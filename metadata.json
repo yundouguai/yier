@@ -1,0 +1,6 @@
+{
+  "name": "一二布布 · 3D 古城飞行棋",
+  "description": "3D 古城主题飞行棋游戏，包含一二与布布系列角色、经典 7 格边环形赛道、摇摇车手办与水乡古城生态场景。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
