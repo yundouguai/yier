@@ -50,6 +50,10 @@ const _scratchDiceScale = new THREE.Vector3();
 const _scratchCamOffset = new THREE.Vector3();
 const _scratchCamSpherical = new THREE.Spherical();
 const _scratchCamPos = new THREE.Vector3();
+const _scratchBirdPos = new THREE.Vector3();
+const _scratchBirdNext = new THREE.Vector3();
+const _scratchBirdPrev = new THREE.Vector3();
+const _scratchBirdOrb = new THREE.Vector3();
 
 interface AnimTween {
   t0: number;
@@ -200,8 +204,8 @@ export class FlightChessEngine {
     this.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xe6d6bc);
-    this.scene.fog = new THREE.Fog(0xe6d6bc, 36, 78);
+    this.scene.background = new THREE.Color(0xdbe8df);
+    this.scene.fog = new THREE.Fog(0xdbe8df, 48, 108);
 
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     const roomEnv = new RoomEnvironment();
@@ -216,7 +220,7 @@ export class FlightChessEngine {
       portrait() ? 54 : 47,
       window.innerWidth / window.innerHeight,
       0.1,
-      130,
+      140,
     );
     this.fitOrientation();
 
@@ -236,7 +240,7 @@ export class FlightChessEngine {
     this.controls.zoomSpeed = 0.9;
     this.controls.panSpeed = 0.75;
     this.controls.minDistance = 5.5;
-    this.controls.maxDistance = 32;
+    this.controls.maxDistance = 38;
     this.controls.minPolarAngle = 0.14;
     this.controls.maxPolarAngle = 1.24;
 
@@ -408,8 +412,8 @@ export class FlightChessEngine {
     const portrait = window.innerHeight > window.innerWidth;
     this.camera.fov = portrait ? 54 : 47;
     if (this.scene.fog instanceof THREE.Fog) {
-      this.scene.fog.near = portrait ? 40 : 34;
-      this.scene.fog.far = portrait ? 86 : 74;
+      this.scene.fog.near = portrait ? 52 : 48;
+      this.scene.fog.far = portrait ? 116 : 108;
     }
     this.camera.updateProjectionMatrix();
   }
@@ -471,7 +475,7 @@ export class FlightChessEngine {
     if (new URLSearchParams(window.location.search).has('closeup')) return;
     this.camGoalTarget.set(tx, ty, tz);
     this.camGoalSpherical.set(
-      THREE.MathUtils.clamp(radius, 5.5, 32),
+      THREE.MathUtils.clamp(radius, 5.5, 38),
       THREE.MathUtils.clamp(phi, 0.14, 1.24),
       theta,
     );
@@ -645,7 +649,11 @@ export class FlightChessEngine {
       this.camFollowPlane = null;
       this.camFollowObj = null;
     }
-    this.resetView();
+    if (mode === 'free') {
+      this.camGoalActive = false;
+    } else {
+      this.resetView();
+    }
     this.emitSnapshot();
   }
 
@@ -1528,22 +1536,35 @@ export class FlightChessEngine {
         }
       });
 
-      this.world.moatTex.offset.x += dt * 0.025;
-      this.world.moatTex.offset.y += dt * 0.014;
+      const wy = this.world.waterY;
+      this.world.moatTex.offset.x -= dt * 0.068;
+      this.world.moatTex.offset.y += Math.sin(t * 0.6) * dt * 0.008;
+      this.world.waterNormalTex.offset.x -= dt * 0.078;
+      this.world.waterNormalTex.offset.y -= dt * 0.018;
+      this.world.waterUniforms.uTime.value = t;
       const wAttr = this.world.waterMesh.geometry.attributes.position as THREE.BufferAttribute;
       const basePos = this.world.waterMesh.userData.basePos as Float32Array;
+      const stride = 161;
       for (let i = 0; i < wAttr.count; i++) {
         const bx = basePos[i * 3];
         const bz = basePos[i * 3 + 2];
+        const ang = Math.atan2(bz, bx);
+        const u = Math.floor(i / stride) / 20;
+        const env = Math.sin(u * Math.PI);
         wAttr.setY(
           i,
-          -0.5 + Math.sin(bx * 0.55 + t * 1.6) * 0.012 + Math.cos(bz * 0.55 + t * 1.3) * 0.012,
+          wy +
+            env *
+              (Math.sin(ang * 10 - t * 1.9) * 0.009 +
+                Math.sin(ang * 18 - t * 2.6 + u * 5.0) * 0.005 +
+                Math.cos(bx * 0.55 + bz * 0.45 - t * 1.4) * 0.003),
         );
       }
       wAttr.needsUpdate = true;
+      this.world.waterMesh.geometry.computeVertexNormals();
 
       for (const l of this.world.lotusList) {
-        l.g.position.y = -0.49 + Math.sin(t * 1.6 + l.phase) * 0.014;
+        l.g.position.y = wy + 0.008 + Math.sin(t * 1.6 + l.phase) * 0.012;
       }
       for (const w of this.world.willowDrapeList) {
         w.g.rotation.z = Math.sin(t * 1.2 + w.phase) * 0.06;
@@ -1554,33 +1575,103 @@ export class FlightChessEngine {
         p.m.position.x += Math.sin(t * 1.5 + p.sway) * 0.35 * dt;
         p.m.rotation.x += dt * 1.8;
         p.m.rotation.z += dt * 1.3;
-        if (p.m.position.y < -0.64) {
+        if (p.m.position.y < wy) {
           p.m.position.y = rnd(2.8, 4.6);
           p.m.position.x = Math.cos(p.ang) * p.baseR;
           p.m.position.z = Math.sin(p.ang) * p.baseR;
         }
       }
       for (const k of this.world.swimKois) {
-        const r = this.world.moatMid(k.th) + k.rOff;
+        const dirSign = Math.sign(k.speed) || 1;
+        let speedMult = 1.0;
+        let tailAmp = 1.0;
+        let tailRate = 5.4;
+        let rWave = 0;
+
+        if (k.style === 'burst') {
+          // 间歇摆尾冲刺 + 舒展胸鳍滑行
+          const cycle = 0.5 + 0.5 * Math.sin(t * 0.9 + k.phase);
+          const burst = Math.pow(cycle, 2.2);
+          speedMult = 0.58 + burst * 1.15;
+          tailAmp = 0.42 + burst * 1.05;
+          tailRate = 4.2 + burst * 6.5;
+          rWave = Math.sin(t * 0.38 + k.phase) * 0.55;
+        } else if (k.style === 'dart') {
+          // 灵动蛇形穿梭游动（幅度更大的横向摆巡）
+          speedMult = 1.05 + 0.3 * Math.sin(t * 1.3 + k.phase);
+          tailAmp = 1.15;
+          tailRate = 7.4;
+          rWave =
+            Math.sin(t * 0.72 + k.phase) * 0.78 +
+            Math.cos(t * 0.35 + k.phase * 1.7) * 0.42;
+        } else if (k.style === 'hover') {
+          // 悠闲慢游晃鳍
+          speedMult = 0.65 + 0.22 * Math.sin(t * 0.65 + k.phase);
+          tailAmp = 0.68;
+          tailRate = 3.8;
+          rWave = Math.sin(t * 0.28 + k.phase) * 0.48;
+        } else {
+          // 平稳巡游
+          speedMult = 0.9 + 0.18 * Math.sin(t * 0.7 + k.phase);
+          tailAmp = 0.9;
+          tailRate = 5.2;
+          rWave = Math.sin(t * 0.42 + k.phase) * 0.6;
+        }
+
+        const prevROff = k.rOff;
+        k.rOff = THREE.MathUtils.clamp(k.baseROff + rWave, -1.38, 1.38);
+        const r = this.world.moatChannelR(k.th, prevROff, 0.95);
         const px = Math.cos(k.th) * r;
         const pz = Math.sin(k.th) * r;
-        k.th += dt * k.speed;
-        const r2 = this.world.moatMid(k.th) + k.rOff;
+        const prevY = k.g.position.y;
+
+        k.th += dt * k.speed * speedMult;
+        k.swimPhase += dt * tailRate;
+
+        const r2 = this.world.moatChannelR(k.th, k.rOff, 0.95);
         const nx = Math.cos(k.th) * r2;
         const nz = Math.sin(k.th) * r2;
-        k.g.position.set(nx, -0.57 + Math.sin(t * 2.4 + k.phase) * 0.015, nz);
-        k.g.rotation.y = Math.atan2(nx - px, nz - pz);
-        (k.g.userData.tail as THREE.Group).rotation.y = Math.sin(t * 10 + k.phase) * 0.42;
+        const depthWave =
+          k.style === 'dart'
+            ? Math.sin(t * 1.5 + k.phase) * 0.032
+            : Math.sin(t * 1.1 + k.phase) * 0.018;
+        const ny = wy - 0.11 + depthWave;
+
+        k.g.position.set(nx, ny, nz);
+        const dx = nx - px;
+        const dz = nz - pz;
+        const dy = ny - prevY;
+        const horiz = Math.hypot(dx, dz) || 1e-4;
+        k.g.rotation.y = Math.atan2(dx, dz);
+        k.g.rotation.x = THREE.MathUtils.clamp(-dy / horiz * 0.65, -0.25, 0.25);
+        k.g.rotation.z = THREE.MathUtils.clamp(((k.rOff - prevROff) / (dt || 0.016)) * dirSign * 0.18, -0.26, 0.26);
+
+        // S型全身波浪传导：头 -> 中段尾柄 -> 尾鳍 + 胸鳍协同划水
+        const headPivot = k.g.userData.headPivot as THREE.Group | undefined;
+        const midPivot = k.g.userData.midPivot as THREE.Group | undefined;
+        const tailPivot = k.g.userData.tail as THREE.Group | undefined;
+        const finL = k.g.userData.finL as THREE.Group | undefined;
+        const finR = k.g.userData.finR as THREE.Group | undefined;
+        if (headPivot) headPivot.rotation.y = Math.sin(k.swimPhase) * 0.08 * tailAmp;
+        if (midPivot) midPivot.rotation.y = Math.sin(k.swimPhase - 0.95) * 0.22 * tailAmp;
+        if (tailPivot) tailPivot.rotation.y = Math.sin(k.swimPhase - 1.9) * 0.36 * tailAmp;
+        if (finL && finR) {
+          const pad = Math.sin(t * 2.9 + k.phase) * 0.24;
+          finL.rotation.y = 0.28 + pad;
+          finR.rotation.y = -0.28 - pad;
+          finL.rotation.z = 0.12 + Math.cos(t * 2.9 + k.phase) * 0.14;
+          finR.rotation.z = -0.12 - Math.cos(t * 2.9 + k.phase) * 0.14;
+        }
       }
       for (const d of this.world.moatDucks) {
-        const r = this.world.moatMid(d.th) + d.rOff;
+        const r = this.world.moatChannelR(d.th, d.rOff, 0.92);
         const px = Math.cos(d.th) * r;
         const pz = Math.sin(d.th) * r;
         d.th += dt * d.speed;
-        const r2 = this.world.moatMid(d.th) + d.rOff;
+        const r2 = this.world.moatChannelR(d.th, d.rOff, 0.92);
         const nx = Math.cos(d.th) * r2;
         const nz = Math.sin(d.th) * r2;
-        d.g.position.set(nx, -0.5 + Math.sin(t * 2 + d.bob) * 0.015, nz);
+        d.g.position.set(nx, wy - 0.004 + Math.sin(t * 2 + d.bob) * 0.014, nz);
         d.g.rotation.y = Math.atan2(nx - px, nz - pz);
       }
 
@@ -1653,39 +1744,355 @@ export class FlightChessEngine {
       for (let i = this.world.critters.length - 1; i >= 0; i--) {
         const c = this.world.critters[i];
         c.ttl -= dt;
-        if (c.ttl <= 0) {
+        const canDespawn =
+          c.kind !== 'rabbit' || c.state === 'rest' || c.state === 'hop';
+        if (c.ttl <= 0 && canDespawn) {
           this.scene.remove(c.g);
           this.world.critters.splice(i, 1);
           continue;
         }
         if (c.kind === 'rabbit') {
+          const bodyPivot = c.g.userData.bodyPivot as THREE.Group;
+          const headPivot = c.g.userData.headPivot as THREE.Group;
+          const earL = c.g.userData.earL as THREE.Group;
+          const earR = c.g.userData.earR as THREE.Group;
+          const pawL = c.g.userData.pawL as THREE.Group;
+          const pawR = c.g.userData.pawR as THREE.Group;
+          const hindPivot = c.g.userData.hindPivot as THREE.Group;
+          const tailPivot = c.g.userData.tailPivot as THREE.Group;
+          const shadowDisc = c.g.userData.shadowDisc as THREE.Mesh;
+          const carrotGrp = c.g.userData.carrotGrp as THREE.Group;
+          const grassGrp = c.g.userData.grassGrp as THREE.Group;
+          const burrowGrp = c.g.userData.burrowGrp as THREE.Group;
+          const dirtChips = c.g.userData.dirtChips as THREE.Mesh[];
+          const px = c.g.position.x;
+          const pz = c.g.position.z;
+
+          carrotGrp.visible = c.state === 'eatCarrot';
+          grassGrp.visible = c.state === 'graze';
+          const showBurrow =
+            c.state === 'dig' || c.state === 'burrow' || c.state === 'emerge';
+          burrowGrp.visible = showBurrow;
+          shadowDisc.visible = !showBurrow;
+          if (c.state !== 'dig') {
+            dirtChips.forEach((chip) => {
+              chip.visible = false;
+            });
+          }
+
           if (c.state === 'rest') {
             c.rest -= dt;
-            c.g.scale.set(1, 1, 1);
+            c.g.position.y = this.world.hillH(px, pz);
+            bodyPivot.position.set(0, 0.02, 0);
+            bodyPivot.rotation.set(-0.06 + Math.sin(t * 2.1 + c.phase) * 0.05, 0, 0);
+            const br = Math.sin(t * 4.2 + c.phase);
+            bodyPivot.scale.set(1 - br * 0.025, 1 + br * 0.035, 1 - br * 0.025);
+            headPivot.rotation.set(
+              Math.sin(t * 6.8 + c.phase) * 0.055,
+              Math.sin(t * 1.6 + c.phase * 1.3) * 0.34,
+              Math.sin(t * 2.3 + c.phase) * 0.14,
+            );
+            earL.rotation.set(
+              -0.14 + Math.sin(t * 4.8 + c.phase) * 0.12,
+              0,
+              0.18 + Math.sin(t * 3.1 + c.phase) * 0.08,
+            );
+            earR.rotation.set(
+              -0.1 + Math.cos(t * 4.1 + c.phase) * 0.14,
+              0,
+              -0.18 - Math.cos(t * 3.5 + c.phase) * 0.08,
+            );
+            pawL.rotation.set(0, 0, 0);
+            pawR.rotation.set(0, 0, 0);
+            hindPivot.rotation.x = 0;
+            tailPivot.rotation.set(0, Math.sin(t * 5.0 + c.phase) * 0.15, 0);
+            shadowDisc.scale.setScalar(1);
+            (shadowDisc.material as THREE.MeshBasicMaterial).opacity = 0.29;
+
             if (c.rest <= 0) {
-              c.state = 'hop';
-              c.hopT = 0;
-              const px = c.g.position.x;
-              const pz = c.g.position.z;
-              c.dir =
-                Math.hypot(px, pz) > 34
-                  ? Math.atan2(-pz, -px) + (Math.random() - 0.5)
-                  : c.dir + Math.random() * 1.8 - 0.9;
-              c.g.rotation.y = -c.dir + Math.PI / 2;
+              const roll = Math.random();
+              if (roll < 0.44) {
+                c.state = 'hop';
+                c.hopT = 0;
+                const hopDist = 2.35 * c.hopDur;
+                const curR = Math.hypot(px, pz);
+                const curTh = Math.atan2(pz, px);
+                let chosenDir = c.dir;
+                let found = false;
+                for (let tryIdx = 0; tryIdx < 10; tryIdx++) {
+                  const cand =
+                    tryIdx === 0 && curR > 31.5
+                      ? Math.atan2(-pz, -px) + rnd(-0.5, 0.5)
+                      : tryIdx === 0 && curR < this.world.moatOuterR(curTh) + 1.85
+                        ? curTh + rnd(-0.5, 0.5)
+                        : c.dir + rnd(-1.1, 1.1) + tryIdx * 0.45;
+                  const nx = px + Math.cos(cand) * hopDist;
+                  const nz = pz + Math.sin(cand) * hopDist;
+                  const nr = Math.hypot(nx, nz);
+                  const nTh = Math.atan2(nz, nx);
+                  if (
+                    nr >= this.world.moatOuterR(nTh) + 1.5 &&
+                    nr <= 32.5 &&
+                    Math.min(Math.abs(nx), Math.abs(nz)) >= 1.55
+                  ) {
+                    chosenDir = cand;
+                    found = true;
+                    break;
+                  }
+                }
+                if (!found) {
+                  chosenDir = curR < 25.5 ? curTh : Math.atan2(-pz, -px);
+                }
+                c.dir = chosenDir;
+                c.g.rotation.y = -c.dir + Math.PI / 2;
+              } else if (roll < 0.67) {
+                c.state = 'graze';
+                c.stateT = 0;
+                c.stateDur = rnd(2.2, 3.4);
+              } else if (roll < 0.85) {
+                c.state = 'eatCarrot';
+                c.stateT = 0;
+                c.stateDur = rnd(2.4, 3.6);
+              } else {
+                c.state = 'dig';
+                c.stateT = 0;
+                c.stateDur = rnd(1.8, 2.4);
+              }
             }
-          } else {
+          } else if (c.state === 'hop') {
             c.hopT += dt / c.hopDur;
             if (c.hopT >= 1) {
               c.hopT = 0;
               c.state = 'rest';
-              c.rest = 0.3 + Math.random() * 1.2;
-              c.g.position.y = -0.66;
+              c.rest = 0.32 + Math.random() * 0.95;
+              c.g.position.y = this.world.hillH(px, pz);
+              bodyPivot.position.set(0, 0.02, 0);
+              bodyPivot.rotation.set(0.08, 0, 0);
+              bodyPivot.scale.set(1.06, 0.92, 1.04);
+              pawL.rotation.set(0, 0, 0);
+              pawR.rotation.set(0, 0, 0);
+              hindPivot.rotation.x = 0;
             } else {
+              let nx = px + Math.cos(c.dir) * 2.35 * dt;
+              let nz = pz + Math.sin(c.dir) * 2.35 * dt;
+              const nTh = Math.atan2(nz, nx);
+              const safeR = this.world.moatOuterR(nTh) + 1.38;
+              const nr = Math.hypot(nx, nz);
+              if (nr < safeR) {
+                nx = Math.cos(nTh) * safeR;
+                nz = Math.sin(nTh) * safeR;
+                c.dir = nTh;
+                c.g.rotation.y = -c.dir + Math.PI / 2;
+              }
+              c.g.position.x = nx;
+              c.g.position.z = nz;
+              c.g.position.y = this.world.hillH(nx, nz);
+
               const arc = Math.sin(c.hopT * Math.PI);
-              c.g.position.x += Math.cos(c.dir) * 2.8 * dt;
-              c.g.position.z += Math.sin(c.dir) * 2.8 * dt;
-              c.g.position.y = -0.66 + arc * 0.36;
-              c.g.scale.set(1 - arc * 0.06, 1 + arc * 0.1, 1 - arc * 0.06);
+              const pitch = Math.cos(c.hopT * Math.PI);
+              bodyPivot.position.set(0, 0.02 + arc * c.hopH, 0);
+              bodyPivot.rotation.set(-pitch * 0.42, 0, 0);
+              bodyPivot.scale.set(1 - arc * 0.08, 1 + arc * 0.14, 1 + arc * 0.08);
+              pawL.rotation.set(-arc * 0.45, 0, 0);
+              pawR.rotation.set(-arc * 0.45, 0, 0);
+              hindPivot.rotation.x = arc * 0.72;
+              headPivot.rotation.set(pitch * 0.16, 0, 0);
+              earL.rotation.set(-0.15 - arc * 0.56, 0, 0.2);
+              earR.rotation.set(-0.15 - arc * 0.48, 0, -0.2);
+              tailPivot.rotation.set(-arc * 0.25, 0, 0);
+              shadowDisc.scale.setScalar(1 - arc * 0.35);
+              (shadowDisc.material as THREE.MeshBasicMaterial).opacity =
+                0.29 * (1 - arc * 0.55);
+            }
+          } else if (c.state === 'graze') {
+            c.stateT += dt;
+            const u = Math.min(1, c.stateT / c.stateDur);
+            const env = Math.min(1, u * 5.2, (1 - u) * 5.2);
+            const nibblePhase = 0.5 + 0.5 * Math.sin(t * 2.8 + c.phase);
+            const chewingLift = nibblePhase < 0.24 ? (0.24 - nibblePhase) / 0.24 : 0;
+
+            c.g.position.y = this.world.hillH(px, pz);
+            bodyPivot.position.set(0, 0.02, 0.02 * env);
+            bodyPivot.rotation.set(0.28 * env * (1 - chewingLift * 0.5), 0, 0);
+            bodyPivot.scale.set(1, 1 - 0.04 * env + Math.sin(t * 14) * 0.02, 1);
+
+            headPivot.rotation.set(
+              (0.58 * (1 - chewingLift * 0.65) + Math.sin(t * 16) * 0.11) * env,
+              Math.sin(t * 4.2 + c.phase) * (chewingLift > 0 ? 0.24 : 0.1),
+              Math.sin(t * 7.5) * 0.06 * env,
+            );
+            earL.rotation.set(0.1 + Math.sin(t * 6.5 + c.phase) * 0.1, 0, 0.16);
+            earR.rotation.set(0.06 + Math.cos(t * 5.8 + c.phase) * 0.1, 0, -0.16);
+            pawL.rotation.set(0.18 * env, 0, 0);
+            pawR.rotation.set(0.18 * env, 0, 0);
+            hindPivot.rotation.x = 0;
+            tailPivot.rotation.set(0, Math.sin(t * 6.5 + c.phase) * 0.18, 0);
+            shadowDisc.scale.setScalar(1);
+            (shadowDisc.material as THREE.MeshBasicMaterial).opacity = 0.29;
+
+            grassGrp.scale.setScalar(Math.max(0.35, 1.0 - u * 0.45));
+            grassGrp.rotation.z = Math.sin(t * 15) * 0.09 * (1 - chewingLift);
+
+            if (u >= 1) {
+              c.state = 'rest';
+              c.rest = rnd(0.35, 0.95);
+            }
+          } else if (c.state === 'eatCarrot') {
+            c.stateT += dt;
+            const u = Math.min(1, c.stateT / c.stateDur);
+            const env = Math.min(1, u * 5.2, (1 - u) * 5.2);
+
+            c.g.position.y = this.world.hillH(px, pz);
+            bodyPivot.position.set(0, 0.02 + 0.026 * env, 0);
+            bodyPivot.rotation.set(-0.26 * env, 0, 0);
+            bodyPivot.scale.set(
+              1 - Math.sin(t * 14) * 0.015,
+              1 + 0.04 * env,
+              1,
+            );
+
+            pawL.rotation.set(-0.98 * env, 0, -0.24 * env);
+            pawR.rotation.set(-0.98 * env, 0, 0.24 * env);
+            headPivot.rotation.set(
+              (0.24 + Math.sin(t * 16) * 0.09) * env,
+              Math.sin(t * 3.4 + c.phase) * 0.14 * env,
+              Math.sin(t * 5.0) * 0.06 * env,
+            );
+            earL.rotation.set(-0.08 + Math.sin(t * 7.2 + c.phase) * 0.14, 0, 0.22);
+            earR.rotation.set(-0.08 + Math.cos(t * 6.6 + c.phase) * 0.14, 0, -0.22);
+            hindPivot.rotation.x = 0.2 * env;
+            tailPivot.rotation.set(0, Math.sin(t * 8.5 + c.phase) * 0.24, 0);
+            shadowDisc.scale.setScalar(1);
+            (shadowDisc.material as THREE.MeshBasicMaterial).opacity = 0.29;
+
+            carrotGrp.scale.setScalar((1 - u * 0.42) * env);
+            carrotGrp.position.y = 0.165 + Math.sin(t * 16) * 0.008;
+            carrotGrp.rotation.z = Math.sin(t * 8) * 0.08;
+
+            if (u >= 1) {
+              c.state = 'rest';
+              c.rest = rnd(0.35, 0.95);
+            }
+          } else if (c.state === 'dig') {
+            c.stateT += dt;
+            const u = Math.min(1, c.stateT / c.stateDur);
+
+            c.g.position.y = this.world.hillH(px, pz);
+            const moundS = THREE.MathUtils.smoothstep(u, 0, 0.55);
+            burrowGrp.scale.setScalar(0.18 + moundS * 0.82);
+
+            bodyPivot.position.set(0, 0.02 + Math.abs(Math.sin(t * 24)) * 0.015, 0.04);
+            bodyPivot.rotation.set(0.36, 0, Math.sin(t * 12) * 0.08);
+            bodyPivot.scale.set(1, 1, 1);
+
+            pawL.rotation.set(-0.32 + Math.sin(t * 26) * 0.72, 0, 0);
+            pawR.rotation.set(-0.32 - Math.sin(t * 26) * 0.72, 0, 0);
+            headPivot.rotation.set(0.42 + Math.sin(t * 13) * 0.06, 0, 0);
+            earL.rotation.set(-0.38, 0, 0.22);
+            earR.rotation.set(-0.35, 0, -0.22);
+            hindPivot.rotation.x = 0;
+            tailPivot.rotation.set(0, Math.sin(t * 12) * 0.18, 0);
+
+            dirtChips.forEach((chip, idx) => {
+              chip.visible = true;
+              const p = (t * 2.3 + idx * 0.25) % 1;
+              const side = idx % 2 === 0 ? 1 : -1;
+              chip.position.set(
+                side * (0.04 + p * 0.11),
+                0.02 + Math.sin(p * Math.PI) * 0.2,
+                -p * 0.35,
+              );
+              chip.rotation.set(p * 6, p * 4, idx);
+            });
+
+            if (u >= 1) {
+              c.state = 'burrow';
+              c.stateT = 0;
+              c.stateDur = 1.45;
+            }
+          } else if (c.state === 'burrow') {
+            c.stateT += dt;
+            const u = Math.min(1, c.stateT / c.stateDur);
+            c.g.position.y = this.world.hillH(px, pz);
+            burrowGrp.scale.setScalar(1);
+
+            if (u < 0.28) {
+              const k = u / 0.28;
+              const arc = Math.sin(k * Math.PI);
+              bodyPivot.position.set(0, 0.02 + arc * 0.09, 0.04 + k * 0.21);
+              bodyPivot.rotation.set(0.36 + k * 0.44, 0, 0);
+              bodyPivot.scale.set(1, 1, 1);
+              pawL.rotation.set(-0.45, 0, 0);
+              pawR.rotation.set(-0.45, 0, 0);
+              hindPivot.rotation.x = arc * 0.55;
+            } else if (u < 0.78) {
+              const k = (u - 0.28) / 0.5;
+              bodyPivot.position.set(0, -k * 0.26, 0.25);
+              bodyPivot.rotation.set(0.8, 0, Math.sin(t * 16) * 0.12);
+              bodyPivot.scale.set(1, 1, 1);
+              pawL.rotation.set(-0.55, 0, 0);
+              pawR.rotation.set(-0.55, 0, 0);
+              hindPivot.rotation.x = Math.sin(t * 20) * 0.42;
+              tailPivot.rotation.set(0, Math.sin(t * 18) * 0.34, 0);
+            } else {
+              const k = (u - 0.78) / 0.22;
+              bodyPivot.position.set(0, -0.26 - k * 0.1, 0.25);
+              bodyPivot.rotation.set(0.8, 0, 0);
+              bodyPivot.scale.setScalar(Math.max(0.01, 1 - k));
+            }
+            headPivot.rotation.set(0.3, 0, 0);
+            earL.rotation.set(-0.45, 0, 0.18);
+            earR.rotation.set(-0.45, 0, -0.18);
+
+            if (u >= 1) {
+              c.state = 'emerge';
+              c.stateT = 0;
+              c.stateDur = 1.55;
+            }
+          } else {
+            // emerge: 探头张望后跳出地洞，土堆自然收拢消失
+            c.stateT += dt;
+            const u = Math.min(1, c.stateT / c.stateDur);
+            c.g.position.y = this.world.hillH(px, pz);
+
+            if (u < 0.32) {
+              const k = u / 0.32;
+              burrowGrp.scale.setScalar(1);
+              bodyPivot.scale.setScalar(THREE.MathUtils.smoothstep(k, 0, 0.35) * 0.99 + 0.01);
+              bodyPivot.position.set(0, -0.3 + k * 0.2, 0.22);
+              bodyPivot.rotation.set(-0.2, 0, 0);
+              headPivot.rotation.set(-0.1, 0, 0);
+              earL.rotation.set(-0.1, 0, 0.18);
+              earR.rotation.set(-0.1, 0, -0.18);
+            } else if (u < 0.68) {
+              const k = (u - 0.32) / 0.36;
+              burrowGrp.scale.setScalar(1);
+              bodyPivot.scale.set(1, 1, 1);
+              bodyPivot.position.set(0, -0.1, 0.22);
+              bodyPivot.rotation.set(-0.15, 0, 0);
+              headPivot.rotation.set(0, Math.sin(k * Math.PI * 3.2) * 0.52, 0);
+              earL.rotation.set(-0.08 + Math.sin(t * 8) * 0.12, 0, 0.2);
+              earR.rotation.set(-0.08 + Math.cos(t * 7.5) * 0.12, 0, -0.2);
+            } else {
+              const k = (u - 0.68) / 0.32;
+              const arc = Math.sin(k * Math.PI);
+              burrowGrp.scale.setScalar(Math.max(0.01, 1 - k));
+              bodyPivot.scale.set(1, 1, 1);
+              bodyPivot.position.set(0, -0.1 + k * 0.12 + arc * 0.16, 0.22 * (1 - k));
+              bodyPivot.rotation.set(-Math.cos(k * Math.PI) * 0.25, 0, 0);
+              pawL.rotation.set(-arc * 0.4, 0, 0);
+              pawR.rotation.set(-arc * 0.4, 0, 0);
+              hindPivot.rotation.x = arc * 0.55;
+              headPivot.rotation.set(0, 0, 0);
+            }
+
+            if (u >= 1) {
+              c.state = 'rest';
+              c.rest = rnd(0.45, 1.1);
+              burrowGrp.visible = false;
+              burrowGrp.scale.setScalar(1);
+              bodyPivot.scale.set(1, 1, 1);
+              bodyPivot.position.set(0, 0.02, 0);
             }
           }
         } else if (c.kind === 'bird') {
@@ -1695,12 +2102,110 @@ export class FlightChessEngine {
             this.world.critters.splice(i, 1);
             continue;
           }
-          c.g.position.lerpVectors(c.from, c.to, c.prog);
-          c.g.position.y += Math.sin(c.prog * 7 + c.flap) * 0.35;
-          c.flap += dt * 9;
-          const w = Math.sin(c.flap) * 0.55;
-          (c.g.userData.lw as THREE.Object3D).rotation.z = w;
-          (c.g.userData.rw as THREE.Object3D).rotation.z = -w;
+          const evalBirdPos = (p: number, out: THREE.Vector3) => {
+            const cp = THREE.MathUtils.clamp(p, 0, 1);
+            if (c.mode === 'circle') {
+              const wIn = THREE.MathUtils.smoothstep(cp, 0, 0.24);
+              const wOut = THREE.MathUtils.smoothstep(cp, 0.76, 1);
+              const ang = c.phase + cp * c.circleSpeed;
+              const baseH = (c.from.y + c.to.y) * 0.5;
+              _scratchBirdOrb.set(
+                Math.cos(ang) * c.circleR,
+                baseH + Math.sin(cp * Math.PI * 4 + c.phase) * 0.42,
+                Math.sin(ang) * c.circleR,
+              );
+              out.lerpVectors(c.from, _scratchBirdOrb, wIn);
+              out.lerp(c.to, wOut);
+            } else {
+              const inv = 1 - cp;
+              out
+                .copy(c.from)
+                .multiplyScalar(inv * inv)
+                .addScaledVector(c.ctrl, 2 * inv * cp)
+                .addScaledVector(c.to, cp * cp);
+              if (c.mode === 'bound') {
+                // 上下蹦跶式波浪起伏飞行
+                out.y += Math.sin(cp * Math.PI * 13 + c.phase) * 0.46;
+              } else if (c.mode === 'soar') {
+                out.y += Math.sin(cp * Math.PI * 2 + c.phase) * 0.28;
+              }
+            }
+            return out;
+          };
+
+          const pPrev = Math.max(0, c.prog - 0.015);
+          const pNext = Math.min(1, c.prog + 0.015);
+          evalBirdPos(pPrev, _scratchBirdPrev);
+          evalBirdPos(c.prog, _scratchBirdPos);
+          evalBirdPos(pNext, _scratchBirdNext);
+
+          c.g.position.copy(_scratchBirdPos);
+          if (pNext > c.prog) {
+            c.g.lookAt(_scratchBirdNext);
+          }
+
+          // 计算水平转弯倾斜压坡角
+          const v1x = _scratchBirdPos.x - _scratchBirdPrev.x;
+          const v1z = _scratchBirdPos.z - _scratchBirdPrev.z;
+          const v2x = _scratchBirdNext.x - _scratchBirdPos.x;
+          const v2z = _scratchBirdNext.z - _scratchBirdPos.z;
+          const turnCross = (v1x * v2z - v1z * v2x) * 26;
+          const bank = THREE.MathUtils.clamp(turnCross, -0.52, 0.52);
+          c.g.rotateZ(bank);
+
+          const lw = c.g.userData.lw as THREE.Group;
+          const rw = c.g.userData.rw as THREE.Group;
+
+          if (c.mode === 'soar') {
+            // 白鹭/大鸟：长时展翼滑翔 + 间歇慢速深振翅
+            const flapWindow = Math.sin(t * 0.95 + c.phase);
+            if (flapWindow > 0.35) {
+              c.flap += dt * 6.2;
+              const w = Math.sin(c.flap) * 0.52;
+              lw.rotation.set(0, 0, w);
+              rw.rotation.set(0, 0, -w);
+            } else {
+              const glideDihedral = -0.1 + Math.sin(t * 1.4 + c.phase) * 0.03;
+              lw.rotation.set(0, 0.14, glideDihedral);
+              rw.rotation.set(0, -0.14, -glideDihedral);
+            }
+          } else if (c.mode === 'circle') {
+            // 盘旋滑翔：大部分时间平稳侧倾乘气流滑翔，偶尔轻拍几下翅膀维持高度
+            const burst = Math.sin(t * 0.72 + c.phase);
+            if (burst > 0.55) {
+              c.flap += dt * 7.5;
+              const w = Math.sin(c.flap) * 0.45;
+              lw.rotation.set(0, 0.08, w);
+              rw.rotation.set(0, -0.08, -w);
+            } else {
+              lw.rotation.set(0, 0.18, -0.06);
+              rw.rotation.set(0, -0.18, 0.06);
+            }
+          } else if (c.mode === 'swoop') {
+            // 燕子/翠鸟：俯冲掠水时收掠滑翔，拉起爬升时高频急振翅
+            if (c.prog > 0.18 && c.prog < 0.52) {
+              lw.rotation.set(0, 0.46, 0.14);
+              rw.rotation.set(0, -0.46, -0.14);
+            } else {
+              c.flap += dt * 15;
+              const w = Math.sin(c.flap) * 0.65;
+              lw.rotation.set(0, 0.1, w);
+              rw.rotation.set(0, -0.1, -w);
+            }
+          } else {
+            // 雀类/知更鸟：上下蹦跶（爬升期急拍翅，波峰滑落期收拢翅膀）
+            const wavePhase = c.prog * Math.PI * 13 + c.phase;
+            const climbing = Math.cos(wavePhase) > -0.15;
+            if (climbing) {
+              c.flap += dt * 18;
+              const w = Math.sin(c.flap) * 0.72;
+              lw.rotation.set(0, 0, w);
+              rw.rotation.set(0, 0, -w);
+            } else {
+              lw.rotation.set(0, 0.45, 0.42);
+              rw.rotation.set(0, -0.45, -0.42);
+            }
+          }
         } else if (c.kind === 'fish') {
           c.prog += dt / 1.15;
           if (c.prog >= 1) {
@@ -1708,11 +2213,14 @@ export class FlightChessEngine {
             this.world.critters.splice(i, 1);
             continue;
           }
-          c.g.position.y = -0.52 + Math.sin(c.prog * Math.PI) * c.h;
+          c.g.position.y = wy - 0.02 + Math.sin(c.prog * Math.PI) * c.h;
           c.g.rotation.x = -(Math.sin(c.prog * Math.PI) * 1.1 - 0.55);
-          c.g.position.x += Math.cos(c.g.rotation.y) * dt * 0.8;
-          c.g.position.z += Math.sin(c.g.rotation.y) * dt * 0.8;
-          (c.g.userData.tail as THREE.Object3D).rotation.y = Math.sin(t * 18) * 0.5;
+          c.g.position.x += Math.sin(c.g.rotation.y) * dt * 0.85;
+          c.g.position.z += Math.cos(c.g.rotation.y) * dt * 0.85;
+          const midPivot = c.g.userData.midPivot as THREE.Group | undefined;
+          const tailPivot = c.g.userData.tail as THREE.Group | undefined;
+          if (midPivot) midPivot.rotation.y = Math.sin(t * 18) * 0.3;
+          if (tailPivot) tailPivot.rotation.y = Math.sin(t * 18 - 0.8) * 0.52;
         } else {
           c.seed += dt;
           c.flap += dt * 13;
@@ -1731,21 +2239,46 @@ export class FlightChessEngine {
       }
 
       for (const b of this.world.boats) {
-        const r = this.world.moatMid(b.th);
+        const r = this.world.moatChannelR(b.th, 0, 1.2);
         const px = Math.cos(b.th) * r;
         const pz = Math.sin(b.th) * r;
         b.th += dt * b.speed;
-        const r2 = this.world.moatMid(b.th);
+        const r2 = this.world.moatChannelR(b.th, 0, 1.2);
         const nx = Math.cos(b.th) * r2;
         const nz = Math.sin(b.th) * r2;
-        b.g.position.set(nx, -0.48 + Math.sin(t * 1.4 + b.bob) * 0.022, nz);
+        const boatY = wy - 0.03 + Math.sin(t * 1.4 + b.bob) * 0.014;
+        b.g.position.set(nx, boatY, nz);
         b.g.rotation.y = Math.atan2(nx - px, nz - pz);
-        b.g.rotation.z = Math.sin(t * 1.1 + b.bob) * 0.035;
-        (b.g.userData.man as THREE.Object3D).rotation.y = 0.5 + Math.sin(t * 2 + b.bob) * 0.35;
-        const wp = 0.5 + 0.5 * Math.sin(t * 4 + b.bob);
+        b.g.rotation.z = Math.sin(t * 1.1 + b.bob) * 0.028;
+
+        const rowPhase = t * 2.1 + b.bob;
+        const man = b.g.userData.man as THREE.Object3D;
+        man.rotation.y = 0.42 + Math.sin(rowPhase) * 0.18;
+        man.rotation.x = Math.cos(rowPhase) * 0.1;
+
+        const oar = b.g.userData.oar as THREE.Object3D | undefined;
+        if (oar) {
+          oar.rotation.y = Math.sin(rowPhase) * 0.34;
+          oar.rotation.x = Math.cos(rowPhase) * 0.14;
+        }
+
+        const passenger = b.g.userData.passenger as THREE.Object3D | undefined;
+        if (passenger) {
+          passenger.rotation.y = -0.18 + Math.sin(t * 0.9 + b.bob) * 0.12;
+        }
+
+        const wp = 0.5 + 0.5 * Math.sin(t * 3.8 + b.bob);
+        const localWaterOffset = (wy + 0.008 - boatY) / (b.g.scale.y || 1);
+        const hullFoam = b.g.userData.hullFoam as THREE.Mesh | undefined;
+        if (hullFoam) {
+          hullFoam.position.y = localWaterOffset;
+          hullFoam.scale.set(0.98 + wp * 0.06, 0.99 + wp * 0.04, 1);
+          (hullFoam.material as THREE.MeshBasicMaterial).opacity = 0.55 + wp * 0.2;
+        }
         const wake = b.g.userData.wake as THREE.Mesh;
-        wake.scale.set(0.9 + wp * 0.2, 1 + wp * 0.25, 1);
-        (wake.material as THREE.MeshBasicMaterial).opacity = 0.22 + wp * 0.22;
+        wake.position.y = localWaterOffset;
+        wake.scale.set(0.92 + wp * 0.16, 0.96 + wp * 0.22, 1);
+        (wake.material as THREE.MeshBasicMaterial).opacity = 0.44 + wp * 0.24;
       }
     }
 
@@ -1783,9 +2316,9 @@ export class FlightChessEngine {
 
     this.updateCameraRig(dt);
     this.controls.update();
-    this.controls.target.x = THREE.MathUtils.clamp(this.controls.target.x, -11, 11);
+    this.controls.target.x = THREE.MathUtils.clamp(this.controls.target.x, -14, 14);
     this.controls.target.y = THREE.MathUtils.clamp(this.controls.target.y, -0.3, 2.5);
-    this.controls.target.z = THREE.MathUtils.clamp(this.controls.target.z, -11, 11);
+    this.controls.target.z = THREE.MathUtils.clamp(this.controls.target.z, -14, 14);
   }
 
   private updateCameraRig(dt: number): void {

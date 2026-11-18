@@ -16,10 +16,15 @@ import {
   createBrickBankTexture,
   createCourtyardGrassTexture,
   createGrassTexture,
+  createHullFoamTexture,
   createMoatTexture,
+  createRiverbedTexture,
+  createShoreEarthTexture,
   createStartPadTexture,
   createStoneDeckTexture,
+  createWakeTexture,
   createWallBrickTexture,
+  createWaterNormalTexture,
 } from './textures';
 
 export interface RideToyAnim {
@@ -56,12 +61,17 @@ export interface MoatDuckAnim {
   bob: number;
 }
 
+export type FishSwimStyle = 'cruise' | 'burst' | 'dart' | 'hover';
+
 export interface SwimKoiAnim {
   g: THREE.Group;
   th: number;
   speed: number;
   rOff: number;
+  baseROff: number;
   phase: number;
+  swimPhase: number;
+  style: FishSwimStyle;
 }
 
 export interface BoatAnim {
@@ -71,16 +81,32 @@ export interface BoatAnim {
   bob: number;
 }
 
+export type BirdFlightMode = 'soar' | 'swoop' | 'bound' | 'circle';
+
+export type RabbitState =
+  | 'rest'
+  | 'hop'
+  | 'graze'
+  | 'eatCarrot'
+  | 'dig'
+  | 'burrow'
+  | 'emerge';
+
 export type CritterAnim =
   | {
       kind: 'rabbit';
       g: THREE.Group;
       ttl: number;
-      state: 'rest' | 'hop';
+      state: RabbitState;
       rest: number;
+      stateT: number;
+      stateDur: number;
       hopT: number;
       hopDur: number;
       dir: number;
+      phase: number;
+      hopH: number;
+      baseScale: number;
     }
   | {
       kind: 'bird';
@@ -88,9 +114,14 @@ export type CritterAnim =
       ttl: number;
       from: THREE.Vector3;
       to: THREE.Vector3;
+      ctrl: THREE.Vector3;
       prog: number;
       dur: number;
       flap: number;
+      mode: BirdFlightMode;
+      phase: number;
+      circleR: number;
+      circleSpeed: number;
     }
   | {
       kind: 'fly';
@@ -112,6 +143,9 @@ export type CritterAnim =
 export interface WorldRefs {
   waterMesh: THREE.Mesh;
   moatTex: THREE.CanvasTexture;
+  waterNormalTex: THREE.DataTexture;
+  waterUniforms: { uTime: { value: number } };
+  waterY: number;
   rideToys: RideToyAnim[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
@@ -121,15 +155,23 @@ export interface WorldRefs {
   boats: BoatAnim[];
   critters: CritterAnim[];
   moatMid: (th: number) => number;
+  moatOuterR: (th: number) => number;
+  moatChannelR: (th: number, rOff: number, margin?: number) => number;
+  hillH: (x: number, z: number) => number;
   spawnCritter: (kind: 'rabbit' | 'bird' | 'fly' | 'fish') => void;
 }
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const moatInnerR = (th: number) =>
-  12.7 + 0.45 * Math.sin(4 * th + 1.25) + 0.25 * Math.sin(8 * th + 2.6);
+  15.2 + 0.45 * Math.sin(4 * th + 1.25) + 0.25 * Math.sin(8 * th + 2.6);
 const moatOuterR = (th: number) =>
-  16.8 + 0.55 * Math.sin(4 * th + 0.7) + 0.3 * Math.sin(8 * th + 2.1);
+  20.42 + 0.62 * Math.sin(4 * th + 0.7) + 0.34 * Math.sin(8 * th + 2.1);
 const moatMid = (th: number) => (moatInnerR(th) + moatOuterR(th)) * 0.5;
+const moatChannelR = (th: number, rOff: number, margin = 0.82) => {
+  const rMin = Math.max(moatInnerR(th) + margin, 16.1);
+  const rMax = moatOuterR(th) - margin;
+  return THREE.MathUtils.clamp(moatMid(th) + rOff, rMin, rMax);
+};
 
 function mat(c: number, r = 0.62) {
   return new THREE.MeshStandardMaterial({ color: c, roughness: r });
@@ -400,31 +442,43 @@ export function buildAncientWorld(
   };
 
   /* ================= 1. 地形草地与护城河 ================= */
+  const WATER_Y = -0.69;
   const grassTex = createGrassTexture(anisotropy);
+  const shoreEarthTex = createShoreEarthTexture(anisotropy);
+  const hillH = (x: number, z: number) => {
+    const r = Math.hypot(x, z);
+    const th = Math.atan2(z, x);
+    const outerEdge = moatOuterR(th);
+    if (r < outerEdge + 0.52) {
+      const bankT = THREE.MathUtils.smoothstep(r, outerEdge - 0.55, outerEdge + 0.52);
+      return THREE.MathUtils.lerp(-1.18, -0.66, bankT);
+    }
+    if (r < 22.2) return -0.66;
+    const f = THREE.MathUtils.smoothstep(r, 22.2, 45.5);
+    const n =
+      Math.sin(x * 0.14) * Math.cos(z * 0.14) * 0.85 +
+      Math.sin(x * 0.27 + z * 0.2) * 0.45;
+    return -0.66 + f * (0.62 + Math.max(0, n) * 1.25);
+  };
   {
-    const RINGS = 24;
-    const SEGS = 72;
-    const MAXR = 42;
+    const radii = [
+      0, 12, 15, 16.5, 18.2, 19.2, 19.8, 20.3, 20.7, 21.1, 21.5, 21.9, 22.3, 22.8, 23.6, 24.8, 26.4,
+      28.4, 30.8, 33.6, 37.0, 41.0, 45.5, 50.5, 56.0,
+    ];
+    const RINGS = radii.length - 1;
+    const SEGS = 128;
     const verts: number[] = [];
     const uvs: number[] = [];
     const cols: number[] = [];
     const idx: number[] = [];
-    const hillH = (x: number, z: number) => {
-      const r = Math.hypot(x, z);
-      if (r < 17.8) return -0.66;
-      const f = THREE.MathUtils.smoothstep(r, 17.8, 36);
-      const n =
-        Math.sin(x * 0.14) * Math.cos(z * 0.14) * 0.85 +
-        Math.sin(x * 0.27 + z * 0.2) * 0.45;
-      return -0.66 + f * (0.55 + Math.max(0, n) * 1.15);
-    };
-    const cMeadow = new THREE.Color(0xffffff);
-    const cPath = new THREE.Color(0xdcc9a3);
-    const cHill = new THREE.Color(0xe6f0d8);
+    const cMeadow = new THREE.Color(0xf2faec);
+    const cMoss = new THREE.Color(0xd1ebc0);
+    const cPath = new THREE.Color(0xd5cbb4);
+    const cHill = new THREE.Color(0xbce0ae);
     const tmp = new THREE.Color();
 
     for (let i = 0; i <= RINGS; i++) {
-      const rad = (i / RINGS) * MAXR;
+      const rad = radii[i];
       for (let j = 0; j <= SEGS; j++) {
         const th = (j / SEGS) * Math.PI * 2;
         const x = Math.cos(th) * rad;
@@ -432,13 +486,14 @@ export function buildAncientWorld(
         const y = hillH(x, z);
         verts.push(x, y, z);
         uvs.push(x / 8, z / 8);
-        const onPath = rad > 16.2 && rad < 32 && Math.min(Math.abs(x), Math.abs(z)) < 0.95;
-        tmp.copy(cMeadow);
-        if (rad > 22) tmp.lerp(cHill, THREE.MathUtils.smoothstep(rad, 22, 40) * 0.35);
+        const mossWave = 0.5 + 0.5 * Math.sin(x * 0.24) * Math.cos(z * 0.24);
+        const onPath = rad > 21.0 && rad < 40 && Math.min(Math.abs(x), Math.abs(z)) < 0.92;
+        tmp.copy(cMeadow).lerp(cMoss, mossWave * 0.45);
+        if (rad > 21.6) tmp.lerp(cHill, THREE.MathUtils.smoothstep(rad, 21.6, 49.5) * 0.52);
         if (onPath) {
           const edge =
-            1 - THREE.MathUtils.smoothstep(Math.min(Math.abs(x), Math.abs(z)), 0.45, 0.95);
-          tmp.lerp(cPath, edge * 0.85);
+            1 - THREE.MathUtils.smoothstep(Math.min(Math.abs(x), Math.abs(z)), 0.42, 0.92);
+          tmp.lerp(cPath, edge * 0.82);
         }
         cols.push(tmp.r, tmp.g, tmp.b);
       }
@@ -449,7 +504,7 @@ export function buildAncientWorld(
         const b = a + SEGS + 1;
         const c = a + 1;
         const d = b + 1;
-        idx.push(a, b, c, c, b, d);
+        idx.push(a, c, b, b, c, d);
       }
     }
     const g = new THREE.BufferGeometry();
@@ -458,47 +513,121 @@ export function buildAncientWorld(
     g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const meadow = new THREE.Mesh(
-      g,
-      new THREE.MeshStandardMaterial({ map: grassTex, vertexColors: true, roughness: 0.96 }),
-    );
+    const meadowMat = new THREE.MeshStandardMaterial({
+      map: grassTex,
+      vertexColors: true,
+      roughness: 0.96,
+    });
+    meadowMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uEarthMap = { value: shoreEarthTex };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vMeadowWorldPos;')
+        .replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\nvMeadowWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform sampler2D uEarthMap;\nvarying vec3 vMeadowWorldPos;',
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          float mRad = length(vMeadowWorldPos.xz);
+          float mTh = atan(vMeadowWorldPos.z, vMeadowWorldPos.x);
+          float mOuterEdge = 20.42 + 0.62 * sin(4.0 * mTh + 0.7) + 0.34 * sin(8.0 * mTh + 2.1);
+          float mNoise = 0.09 * sin(mTh * 11.0 + 0.5) + 0.06 * cos(mTh * 19.0 - 1.1) + 0.03 * sin(vMeadowWorldPos.x * 2.3 + vMeadowWorldPos.z * 1.9);
+          float mDist = mRad - mOuterEdge;
+          float mGrassMask = smoothstep(0.44, 0.88, mDist + mNoise);
+          vec4 mEarth = texture2D(uEarthMap, vMeadowWorldPos.xz * 0.36);
+          vec3 mSoftEarth = mix(mEarth.rgb, vec3(0.46, 0.44, 0.36), 0.48);
+          float mWet = 1.0 - smoothstep(0.24, 0.56, mDist + mNoise * 0.3);
+          mSoftEarth *= mix(1.0, 0.82, mWet);
+          diffuseColor.rgb = mix(mSoftEarth, diffuseColor.rgb, mGrassMask);
+          `,
+        );
+    };
+    const meadow = new THREE.Mesh(g, meadowMat);
     meadow.receiveShadow = true;
     scene.add(meadow);
   }
 
+  const waterUniforms = { uTime: { value: 0 } };
+
+  // 凹槽式天然卵石河床 + 水底阳光焦散光斑
   {
-    const bedShape = new THREE.Shape();
-    for (let i = 0; i <= 128; i++) {
-      const th = (i / 128) * Math.PI * 2;
-      const r = moatOuterR(th) + 0.6;
-      if (i === 0) bedShape.moveTo(Math.cos(th) * r, Math.sin(th) * r);
-      else bedShape.lineTo(Math.cos(th) * r, Math.sin(th) * r);
+    const riverbedTex = createRiverbedTexture(anisotropy);
+    riverbedTex.repeat.set(8, 1.35);
+    const RAD = 14;
+    const ANG = 160;
+    const pos: number[] = [];
+    const uvs: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i <= RAD; i++) {
+      const u = i / RAD;
+      const bedY = -0.80 - 0.32 * Math.sin(u * Math.PI);
+      for (let j = 0; j <= ANG; j++) {
+        const th = (j / ANG) * Math.PI * 2;
+        const r = THREE.MathUtils.lerp(moatInnerR(th) + 0.18, moatOuterR(th) + 0.34, u);
+        pos.push(Math.cos(th) * r, bedY, Math.sin(th) * r);
+        uvs.push((j / ANG) * 6, u);
+      }
     }
-    const bedHole = new THREE.Path();
-    for (let i = 128; i >= 0; i--) {
-      const th = (i / 128) * Math.PI * 2;
-      const r = moatInnerR(th) - 0.6;
-      if (i === 128) bedHole.moveTo(Math.cos(th) * r, Math.sin(th) * r);
-      else bedHole.lineTo(Math.cos(th) * r, Math.sin(th) * r);
+    for (let i = 0; i < RAD; i++) {
+      for (let j = 0; j < ANG; j++) {
+        const a = i * (ANG + 1) + j;
+        const b = a + ANG + 1;
+        const c = a + 1;
+        const d = b + 1;
+        idx.push(a, c, b, b, c, d);
+      }
     }
-    bedShape.holes.push(bedHole);
-    const bed = new THREE.Mesh(new THREE.ShapeGeometry(bedShape), mat(0x284752, 0.95));
-    bed.rotation.x = -Math.PI / 2;
-    bed.position.y = -0.92;
-    bed.receiveShadow = true;
+    const bedGeo = new THREE.BufferGeometry();
+    bedGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    bedGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    bedGeo.setIndex(idx);
+    bedGeo.computeVertexNormals();
+    const bedMat = new THREE.MeshStandardMaterial({ map: riverbedTex, roughness: 0.92 });
+    bedMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = waterUniforms.uTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vBedUv;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBedUv = uv;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform float uTime;\nvarying vec2 vBedUv;',
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          float bAng = vBedUv.x * 1.04719755;
+          float c1 = sin(bAng * 32.0 - uTime * 2.1 + sin(vBedUv.y * 16.0) * 1.5);
+          float c2 = cos(bAng * 46.0 - uTime * 2.7 - sin(vBedUv.y * 22.0 + uTime * 1.3) * 1.6);
+          float c3 = sin((bAng * 22.0 + vBedUv.y * 18.0) - uTime * 1.6);
+          float caustic = pow(max(0.0001, clamp(1.0 - abs(c1 + c2 * 0.8 + c3 * 0.5) * 0.48, 0.0, 1.0)), 3.2);
+          diffuseColor.rgb += vec3(0.14, 0.22, 0.18) * caustic * (0.42 + 0.58 * sin(vBedUv.y * 3.14159265));
+          `,
+        );
+    };
+    const bed = new THREE.Mesh(bedGeo, bedMat);
+    bed.receiveShadow = false;
     scene.add(bed);
   }
 
   const moatTex = createMoatTexture(anisotropy);
+  const waterNormalTex = createWaterNormalTexture(anisotropy);
+  waterNormalTex.repeat.set(7, 2.8);
   const waterMesh = (() => {
-    const RAD = 6;
-    const ANG = 128;
+    const RAD = 20;
+    const ANG = 160;
     const pos: number[] = [];
     const uvs: number[] = [];
     const cols: number[] = [];
     const idx: number[] = [];
-    const cEdge = new THREE.Color(0x9be0dc);
-    const cDeep = new THREE.Color(0x3b768c);
+    const cEdge = new THREE.Color(0xc2f6ed);
+    const cDeep = new THREE.Color(0x45afc2);
     const tmp = new THREE.Color();
 
     for (let i = 0; i <= RAD; i++) {
@@ -506,8 +635,8 @@ export function buildAncientWorld(
       tmp.copy(cEdge).lerp(cDeep, Math.sin(u * Math.PI));
       for (let j = 0; j <= ANG; j++) {
         const th = (j / ANG) * Math.PI * 2;
-        const r = THREE.MathUtils.lerp(moatInnerR(th) - 0.15, moatOuterR(th) + 0.15, u);
-        pos.push(Math.cos(th) * r, -0.5, Math.sin(th) * r);
+        const r = THREE.MathUtils.lerp(moatInnerR(th) + 0.14, moatOuterR(th) + 0.42, u);
+        pos.push(Math.cos(th) * r, WATER_Y, Math.sin(th) * r);
         uvs.push((j / ANG) * 6, u);
         cols.push(tmp.r, tmp.g, tmp.b);
       }
@@ -518,7 +647,7 @@ export function buildAncientWorld(
         const b = a + ANG + 1;
         const c = a + 1;
         const d = b + 1;
-        idx.push(a, b, c, c, b, d);
+        idx.push(a, c, b, b, c, d);
       }
     }
     const g = new THREE.BufferGeometry();
@@ -527,18 +656,127 @@ export function buildAncientWorld(
     g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const m = new THREE.Mesh(
-      g,
-      new THREE.MeshStandardMaterial({
-        map: moatTex,
-        vertexColors: true,
-        roughness: 0.12,
-        metalness: 0.32,
-        transparent: true,
-        opacity: 0.82,
-      }),
-    );
+    const waterMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      map: moatTex,
+      normalMap: waterNormalTex,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+      vertexColors: true,
+      roughness: 0.34,
+      metalness: 0.0,
+      clearcoat: 0.14,
+      clearcoatRoughness: 0.3,
+      ior: 1.333,
+      reflectivity: 0.28,
+      envMapIntensity: 0.22,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+    });
+    waterMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = waterUniforms.uTime;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying vec2 vMoatUv;
+          varying vec3 vWaterWorldPos;
+          varying vec3 vRadView;
+          varying vec3 vTanView;`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          vMoatUv = uv;
+          vec3 wPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+          vWaterWorldPos = wPos;
+          vec3 rDir = normalize(vec3(wPos.x, 0.0, wPos.z));
+          vec3 tDir = vec3(-rDir.z, 0.0, rDir.x);
+          vRadView = (viewMatrix * vec4(rDir, 0.0)).xyz;
+          vTanView = (viewMatrix * vec4(tDir, 0.0)).xyz;`,
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform float uTime;
+          varying vec2 vMoatUv;
+          varying vec3 vWaterWorldPos;
+          varying vec3 vRadView;
+          varying vec3 vTanView;`,
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+          float wAng = vMoatUv.x * 1.04719755;
+          float wAcross = vMoatUv.y;
+          float w1 = sin(wAng * 18.0 - uTime * 2.4 + sin(wAcross * 9.42477) * 1.5);
+          float w2 = cos(wAng * 31.0 - uTime * 3.3 - wAcross * 18.84955);
+          float w3 = sin(wAng * 39.0 - uTime * 3.2 + wAcross * 20.0);
+          float wCross = cos(wAcross * 18.0 + uTime * 1.7 + wAng * 7.0);
+          normal = normalize(
+            normal +
+            vTanView * (w1 * 0.075 + w2 * 0.055 + w3 * 0.025) +
+            vRadView * (wCross * 0.05 + w2 * 0.035)
+          );`,
+        )
+        .replace(
+          '#include <clearcoat_normal_fragment_maps>',
+          `#include <clearcoat_normal_fragment_maps>
+          #ifdef USE_CLEARCOAT
+            clearcoatNormal = normal;
+          #endif`,
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          float cAng = vMoatUv.x * 1.04719755;
+          float cAcross = vMoatUv.y;
+          float shoreDist = min(cAcross, 1.0 - cAcross);
+
+          // 浅岸边缘自然羽化融入湿润泥沙，河心保持通透以便清晰看到水下锦鲤
+          float centerDepth = sin(clamp(cAcross, 0.0, 1.0) * 3.14159265);
+          float shoreFeather = smoothstep(0.0, 0.042, shoreDist);
+          diffuseColor.a = mix(0.24, 0.54, pow(max(centerDepth, 0.0001), 0.72)) * shoreFeather;
+
+          // 顺流蜿蜒流动的水流丝带
+          float s1 = sin(cAng * 14.0 - uTime * 1.9 + sin(cAcross * 9.42477) * 1.5);
+          float s2 = sin(cAng * 24.0 - uTime * 2.5 - cAcross * 15.70796 + cos(cAng * 6.0) * 1.1);
+          float s3 = cos(cAng * 32.0 - uTime * 3.1 + sin(cAcross * 12.56637) * 1.2);
+          float ribbon = smoothstep(0.54, 0.96, 0.45 * s1 + 0.35 * s2 + 0.25 * s3);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.76, 0.95, 0.96), ribbon * 0.20 * centerDepth);
+
+          // 偶尔随日光与波峰摇曳出现的波光粼粼
+          float sunBurst = smoothstep(0.18, 0.82, 0.5 + 0.5 * sin(uTime * 0.55 + sin(cAng * 3.0) * 1.6))
+                         * smoothstep(0.05, 0.75, 0.5 + 0.5 * cos(cAng * 5.0 - uTime * 0.42 + cAcross * 2.5));
+          float glintA = sin(cAng * 28.0 - uTime * 2.8 + cAcross * 18.0);
+          float glintB = cos(cAng * 37.0 - uTime * 3.5 - cAcross * 23.0);
+          float glint = pow(max(0.0001, clamp(glintA * glintB, 0.0, 1.0)), 6.0);
+          diffuseColor.rgb += vec3(0.92, 0.98, 0.90) * glint * sunBurst * 0.58 * centerDepth;
+
+          // 极轻菲涅尔天光过渡（不遮挡水底与游鱼）
+          vec3 viewDirW = normalize(cameraPosition - vWaterWorldPos);
+          float fresnel = pow(max(0.0001, 1.0 - clamp(abs(viewDirW.y), 0.0, 1.0)), 3.2);
+          float waveMod = 0.72 + 0.28 * s1;
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.93, 0.95), fresnel * 0.11 * waveMod);
+
+          // 浅水拍岸微沫（略退入水面内侧，避免死白边缘）
+          float shoreWave = 0.010 * sin(cAng * 24.0 + uTime * 2.1) + 0.005 * cos(cAng * 36.0 - uTime * 2.7);
+          float innerLap = smoothstep(0.018, 0.044 + shoreWave, shoreDist) * (1.0 - smoothstep(0.044 + shoreWave, 0.095 + shoreWave, shoreDist));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.97, 0.98), innerLap * 0.28);
+          diffuseColor.a = max(diffuseColor.a, innerLap * 0.36);
+
+          // 四座石桥墩旁顺流扩散的绕流涟漪
+          float pierProx = pow(max(0.0001, cos(4.0 * cAng)), 12.0);
+          float pierBand = 1.0 - smoothstep(0.04, 0.28, shoreDist);
+          float pierRipple = 0.5 + 0.5 * sin(abs(sin(4.0 * cAng)) * 42.0 - uTime * 4.5);
+          float pierWake = pierProx * pierBand * smoothstep(0.45, 0.95, pierRipple);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.99, 1.0), pierWake * 0.55);`,
+        );
+    };
+    const m = new THREE.Mesh(g, waterMat);
     m.receiveShadow = true;
+    m.renderOrder = 1;
     scene.add(m);
     m.userData.basePos = Float32Array.from(pos);
     return m;
@@ -550,45 +788,49 @@ export function buildAncientWorld(
   {
     const rockGeo = new THREE.DodecahedronGeometry(0.22, 1);
     const rockMats = [mat(0x7c8589, 0.88), mat(0x90979a, 0.85), mat(0x6c7a72, 0.9)];
-    for (let i = 0; i < 110; i++) {
+    // 河岸鹅卵石沿外岸草坡与内岸青砖石阶自然散布，不悬浮入水
+    for (let i = 0; i < 104; i++) {
       const th = Math.random() * Math.PI * 2;
-      const isInner = Math.random() < 0.5;
-      const r =
-        (isInner ? moatInnerR(th) : moatOuterR(th)) +
-        (isInner ? -0.08 : 0.12) +
-        (Math.random() - 0.5) * 0.22;
+      const isInnerDeck = i % 3 === 0;
+      const r = isInnerDeck
+        ? moatInnerR(th) - rnd(0.32, 1.15)
+        : moatOuterR(th) + rnd(0.54, 1.32);
       const x = Math.cos(th) * r;
       const z = Math.sin(th) * r;
-      if (Math.min(Math.abs(x), Math.abs(z)) < 1.25) continue;
+      if (Math.min(Math.abs(x), Math.abs(z)) < 1.85) continue;
+      if (isInnerDeck && Math.max(Math.abs(x), Math.abs(z)) < 10.05) continue;
       const rock = new THREE.Mesh(rockGeo, rockMats[i % 3]);
-      rock.scale.set(rnd(0.6, 1.5), rnd(0.4, 0.8), rnd(0.6, 1.4));
-      rock.position.set(x, -0.62, z);
-      rock.rotation.set(rnd(-0.2, 0.2), rnd(0, 6), rnd(-0.2, 0.2));
+      const sc = rnd(0.56, 1.2);
+      rock.scale.set(sc * rnd(0.85, 1.2), sc * rnd(0.4, 0.6), sc * rnd(0.85, 1.2));
+      const baseY = isInnerDeck ? -0.644 : hillH(x, z) - 0.055;
+      rock.position.set(x, baseY, z);
+      rock.rotation.set(rnd(-0.14, 0.14), rnd(0, 6), rnd(-0.14, 0.14));
       rock.receiveShadow = true;
       scene.add(rock);
     }
 
-    const padGeo = new THREE.CircleGeometry(0.26, 18, 0.22, Math.PI * 2 - 0.44);
+    const padGeo = new THREE.CircleGeometry(0.21, 18, 0.22, Math.PI * 2 - 0.44);
     const padMat = new THREE.MeshStandardMaterial({
       color: 0x4b934c,
       roughness: 0.65,
       side: THREE.DoubleSide,
     });
-    const lotusPetalGeo = new THREE.ConeGeometry(0.055, 0.14, 5);
+    const lotusPetalGeo = new THREE.ConeGeometry(0.048, 0.125, 5);
     const lotusMats = [mat(0xffadc4, 0.5), mat(0xfff5f8, 0.5)];
     const lotusCoreMat = mat(0xf5cb42, 0.5);
 
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < 34; i++) {
       const th = Math.random() * Math.PI * 2;
-      const r = moatMid(th) + rnd(-1.35, 1.35);
+      const sideSign = i % 2 === 0 ? 1 : -1;
+      const r = moatChannelR(th, sideSign * rnd(1.0, 1.75), 0.85);
       const x = Math.cos(th) * r;
       const z = Math.sin(th) * r;
-      if (Math.min(Math.abs(x), Math.abs(z)) < 1.3) continue;
+      if (Math.min(Math.abs(x), Math.abs(z)) < 1.45) continue;
       const grp = new THREE.Group();
       const pad = new THREE.Mesh(padGeo, padMat);
       pad.rotation.x = -Math.PI / 2;
       pad.rotation.z = rnd(0, 6);
-      pad.scale.setScalar(rnd(0.75, 1.3));
+      pad.scale.setScalar(rnd(0.75, 1.2));
       pad.receiveShadow = true;
       grp.add(pad);
       if (i % 3 === 0) {
@@ -597,30 +839,30 @@ export function buildAncientWorld(
         for (let k = 0; k < 7; k++) {
           const pa = (k / 7) * Math.PI * 2;
           const pt = new THREE.Mesh(lotusPetalGeo, pm);
-          pt.position.set(Math.cos(pa) * 0.06, 0.04, Math.sin(pa) * 0.06);
+          pt.position.set(Math.cos(pa) * 0.052, 0.036, Math.sin(pa) * 0.052);
           pt.rotation.set(Math.sin(pa) * 0.55, 0, -Math.cos(pa) * 0.55);
           fl.add(pt);
         }
-        const core = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), lotusCoreMat);
-        core.position.y = 0.045;
+        const core = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), lotusCoreMat);
+        core.position.y = 0.04;
         fl.add(core);
         grp.add(fl);
       }
-      grp.position.set(x, -0.49, z);
+      grp.position.set(x, WATER_Y + 0.008, z);
       scene.add(grp);
       lotusList.push({ g: grp, phase: rnd(0, 6) });
     }
   }
 
-  // 石拱桥
+  // 石拱桥（匹配缩小 15% 后的护城河跨度）
   {
     const stoneMat = mat(0xa0acb0, 0.78);
     const stoneDark = mat(0x7c888d, 0.82);
     const capGold = mat(0xd4b678, 0.55);
     const bridge = new THREE.Group();
-    const NS = 11;
-    const LEN = 6.4;
-    const H = 0.76;
+    const NS = 15;
+    const LEN = 7.6;
+    const H = 0.88;
     const GY = -0.64;
     const HT = 0.09;
 
@@ -629,7 +871,7 @@ export function buildAncientWorld(
       const x = (um - 0.5) * LEN;
       const y = GY + HT + H * Math.sin(Math.PI * um);
       const slope = ((H * Math.PI) / LEN) * Math.cos(Math.PI * um);
-      const seg = new THREE.Mesh(new THREE.BoxGeometry(LEN / NS + 0.08, 0.18, 1.88), stoneMat);
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(LEN / NS + 0.08, 0.18, 1.92), stoneMat);
       seg.position.set(x, y, 0);
       seg.rotation.z = Math.atan(slope);
       seg.castShadow = true;
@@ -640,38 +882,38 @@ export function buildAncientWorld(
           new THREE.BoxGeometry(LEN / NS + 0.08, 0.2, 0.07),
           stoneDark,
         );
-        panel.position.set(x, y + 0.14, 0.88 * sz);
+        panel.position.set(x, y + 0.14, 0.9 * sz);
         panel.rotation.z = Math.atan(slope);
         bridge.add(panel);
         const rail = new THREE.Mesh(
           new THREE.BoxGeometry(LEN / NS + 0.08, 0.08, 0.11),
           stoneDark,
         );
-        rail.position.set(x, y + 0.28, 0.88 * sz);
+        rail.position.set(x, y + 0.28, 0.9 * sz);
         rail.rotation.z = Math.atan(slope);
         bridge.add(rail);
         if (i % 2 === 0) {
           const post = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.36, 0.12), stoneDark);
-          post.position.set(x, y + 0.18, 0.88 * sz);
+          post.position.set(x, y + 0.18, 0.9 * sz);
           post.rotation.z = Math.atan(slope);
           bridge.add(post);
           const bud = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), capGold);
-          bud.position.set(x, y + 0.39, 0.88 * sz);
+          bud.position.set(x, y + 0.39, 0.9 * sz);
           bridge.add(bud);
         }
       }
     }
     for (const ex of [-1, 1]) {
-      const pier = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 1.94), stoneDark);
-      pier.position.set(ex * (LEN / 2 - 0.3), GY - 0.15, 0);
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.78, 1.98), stoneDark);
+      pier.position.set(ex * (LEN / 2 - 0.3), GY - 0.24, 0);
       bridge.add(pier);
       for (const sz of [-1, 1]) {
         const cap = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.62, 0.2), stoneDark);
-        cap.position.set(ex * (LEN / 2), GY + 0.3, 0.92 * sz);
+        cap.position.set(ex * (LEN / 2), GY + 0.3, 0.94 * sz);
         cap.castShadow = true;
         bridge.add(cap);
         const finial = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), capGold);
-        finial.position.set(ex * (LEN / 2), GY + 0.65, 0.92 * sz);
+        finial.position.set(ex * (LEN / 2), GY + 0.65, 0.94 * sz);
         bridge.add(finial);
       }
     }
@@ -679,67 +921,234 @@ export function buildAncientWorld(
       const b = bridge.clone();
       b.rotation.y = (q * Math.PI) / 2;
       const a = (q * Math.PI) / 2;
-      b.position.set(Math.cos(a) * 14.75, 0, Math.sin(a) * 14.75);
+      b.position.set(Math.cos(a) * 18.4, 0, Math.sin(a) * 18.4);
       scene.add(b);
     }
   }
 
-  // 内岸青砖步道
+  // 内岸青砖步道 + 石质路缘压顶 + 阶梯式青石驳岸护坡（带涉水湿石暗化）
   {
     const bankTex = createBrickBankTexture(anisotropy);
+    const SEGS = 128;
+    const pos: number[] = [];
+    const uvs: number[] = [];
+    const idx: number[] = [];
+    for (let j = 0; j <= SEGS; j++) {
+      const th = (j / SEGS) * Math.PI * 2;
+      const c = Math.cos(th);
+      const s = Math.sin(th);
+      const rIn = 8.2;
+      const rOut = moatInnerR(th) - 0.08;
+      pos.push(c * rIn, -0.63, s * rIn, c * rOut, -0.63, s * rOut);
+      uvs.push(c * rIn / 32 + 0.5, s * rIn / 32 + 0.5, c * rOut / 32 + 0.5, s * rOut / 32 + 0.5);
+    }
+    for (let j = 0; j < SEGS; j++) {
+      const a = j * 2;
+      const b = a + 1;
+      const c = a + 2;
+      const d = a + 3;
+      idx.push(a, c, b, b, c, d);
+    }
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    bg.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    bg.setIndex(idx);
+    bg.computeVertexNormals();
     const bank = new THREE.Mesh(
-      new THREE.RingGeometry(8.2, 13.4, 64),
+      bg,
       new THREE.MeshStandardMaterial({ map: bankTex, roughness: 0.88 }),
     );
-    bank.rotation.x = -Math.PI / 2;
-    bank.position.y = -0.63;
     bank.receiveShadow = true;
     scene.add(bank);
+
+    // 青砖外沿厚实条石路缘压顶
+    const curbPos: number[] = [];
+    const curbUvs: number[] = [];
+    const curbIdx: number[] = [];
+    for (let j = 0; j <= SEGS; j++) {
+      const th = (j / SEGS) * Math.PI * 2;
+      const c = Math.cos(th);
+      const s = Math.sin(th);
+      const r0 = moatInnerR(th) - 0.14;
+      const r1 = moatInnerR(th) + 0.02;
+      const r2 = moatInnerR(th) + 0.04;
+      curbPos.push(
+        c * r0, -0.616, s * r0,
+        c * r1, -0.616, s * r1,
+        c * r2, -0.642, s * r2,
+      );
+      curbUvs.push((j / SEGS) * 24, 0, (j / SEGS) * 24, 0.7, (j / SEGS) * 24, 1);
+    }
+    for (let j = 0; j < SEGS; j++) {
+      for (let k = 0; k < 2; k++) {
+        const a = j * 3 + k;
+        const b = a + 1;
+        const c = a + 3;
+        const d = b + 3;
+        curbIdx.push(a, c, b, b, c, d);
+      }
+    }
+    const cg = new THREE.BufferGeometry();
+    cg.setAttribute('position', new THREE.Float32BufferAttribute(curbPos, 3));
+    cg.setAttribute('uv', new THREE.Float32BufferAttribute(curbUvs, 2));
+    cg.setIndex(curbIdx);
+    cg.computeVertexNormals();
+    const innerCurb = new THREE.Mesh(
+      cg,
+      new THREE.MeshStandardMaterial({ map: bankTex, color: 0xdfe5e8, roughness: 0.84 }),
+    );
+    innerCurb.receiveShadow = true;
+    scene.add(innerCurb);
+
+    // 青石斜坡砌筑驳岸（从条石路缘外斜入水底，靠水线呈深润青苔湿石色）
+    const REV_RINGS = 4;
+    const REV_ANG = 160;
+    const sPos: number[] = [];
+    const sUvs: number[] = [];
+    const sCols: number[] = [];
+    const sIdx: number[] = [];
+    const cDryStone = new THREE.Color(0xcfd7db);
+    const cWetStone = new THREE.Color(0x637375);
+    const sTmp = new THREE.Color();
+    for (let i = 0; i <= REV_RINGS; i++) {
+      const u = i / REV_RINGS;
+      const wetT = THREE.MathUtils.smoothstep(u, 0.25, 0.75);
+      sTmp.copy(cDryStone).lerp(cWetStone, wetT);
+      for (let j = 0; j <= REV_ANG; j++) {
+        const th = (j / REV_ANG) * Math.PI * 2;
+        const c = Math.cos(th);
+        const s = Math.sin(th);
+        const dr = THREE.MathUtils.lerp(-0.02, 0.44, u);
+        const y = THREE.MathUtils.lerp(-0.634, -0.88, Math.pow(u, 1.15));
+        const r = moatInnerR(th) + dr;
+        sPos.push(c * r, y, s * r);
+        sUvs.push((j / REV_ANG) * 20, u * 1.4);
+        sCols.push(sTmp.r, sTmp.g, sTmp.b);
+      }
+    }
+    for (let i = 0; i < REV_RINGS; i++) {
+      for (let j = 0; j < REV_ANG; j++) {
+        const a = i * (REV_ANG + 1) + j;
+        const b = a + REV_ANG + 1;
+        const c = a + 1;
+        const d = b + 1;
+        sIdx.push(a, c, b, b, c, d);
+      }
+    }
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.Float32BufferAttribute(sPos, 3));
+    sg.setAttribute('uv', new THREE.Float32BufferAttribute(sUvs, 2));
+    sg.setAttribute('color', new THREE.Float32BufferAttribute(sCols, 3));
+    sg.setIndex(sIdx);
+    sg.computeVertexNormals();
+    const innerStoneBank = new THREE.Mesh(
+      sg,
+      new THREE.MeshStandardMaterial({
+        map: bankTex,
+        vertexColors: true,
+        roughness: 0.85,
+      }),
+    );
+    innerStoneBank.receiveShadow = true;
+    scene.add(innerStoneBank);
   }
 
-  /* ================= 2. 森林、垂柳、樱花、野花与小蘑菇 ================= */
+  /* ================= 2. 森林、垂柳、樱花、灌木、野花与小蘑菇 ================= */
   const petals: PetalAnim[] = [];
   {
-    const GY = -0.66;
-    const barkMat = mat(0x6e4b35, 0.92);
+    const barkMat = mat(0x6e4b35, 0.9);
     const darkBarkMat = mat(0x523626, 0.92);
-    const sphGeo = new THREE.SphereGeometry(1, 14, 12);
-    const trunkGeo = new THREE.CylinderGeometry(0.11, 0.2, 1, 8);
-    const rootGeo = new THREE.ConeGeometry(0.24, 0.36, 7);
-    const coneGeo = new THREE.ConeGeometry(1, 1.35, 12);
-    const greens = [mat(0x4f8a42, 0.82), mat(0x639e4c, 0.82), mat(0x3f7539, 0.84), mat(0x78ad58, 0.8)];
-    const sakuras = [mat(0xffb7cc, 0.78), mat(0xffcadb, 0.76), mat(0xff9ebb, 0.8)];
-    const warms = [mat(0xd96b43, 0.8), mat(0xe3963e, 0.8), mat(0xe8c448, 0.78)];
+    const crownGeo = new THREE.IcosahedronGeometry(1, 2);
+    const trunkGeo = new THREE.CylinderGeometry(0.11, 0.22, 1.15, 10);
+    const branchGeo = new THREE.CylinderGeometry(0.045, 0.085, 0.72, 7);
+    const rootButtressGeo = new THREE.ConeGeometry(0.13, 0.38, 6);
+    const pineTierGeo = new THREE.ConeGeometry(1, 1.15, 9);
+    const pineTipGeo = new THREE.ConeGeometry(0.55, 0.95, 9);
+    const bushPuffGeo = new THREE.IcosahedronGeometry(0.36, 1);
+    const forestStoneGeo = new THREE.DodecahedronGeometry(0.34, 1);
+
+    const greens = [
+      mat(0x46883c, 0.82),
+      mat(0x5aa048, 0.8),
+      mat(0x3a7335, 0.84),
+      mat(0x70b455, 0.78),
+    ];
+    const pineMats = [
+      mat(0x2f683a, 0.84),
+      mat(0x3b7843, 0.82),
+      mat(0x4a894f, 0.8),
+      mat(0x5d9d5b, 0.78),
+    ];
+    const sakuras = [mat(0xffb7cc, 0.76), mat(0xffcadb, 0.74), mat(0xff9ebb, 0.78)];
+    const warms = [mat(0xd96b43, 0.8), mat(0xe3963e, 0.78), mat(0xe8c448, 0.76)];
+    const bushMats = [mat(0x4b8f42, 0.84), mat(0x5fa44f, 0.82)];
+    const mossStoneMat = mat(0x6d7c70, 0.88);
+    const willowCrownMat = mat(0x6fb04e, 0.8);
     const willowLeafMat = new THREE.MeshStandardMaterial({
-      color: 0x7eb856,
-      roughness: 0.82,
+      color: 0x7ec05a,
+      roughness: 0.8,
       side: THREE.DoubleSide,
     });
     const treeGroup = new THREE.Group();
 
-    const addFluffyTree = (x: number, z: number, s: number, mats = greens) => {
+    const moatSafeOuter = (x: number, z: number, pad = 1.45) => {
+      const r = Math.hypot(x, z);
+      const th = Math.atan2(z, x);
+      return r >= moatOuterR(th) + pad;
+    };
+    const moatSafeInner = (x: number, z: number, pad = 1.2) => {
+      const r = Math.hypot(x, z);
+      const th = Math.atan2(z, x);
+      return (
+        r <= moatInnerR(th) - pad &&
+        Math.max(Math.abs(x), Math.abs(z)) >= 10.35 &&
+        Math.min(Math.abs(x), Math.abs(z)) >= 2.25 &&
+        !(Math.abs(x) > 8.8 && Math.abs(z) > 8.8)
+      );
+    };
+
+    const addFluffyTree = (x: number, z: number, s: number, mats = greens, yBase?: number) => {
       const g = new THREE.Group();
       const tr = new THREE.Mesh(trunkGeo, barkMat);
-      tr.position.y = 0.52;
-      tr.scale.y = 1.05;
+      tr.position.y = 0.56;
+      tr.rotation.z = 0.04;
+      tr.castShadow = true;
+      tr.receiveShadow = true;
       g.add(tr);
-      const rt = new THREE.Mesh(rootGeo, barkMat);
-      rt.position.y = 0.14;
-      g.add(rt);
-      const blobs: [number, number, number, number][] = [
-        [0, 1.42, 0, 0.78],
-        [0.42, 1.25, 0.2, 0.54],
-        [-0.4, 1.28, -0.18, 0.56],
-        [0.1, 1.3, -0.4, 0.52],
-        [0, 1.72, 0.08, 0.56],
+
+      for (let b = 0; b < 3; b++) {
+        const ba = (b / 3) * Math.PI * 2 + 0.4;
+        const rt = new THREE.Mesh(rootButtressGeo, barkMat);
+        rt.position.set(Math.cos(ba) * 0.14, 0.14, Math.sin(ba) * 0.14);
+        rt.rotation.set(Math.sin(ba) * 0.42, 0, -Math.cos(ba) * 0.42);
+        g.add(rt);
+
+        const br = new THREE.Mesh(branchGeo, barkMat);
+        br.position.set(Math.cos(ba) * 0.2, 1.05, Math.sin(ba) * 0.2);
+        br.rotation.set(Math.sin(ba) * 0.55, 0, -Math.cos(ba) * 0.55);
+        g.add(br);
+      }
+
+      const lobes: [number, number, number, number, number, number][] = [
+        [0, 1.56, 0, 0.72, 0.58, 0.72],
+        [0.44, 1.38, 0.18, 0.52, 0.44, 0.52],
+        [-0.42, 1.4, -0.18, 0.54, 0.45, 0.54],
+        [0.14, 1.36, -0.42, 0.5, 0.42, 0.5],
+        [-0.16, 1.42, 0.42, 0.48, 0.42, 0.48],
+        [0.2, 1.82, 0.14, 0.44, 0.38, 0.44],
+        [-0.14, 1.9, -0.1, 0.48, 0.4, 0.48],
       ];
-      blobs.forEach(([px, py, pz, pr], i) => {
-        const m = new THREE.Mesh(sphGeo, mats[i % mats.length]);
+      lobes.forEach(([px, py, pz, sx, sy, sz], i) => {
+        const m = new THREE.Mesh(crownGeo, mats[i % mats.length]);
         m.position.set(px, py, pz);
-        m.scale.set(pr * 1.12, pr * 0.92, pr * 1.12);
+        m.scale.set(sx, sy, sz);
+        m.rotation.set(i * 0.5, i * 1.1, i * 0.3);
+        m.castShadow = true;
+        m.receiveShadow = true;
         g.add(m);
       });
-      g.position.set(x, GY, z);
+
+      g.position.set(x, yBase ?? hillH(x, z) - 0.04, z);
       g.scale.setScalar(s);
       g.rotation.y = rnd(0, 6.28);
       treeGroup.add(g);
@@ -748,89 +1157,184 @@ export function buildAncientWorld(
     const addPineTree = (x: number, z: number, s: number) => {
       const g = new THREE.Group();
       const tr = new THREE.Mesh(trunkGeo, darkBarkMat);
-      tr.position.y = 0.45;
+      tr.position.y = 0.54;
+      tr.castShadow = true;
       g.add(tr);
-      for (let i = 0; i < 3; i++) {
-        const c = new THREE.Mesh(coneGeo, greens[i % greens.length]);
-        c.position.y = 1.05 + i * 0.68;
-        c.scale.set(1 - 0.22 * i, 0.95 - 0.12 * i, 1 - 0.22 * i);
-        g.add(c);
-        const cap = new THREE.Mesh(sphGeo, greens[i % greens.length]);
-        cap.position.y = 1.42 + i * 0.68;
-        cap.scale.setScalar(0.32 * (1 - 0.2 * i));
-        g.add(cap);
+      for (let b = 0; b < 3; b++) {
+        const ba = (b / 3) * Math.PI * 2;
+        const rt = new THREE.Mesh(rootButtressGeo, darkBarkMat);
+        rt.position.set(Math.cos(ba) * 0.13, 0.13, Math.sin(ba) * 0.13);
+        rt.rotation.set(Math.sin(ba) * 0.38, 0, -Math.cos(ba) * 0.38);
+        g.add(rt);
       }
-      g.position.set(x, GY, z);
+
+      const tiers = [
+        { y: 1.05, r: 0.92, h: 0.95 },
+        { y: 1.56, r: 0.76, h: 0.88 },
+        { y: 2.04, r: 0.58, h: 0.82 },
+        { y: 2.46, r: 0.4, h: 0.72 },
+      ];
+      tiers.forEach((tier, i) => {
+        const c = new THREE.Mesh(
+          i === tiers.length - 1 ? pineTipGeo : pineTierGeo,
+          pineMats[i % pineMats.length],
+        );
+        c.position.y = tier.y;
+        c.scale.set(
+          i === tiers.length - 1 ? tier.r * 1.8 : tier.r,
+          tier.h,
+          i === tiers.length - 1 ? tier.r * 1.8 : tier.r,
+        );
+        c.rotation.set((i % 2 === 0 ? 1 : -1) * 0.03, i * 0.68, (i % 2 === 0 ? -1 : 1) * 0.025);
+        c.castShadow = true;
+        c.receiveShadow = true;
+        g.add(c);
+      });
+
+      g.position.set(x, hillH(x, z) - 0.04, z);
       g.scale.setScalar(s);
       g.rotation.y = rnd(0, 6.28);
       treeGroup.add(g);
     };
 
-    const drapeGeo = new THREE.BoxGeometry(0.05, 0.85, 0.03);
-    const willows: [number, number][] = [
-      [-10.2, -10.2],
-      [10.2, -10.2],
-      [10.2, 10.2],
-      [-10.2, 10.2],
-      [-17.5, 6.5],
-      [17.5, -6.5],
-    ];
-    willows.forEach(([wx, wz], idx) => {
+    const addBush = (x: number, z: number, s: number) => {
       const g = new THREE.Group();
+      const puffs: [number, number, number, number][] = [
+        [0, 0.24, 0, 1.05],
+        [0.24, 0.18, 0.14, 0.78],
+        [-0.22, 0.2, -0.12, 0.82],
+        [0.05, 0.22, -0.24, 0.72],
+      ];
+      puffs.forEach(([px, py, pz, ps], i) => {
+        const m = new THREE.Mesh(bushPuffGeo, bushMats[i % bushMats.length]);
+        m.position.set(px, py, pz);
+        m.scale.set(ps, ps * 0.78, ps);
+        m.rotation.y = i * 1.3;
+        m.receiveShadow = true;
+        g.add(m);
+      });
+      g.position.set(x, hillH(x, z) - 0.03, z);
+      g.scale.setScalar(s);
+      treeGroup.add(g);
+    };
+
+    // 垂柳全部移至护城河外岸草坡（不再长进水里），并采用双枝干 + 多簇树冠 + 细长垂柳丝
+    const drapeGeo = new THREE.CylinderGeometry(0.022, 0.006, 0.94, 5);
+    const willowAngles = [0.44, 1.14, 1.98, 2.72, 3.58, 4.3, 5.14, 5.86];
+    willowAngles.forEach((ang, idx) => {
+      const r = moatOuterR(ang) + 1.55;
+      const wx = Math.cos(ang) * r;
+      const wz = Math.sin(ang) * r;
+      const g = new THREE.Group();
+
       const tr = new THREE.Mesh(trunkGeo, barkMat);
-      tr.position.y = 0.65;
-      tr.scale.set(1.15, 1.35, 1.15);
-      tr.rotation.z = 0.15;
+      tr.position.set(0.06, 0.64, 0);
+      tr.scale.set(1.1, 1.25, 1.1);
+      tr.rotation.z = 0.16;
+      tr.castShadow = true;
       g.add(tr);
-      const crown = new THREE.Mesh(sphGeo, willowLeafMat);
-      crown.position.set(-0.1, 1.55, 0);
-      crown.scale.set(0.85, 0.62, 0.85);
-      g.add(crown);
+
+      const tr2 = new THREE.Mesh(branchGeo, barkMat);
+      tr2.position.set(-0.14, 1.08, 0.08);
+      tr2.rotation.set(0.18, 0, 0.45);
+      g.add(tr2);
+
+      const crownLobes: [number, number, number, number, number][] = [
+        [-0.08, 1.56, 0, 0.76, 0.56],
+        [0.28, 1.44, 0.22, 0.56, 0.44],
+        [-0.36, 1.46, -0.18, 0.58, 0.46],
+        [0.05, 1.76, -0.1, 0.5, 0.4],
+      ];
+      crownLobes.forEach(([px, py, pz, rx, ry], cIdx) => {
+        const cr = new THREE.Mesh(crownGeo, willowCrownMat);
+        cr.position.set(px, py, pz);
+        cr.scale.set(rx, ry, rx);
+        cr.rotation.y = cIdx * 0.9;
+        cr.castShadow = true;
+        g.add(cr);
+      });
+
       const drapes = new THREE.Group();
-      drapes.position.set(-0.1, 1.4, 0);
-      for (let k = 0; k < 10; k++) {
-        const ang = (k / 10) * Math.PI * 2;
+      drapes.position.set(-0.08, 1.44, 0);
+      for (let k = 0; k < 20; k++) {
+        const ka = (k / 20) * Math.PI * 2;
+        const ringR = k % 2 === 0 ? 0.68 : 0.46;
+        const lenScale = 0.8 + (k % 3) * 0.16;
         const strip = new THREE.Mesh(drapeGeo, willowLeafMat);
-        strip.position.set(Math.cos(ang) * 0.68, -0.38, Math.sin(ang) * 0.68);
+        strip.scale.set(1, lenScale, 1);
+        strip.position.set(
+          Math.cos(ka) * ringR,
+          -0.44 * lenScale,
+          Math.sin(ka) * ringR,
+        );
         drapes.add(strip);
       }
       g.add(drapes);
-      g.position.set(wx, GY, wz);
+      g.position.set(wx, hillH(wx, wz) - 0.04, wz);
       g.scale.setScalar(0.95);
-      g.rotation.y = idx * 1.1;
+      // 树枝朝护城河方向微倾
+      g.rotation.y = -ang + Math.PI;
       treeGroup.add(g);
       willowDrapeList.push({ g: drapes, phase: idx * 1.3 });
     });
 
-    for (let i = 0; i < 115; i++) {
+    // 外围郁郁葱葱的森林（严格远离护城河与四条通路）
+    for (let i = 0; i < 145; i++) {
       const a = Math.random() * Math.PI * 2;
-      const r = rnd(18.8, 35);
+      const r = rnd(22.1, 42.0);
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      if (Math.min(Math.abs(x), Math.abs(z)) < 1.85) {
+      if (!moatSafeOuter(x, z, 1.55) || Math.min(Math.abs(x), Math.abs(z)) < 2.05) {
         i--;
         continue;
       }
       const pick = Math.random();
-      if (pick < 0.42) addFluffyTree(x, z, rnd(0.85, 1.55), greens);
-      else if (pick < 0.72) addPineTree(x, z, rnd(0.85, 1.5));
-      else if (pick < 0.88) addFluffyTree(x, z, rnd(0.8, 1.35), sakuras);
+      if (pick < 0.46) addFluffyTree(x, z, rnd(0.9, 1.55), greens);
+      else if (pick < 0.78) addPineTree(x, z, rnd(0.9, 1.55));
+      else if (pick < 0.9) addFluffyTree(x, z, rnd(0.85, 1.35), sakuras);
       else addFluffyTree(x, z, rnd(0.85, 1.35), warms);
     }
 
-    for (let i = 0; i < 22; i++) {
+    // 外林低矮灌木与林间苔石
+    for (let i = 0; i < 42; i++) {
       const a = Math.random() * Math.PI * 2;
-      const r = rnd(9.6, 12.1);
+      const r = rnd(22.0, 37.5);
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      if (
-        (Math.abs(x) < 9.1 && Math.abs(z) < 9.1) ||
-        Math.min(Math.abs(x), Math.abs(z)) < 1.95
-      ) {
-        i--;
-        continue;
+      if (!moatSafeOuter(x, z, 1.35) || Math.min(Math.abs(x), Math.abs(z)) < 1.65) continue;
+      if (i % 3 === 0) {
+        const st = new THREE.Mesh(forestStoneGeo, mossStoneMat);
+        st.scale.set(rnd(0.75, 1.35), rnd(0.45, 0.75), rnd(0.75, 1.3));
+        st.position.set(x, hillH(x, z) + 0.04, z);
+        st.rotation.set(rnd(-0.2, 0.2), rnd(0, 6), rnd(-0.2, 0.2));
+        st.receiveShadow = true;
+        treeGroup.add(st);
+      } else {
+        addBush(x, z, rnd(0.8, 1.35));
       }
-      addFluffyTree(x, z, rnd(0.58, 0.95), i % 2 === 0 ? sakuras : warms);
+    }
+
+    // 护城河与城墙之间的内岸点缀樱花、秋叶与翠绿小树（均匀分布于四边八段内岸，严格不落入水中）
+    const innerTreePts: [number, number][] = [];
+    for (let q = 0; q < 4; q++) {
+      const ca = Math.cos((q * Math.PI) / 2);
+      const sa = Math.sin((q * Math.PI) / 2);
+      for (const side of [-1, 1]) {
+        let placed = 0;
+        for (let attempt = 0; attempt < 40 && placed < 3; attempt++) {
+          const along = side * rnd(2.2, 7.2);
+          const out = rnd(10.45, 12.1);
+          const x = along * ca - out * sa;
+          const z = along * sa + out * ca;
+          if (!moatSafeInner(x, z, 0.85)) continue;
+          if (innerTreePts.some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.35)) continue;
+          innerTreePts.push([x, z]);
+          const palette =
+            (q + placed) % 3 === 0 ? sakuras : (q + placed) % 3 === 1 ? warms : greens;
+          addFluffyTree(x, z, rnd(0.58, 0.8), palette, -0.63);
+          placed++;
+        }
+      }
     }
     scene.add(treeGroup);
 
@@ -844,18 +1348,18 @@ export function buildAncientWorld(
     for (let i = 0; i < 28; i++) {
       const m = new THREE.Mesh(petalDropGeo, petalDropMat);
       const a = rnd(0, 6.28);
-      const r = rnd(9, 24);
+      const r = rnd(11.5, 27.5);
       m.position.set(Math.cos(a) * r, rnd(0.5, 4.2), Math.sin(a) * r);
       scene.add(m);
       petals.push({ m, speed: rnd(0.35, 0.65), sway: rnd(0, 6), baseR: r, ang: a });
     }
 
     const bladeGeo = new THREE.ConeGeometry(0.04, 1, 4);
-    const tuftMats = [mat(0x6d9948, 0.85), mat(0x7fad56, 0.85), mat(0x5e8a3d, 0.85)];
+    const tuftMats = [mat(0x4b8f42, 0.85), mat(0x63aa53, 0.85), mat(0x3d7b38, 0.85)];
     const pGeo = new THREE.SphereGeometry(0.09, 10, 8);
     const cGeo = new THREE.SphereGeometry(0.055, 10, 8);
     const stGeo = new THREE.CylinderGeometry(0.016, 0.024, 0.38, 6);
-    const stMat = mat(0x5e8a3e, 0.8);
+    const stMat = mat(0x4b8a3f, 0.8);
     const cMats = [mat(0xf5cf47, 0.6), mat(0xebae34, 0.6)];
     const pMats = [
       mat(0xff8eb3, 0.65),
@@ -865,16 +1369,16 @@ export function buildAncientWorld(
       mat(0xff9f7a, 0.65),
     ];
 
-    for (let i = 0; i < 75; i++) {
+    for (let i = 0; i < 95; i++) {
       const a = rnd(0, 6.28);
-      const r = rnd(17.6, 34);
+      const r = rnd(21.7, 39.0);
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      if (Math.min(Math.abs(x), Math.abs(z)) < 1.1) continue;
+      if (!moatSafeOuter(x, z, 0.9) || Math.min(Math.abs(x), Math.abs(z)) < 1.2) continue;
       const g = new THREE.Group();
       for (let k = 0; k < 6; k++) {
         const b = new THREE.Mesh(bladeGeo, tuftMats[(i + k) % 3]);
-        const h = rnd(0.45, 0.88);
+        const h = rnd(0.42, 0.8);
         const ba = (k / 6) * Math.PI * 2 + rnd(-0.3, 0.3);
         const br = rnd(0, 0.14);
         b.scale.set(1, h, 1);
@@ -882,17 +1386,17 @@ export function buildAncientWorld(
         b.rotation.set(rnd(-0.35, 0.35), 0, rnd(-0.35, 0.35));
         g.add(b);
       }
-      g.position.set(x, GY, z);
-      g.scale.setScalar(rnd(0.85, 1.45));
+      g.position.set(x, hillH(x, z) - 0.02, z);
+      g.scale.setScalar(rnd(0.8, 1.3));
       scene.add(g);
     }
 
-    for (let i = 0; i < 56; i++) {
+    for (let i = 0; i < 68; i++) {
       const a = rnd(0, 6.28);
-      const r = rnd(17.5, 33);
+      const r = rnd(21.7, 37.5);
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      if (Math.min(Math.abs(x), Math.abs(z)) < 1.15) continue;
+      if (!moatSafeOuter(x, z, 0.9) || Math.min(Math.abs(x), Math.abs(z)) < 1.2) continue;
       const f = new THREE.Group();
       const st = new THREE.Mesh(stGeo, stMat);
       st.position.y = 0.19;
@@ -909,20 +1413,20 @@ export function buildAncientWorld(
       const core = new THREE.Mesh(cGeo, cMats[i % 2]);
       core.position.y = 0.41;
       f.add(core);
-      f.position.set(x, GY, z);
-      f.scale.setScalar(rnd(0.85, 1.35));
+      f.position.set(x, hillH(x, z) - 0.02, z);
+      f.scale.setScalar(rnd(0.72, 1.12));
       scene.add(f);
     }
 
     const mushCapMat = mat(0xe04f47, 0.55);
     const mushStemMat = mat(0xf7efe4, 0.75);
     const mushDotMat = mat(0xffffff, 0.6);
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 24; i++) {
       const a = rnd(0, 6.28);
-      const r = rnd(18.5, 30);
+      const r = rnd(22.1, 35.5);
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      if (Math.min(Math.abs(x), Math.abs(z)) < 1.5) continue;
+      if (!moatSafeOuter(x, z, 1.1) || Math.min(Math.abs(x), Math.abs(z)) < 1.5) continue;
       const mg = new THREE.Group();
       const st = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.055, 0.18, 10), mushStemMat);
       st.position.y = 0.09;
@@ -939,7 +1443,7 @@ export function buildAncientWorld(
         dot.position.set(Math.cos(da) * 0.07, 0.22, Math.sin(da) * 0.07);
         mg.add(dot);
       }
-      mg.position.set(x, GY, z);
+      mg.position.set(x, hillH(x, z) - 0.02, z);
       mg.scale.setScalar(rnd(0.8, 1.35));
       scene.add(mg);
     }
@@ -970,14 +1474,15 @@ export function buildAncientWorld(
     return m;
   };
 
-  addBrickBox(0, 0, 17.8, 0.4, 17.8, -0.68, 7, 0.2);
-  addBrickBox(0, 0, 17.2, 0.62, 17.2, -0.29, 6, 0.3);
+  // 扩大内城台面与双层城台基座，使四角角楼与城墙完全稳落石台之内、杜绝悬空
+  addBrickBox(0, 0, 19.28, 0.6, 19.28, -0.78, 7.6, 0.3);
+  addBrickBox(0, 0, 18.76, 0.56, 18.76, -0.26, 6.6, 0.3);
 
   const deck = new THREE.Mesh(
-    new THREE.BoxGeometry(17.2, 0.12, 17.2),
+    new THREE.BoxGeometry(18.6, 0.06, 18.6),
     new THREE.MeshStandardMaterial({ map: stoneDeckTex, roughness: 0.82 }),
   );
-  deck.position.y = 0.02;
+  deck.position.y = 0.05;
   deck.receiveShadow = true;
   scene.add(deck);
 
@@ -986,27 +1491,27 @@ export function buildAncientWorld(
   const merlonMat = mat(0x8d969c, 0.72);
   for (const sz of [-1, 1]) {
     for (const sx of [-1, 1]) {
-      const wh = new THREE.Mesh(new THREE.BoxGeometry(7.45, 0.22, 0.38), wallMat);
-      wh.position.set(sx * 4.65, 0.22, sz * 8.38);
+      const wh = new THREE.Mesh(new THREE.BoxGeometry(6.88, 0.26, 0.38), wallMat);
+      wh.position.set(sx * 4.365, 0.21, sz * 8.38);
       wh.castShadow = true;
       wh.receiveShadow = true;
       scene.add(wh);
 
-      const wv = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.22, 7.45), wallMat);
-      wv.position.set(sz * 8.38, 0.22, sx * 4.65);
+      const wv = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.26, 6.88), wallMat);
+      wv.position.set(sz * 8.38, 0.21, sx * 4.365);
       wv.castShadow = true;
       wv.receiveShadow = true;
       scene.add(wv);
 
       for (let i = 0; i < 6; i++) {
         const mh = new THREE.Mesh(merlonGeo, merlonMat);
-        mh.position.set(sx * (1.45 + i * 1.22), 0.41, sz * 8.38);
+        mh.position.set(sx * (1.45 + i * 1.2), 0.415, sz * 8.38);
         mh.castShadow = true;
         scene.add(mh);
 
         const mv = new THREE.Mesh(merlonGeo, merlonMat);
         mv.rotation.y = Math.PI / 2;
-        mv.position.set(sz * 8.38, 0.41, sx * (1.45 + i * 1.22));
+        mv.position.set(sz * 8.38, 0.415, sx * (1.45 + i * 1.2));
         mv.castShadow = true;
         scene.add(mv);
       }
@@ -1019,51 +1524,259 @@ export function buildAncientWorld(
     metalness: 0.55,
   });
   {
-    const pillarMat = mat(0x9a362c, 0.6);
-    const roofTileMat = mat(0x444f59, 0.55);
+    const pillarMat = mat(0x9a362c, 0.58);
+    const bracketMat = mat(0xb85838, 0.62);
+    const roofTileMat = mat(0x444f59, 0.52);
+    const eaveTrimMat = mat(0x5a6773, 0.58);
+    const stoneDrumMat = mat(0xa3acb2, 0.68);
+    const plaqueMat = mat(0x23313d, 0.42);
     const lantMat = new THREE.MeshStandardMaterial({
       color: 0xe5442b,
       emissive: 0xb83018,
-      emissiveIntensity: 0.75,
+      emissiveIntensity: 0.78,
       roughness: 0.4,
     });
+    // 预先旋转四棱锥使其底边严格平行于 X/Z 轴，避免缩放后旋转产生倾斜菱形畸变
+    const hipRoofGeo = new THREE.ConeGeometry(1, 1, 4);
+    hipRoofGeo.rotateY(Math.PI / 4);
+    const makeHippedRoof = (w: number, h: number, d: number) => {
+      const m = new THREE.Mesh(hipRoofGeo, roofTileMat);
+      m.scale.set(w / Math.SQRT2, h, d / Math.SQRT2);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      return m;
+    };
+
     for (let q = 0; q < 4; q++) {
       const gate = new THREE.Group();
       for (const sx of [-1, 1]) {
+        // 阶梯柱础 + 八角抱鼓石
+        const baseStone = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.09, 0.34), merlonMat);
+        baseStone.position.set(0.76 * sx, 0.045, 0);
+        baseStone.receiveShadow = true;
+        gate.add(baseStone);
+
+        const drum = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.115, 0.14, 0.08, 8),
+          stoneDrumMat,
+        );
+        drum.position.set(0.76 * sx, 0.13, 0);
+        gate.add(drum);
+
+        // 朱红立柱 + 金色柱箍
         const pil = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.09, 0.11, 1.05, 10),
+          new THREE.CylinderGeometry(0.082, 0.094, 1.02, 14),
           pillarMat,
         );
-        pil.position.set(0.74 * sx, 0.52, 0);
+        pil.position.set(0.76 * sx, 0.68, 0);
         pil.castShadow = true;
         gate.add(pil);
 
-        const baseStone = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.16, 0.28), merlonMat);
-        baseStone.position.set(0.74 * sx, 0.08, 0);
-        gate.add(baseStone);
+        for (const cy of [0.19, 1.13]) {
+          const collar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.102, 0.102, 0.04, 14),
+            trimGold,
+          );
+          collar.position.set(0.76 * sx, cy, 0);
+          gate.add(collar);
+        }
 
-        const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), lantMat);
-        l.scale.y = 0.85;
-        l.position.set(0.86 * sx, 0.82, 0.16);
+        // 挑檐灯笼（含挂臂、金帽与穗饰）
+        const hook = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.032, 0.032), pillarMat);
+        hook.position.set(0.84 * sx, 0.9, 0.16);
+        gate.add(hook);
+
+        const l = new THREE.Mesh(new THREE.SphereGeometry(0.088, 12, 10), lantMat);
+        l.scale.set(1, 0.88, 1);
+        l.position.set(0.9 * sx, 0.79, 0.16);
         gate.add(l);
+
+        for (const ly of [0.87, 0.71]) {
+          const cap = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.036, 0.036, 0.022, 10),
+            trimGold,
+          );
+          cap.position.set(0.9 * sx, ly, 0.16);
+          gate.add(cap);
+        }
+        const tassel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.012, 0.022, 0.055, 6),
+          trimGold,
+        );
+        tassel.position.set(0.9 * sx, 0.67, 0.16);
+        gate.add(tassel);
       }
-      const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.16, 0.24), pillarMat);
-      lintel.position.set(0, 0.98, 0);
-      lintel.castShadow = true;
-      gate.add(lintel);
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(1.38, 0.48, 4), roofTileMat);
-      roof.scale.set(1.25, 1, 0.58);
-      roof.rotation.y = Math.PI / 4;
-      roof.position.set(0, 1.28, 0);
-      roof.castShadow = true;
-      gate.add(roof);
-      const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.09), trimGold);
-      ridge.position.set(0, 1.52, 0);
+
+      // 上下双额枋 + 斗拱 + 中央匾额
+      const lowerBeam = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.11, 0.18), pillarMat);
+      lowerBeam.position.set(0, 0.94, 0);
+      lowerBeam.castShadow = true;
+      gate.add(lowerBeam);
+
+      const upperBeam = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.13, 0.22), pillarMat);
+      upperBeam.position.set(0, 1.15, 0);
+      upperBeam.castShadow = true;
+      gate.add(upperBeam);
+
+      for (const bx of [-0.52, 0, 0.52]) {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.28), bracketMat);
+        b1.position.set(bx, 1.23, 0);
+        gate.add(b1);
+        const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.045, 0.34), bracketMat);
+        b2.position.set(bx, 1.27, 0);
+        gate.add(b2);
+      }
+
+      const plaqueFrame = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.22, 0.25), trimGold);
+      plaqueFrame.position.set(0, 1.04, 0);
+      gate.add(plaqueFrame);
+      const plaqueCore = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.15, 0.27), plaqueMat);
+      plaqueCore.position.set(0, 1.04, 0);
+      gate.add(plaqueCore);
+
+      // 重檐屋顶（下檐 + 阁楼腰线 + 上檐 + 金脊吻兽）
+      const lowerSoffit = new THREE.Mesh(new THREE.BoxGeometry(2.22, 0.055, 0.86), eaveTrimMat);
+      lowerSoffit.position.set(0, 1.3, 0);
+      gate.add(lowerSoffit);
+
+      const lowerRoof = makeHippedRoof(2.3, 0.34, 0.94);
+      lowerRoof.position.set(0, 1.49, 0);
+      gate.add(lowerRoof);
+
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const tip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.09), trimGold);
+          tip.position.set(1.13 * sx, 1.34, 0.44 * sz);
+          tip.rotation.z = 0.28 * sx;
+          gate.add(tip);
+        }
+      }
+
+      const clerestory = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.14, 0.46), pillarMat);
+      clerestory.position.set(0, 1.58, 0);
+      gate.add(clerestory);
+
+      const upperSoffit = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.045, 0.64), eaveTrimMat);
+      upperSoffit.position.set(0, 1.66, 0);
+      gate.add(upperSoffit);
+
+      const upperRoof = makeHippedRoof(1.74, 0.34, 0.7);
+      upperRoof.position.set(0, 1.84, 0);
+      gate.add(upperRoof);
+
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.065, 0.08), trimGold);
+      ridge.position.set(0, 2.01, 0);
       gate.add(ridge);
+
+      for (const sx of [-1, 1]) {
+        const chiwen = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.11, 0.09), trimGold);
+        chiwen.position.set(0.53 * sx, 2.06, 0);
+        chiwen.rotation.z = -0.25 * sx;
+        gate.add(chiwen);
+      }
+
+      const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), trimGold);
+      pearl.position.set(0, 2.08, 0);
+      gate.add(pearl);
+
       const a = (q * Math.PI) / 2;
       gate.position.set(Math.sin(a) * 8.38, 0.08, Math.cos(a) * 8.38);
       gate.rotation.y = a;
       scene.add(gate);
+    }
+
+    // 为其中三座城门修筑青石台阶与垂带石扶手（随机挑一门暂不放台阶，供后续处理）
+    const skipStairGate = (Math.random() * 4) | 0;
+    const stairRiserMat = brickMat(1.2, 0.35);
+    const stairTreadMat = mat(0xabb5bb, 0.72);
+    const stairSideMat = mat(0x889399, 0.78);
+    const stairRailMat = mat(0x9ca7ad, 0.72);
+
+    for (let q = 0; q < 4; q++) {
+      if (q === skipStairGate) continue;
+      const stairGrp = new THREE.Group();
+      const baseLocalY = -0.73; // 略低于内岸青砖地面 (-0.71)，严丝合缝接地
+      const stepCount = 6; // 顶部齐平踏台 + 5 级下阶
+      const totalDrop = 0.71;
+      const stepDepth = 0.32;
+      const zStart = 0.90; // 紧贴扩大后内城台面外沿 (9.30 - 8.38 = 0.92)
+
+      for (let k = 0; k < stepCount; k++) {
+        const yTop = -(k / stepCount) * totalDrop;
+        const h = yTop - baseLocalY;
+        const zCenter = zStart + (k + 0.5) * stepDepth;
+
+        const riser = new THREE.Mesh(new THREE.BoxGeometry(1.66, h, stepDepth + 0.01), stairRiserMat);
+        riser.position.set(0, baseLocalY + h / 2, zCenter);
+        riser.castShadow = true;
+        riser.receiveShadow = true;
+        stairGrp.add(riser);
+
+        const tread = new THREE.Mesh(
+          new THREE.BoxGeometry(1.7, 0.032, stepDepth + 0.03),
+          stairTreadMat,
+        );
+        tread.position.set(0, yTop - 0.014, zCenter + 0.01);
+        tread.castShadow = true;
+        tread.receiveShadow = true;
+        stairGrp.add(tread);
+      }
+
+      // 两侧垂带石挡墙与望柱圆雕柱头
+      const topZ = zStart + stepDepth * 0.5;
+      const botZ = zStart + (stepCount - 0.5) * stepDepth;
+      const topWallY = 0.14;
+      const botWallY = -((stepCount - 1) / stepCount) * totalDrop + 0.14;
+      const slopeLen = Math.hypot(botZ - topZ, topWallY - botWallY);
+      const slopeAng = Math.atan2(topWallY - botWallY, botZ - topZ);
+
+      for (const sx of [-1, 1]) {
+        const cheekX = 0.91 * sx;
+        for (let k = 0; k < stepCount; k++) {
+          const yTop = -(k / stepCount) * totalDrop + 0.14;
+          const h = yTop - baseLocalY;
+          const zCenter = zStart + (k + 0.5) * stepDepth;
+          const wallSeg = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, h, stepDepth + 0.02),
+            stairSideMat,
+          );
+          wallSeg.position.set(cheekX, baseLocalY + h / 2, zCenter);
+          wallSeg.castShadow = true;
+          wallSeg.receiveShadow = true;
+          stairGrp.add(wallSeg);
+        }
+
+        const railCap = new THREE.Mesh(
+          new THREE.BoxGeometry(0.19, 0.055, slopeLen + 0.22),
+          stairRailMat,
+        );
+        railCap.position.set(cheekX, (topWallY + botWallY) * 0.5 + 0.02, (topZ + botZ) * 0.5);
+        railCap.rotation.x = slopeAng;
+        railCap.castShadow = true;
+        stairGrp.add(railCap);
+
+        // 上下端望柱与小石球柱头
+        for (const [pz, pyTop] of [
+          [topZ - 0.04, 0.24],
+          [botZ + 0.06, -totalDrop + 0.3],
+        ] as const) {
+          const ph = pyTop - baseLocalY;
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.2, ph, 0.2), stairRailMat);
+          post.position.set(cheekX, baseLocalY + ph / 2, pz);
+          post.castShadow = true;
+          post.receiveShadow = true;
+          stairGrp.add(post);
+
+          const knob = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), trimGold);
+          knob.position.set(cheekX, pyTop + 0.06, pz);
+          stairGrp.add(knob);
+        }
+      }
+
+      const a = (q * Math.PI) / 2;
+      stairGrp.position.set(Math.sin(a) * 8.38, 0.08, Math.cos(a) * 8.38);
+      stairGrp.rotation.y = a;
+      scene.add(stairGrp);
     }
   }
 
@@ -1444,13 +2157,16 @@ export function buildAncientWorld(
       const firstTile = RING[(P.start + 3) % 52];
       const tx = firstTile[0];
       const tz = firstTile[1];
-      const gVec = new THREE.Vector3(gx, 0.07, gz);
-      const lVec = new THREE.Vector3(lx, 0.07, lz);
+      const gVec = new THREE.Vector3(gx, 0.095, gz);
+      const lVec = new THREE.Vector3(lx, 0.095, lz);
+      const pathDir = lVec.clone().sub(gVec).normalize();
+      const pathStart = gVec.clone().addScaledVector(pathDir, 0.12);
+      const pathLen = Math.max(0.18, pathStart.distanceTo(lVec));
       const gatePath = new THREE.Mesh(
-        new THREE.BoxGeometry(0.54, 0.06, gVec.distanceTo(lVec) + 0.25),
+        new THREE.BoxGeometry(0.54, 0.036, pathLen),
         mat(P.colorLight),
       );
-      gatePath.position.copy(gVec).lerp(lVec, 0.5);
+      gatePath.position.copy(pathStart).lerp(lVec, 0.5);
       gatePath.rotation.y = Math.atan2(lx - gx, lz - gz);
       gatePath.receiveShadow = true;
       scene.add(gatePath);
@@ -1565,28 +2281,30 @@ export function buildAncientWorld(
   centerCap.position.y = 0.125;
   scene.add(centerCap);
 
-  // 四角角楼
+  // 四角角楼（紧贴石台顶面 y=0.08，无悬空）
   for (let j = 0; j < 4; j++) {
     const P = slotPlayer(j);
     const sx = j === 0 || j === 3 ? -1 : 1;
     const sz = j === 0 || j === 1 ? -1 : 1;
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.95, 1.15), brickMat(1.1, 0.8));
-    body.position.y = 0.58;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.04, 1.15), brickMat(1.1, 0.8));
+    body.position.y = 0.52;
+    body.castShadow = true;
+    body.receiveShadow = true;
     g.add(body);
     const band = new THREE.Mesh(new THREE.BoxGeometry(1.36, 0.12, 1.36), merlonMat);
-    band.position.y = 1.12;
+    band.position.y = 1.1;
     g.add(band);
     const roof1 = new THREE.Mesh(new THREE.ConeGeometry(1.12, 0.45, 4), mat(0x46515c, 0.5));
-    roof1.position.y = 1.38;
+    roof1.position.y = 1.36;
     roof1.rotation.y = Math.PI / 4;
     g.add(roof1);
     const roof2 = new THREE.Mesh(new THREE.ConeGeometry(0.75, 0.42, 4), mat(0x3b454f, 0.5));
-    roof2.position.y = 1.68;
+    roof2.position.y = 1.66;
     roof2.rotation.y = Math.PI / 4;
     g.add(roof2);
     const bead = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), trimMat);
-    bead.position.y = 1.94;
+    bead.position.y = 1.92;
     g.add(bead);
     const lantMat = new THREE.MeshStandardMaterial({
       color: 0xe5442b,
@@ -1598,7 +2316,7 @@ export function buildAncientWorld(
       for (const lz of [-1, 1]) {
         const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), lantMat);
         l.scale.y = 0.85;
-        l.position.set(0.74 * lx, 1.02, 0.74 * lz);
+        l.position.set(0.74 * lx, 1.0, 0.74 * lz);
         g.add(l);
       }
     }
@@ -1618,7 +2336,7 @@ export function buildAncientWorld(
       t2.rotation.y = ry;
       g.add(t2);
     });
-    g.position.set(sx * 8.38, 0.12, sz * 8.38);
+    g.position.set(sx * 8.38, 0.08, sz * 8.38);
     scene.add(g);
   }
 
@@ -1628,95 +2346,413 @@ export function buildAncientWorld(
   const swimKois: SwimKoiAnim[] = [];
   const boats: BoatAnim[] = [];
 
-  const furWhite = mat(0xf5f0e8, 0.82);
-  const furCream = mat(0xebd8be, 0.82);
-  const furCocoa = mat(0xc4a484, 0.82);
+  const furWhite = mat(0xfaf6ef, 0.8);
+  const furCream = mat(0xf2e2cb, 0.8);
+  const furCocoa = mat(0xd2b393, 0.8);
   const earPink = mat(0xffb6c8, 0.75);
   const nosePink = mat(0xff8fab, 0.55);
   const eyeDark = mat(0x1f1916, 0.25);
 
+  const eyeShineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const bunnyShadowMat = new THREE.MeshBasicMaterial({
+    color: 0x2a5228,
+    transparent: true,
+    opacity: 0.29,
+    depthWrite: false,
+  });
+
+  const carrotOrangeMat = mat(0xff7a24, 0.58);
+  const carrotLeafMat = mat(0x4ea844, 0.72);
+  const tuftBladeMat = mat(0x56ab48, 0.78);
+  const burrowHoleMat = mat(0x23170e, 0.96);
+  const burrowSoilMat = mat(0x7c5939, 0.92);
+
   const makeCuteBunny = () => {
-    const fur = [furWhite, furCream, furCocoa][(Math.random() * 3) | 0];
+    const palette = [
+      { main: furWhite, belly: furWhite },
+      { main: furCream, belly: furWhite },
+      { main: furCocoa, belly: furCream },
+    ][(Math.random() * 3) | 0];
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 14), fur);
-    body.scale.set(0.95, 0.88, 1.25);
-    body.position.y = 0.15;
-    g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 14), fur);
-    head.scale.set(1.05, 0.95, 1.02);
-    head.position.set(0, 0.29, 0.18);
-    g.add(head);
-    for (const sx of [-1, 1]) {
-      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 10), fur);
-      ear.scale.set(0.75, 2.4, 0.55);
-      ear.position.set(0.058 * sx, 0.46, 0.15);
-      ear.rotation.set(-0.18, 0, 0.22 * sx);
-      g.add(ear);
-      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 8), earPink);
-      inner.scale.set(0.65, 2.0, 0.35);
-      inner.position.set(0, 0, 0.016);
-      ear.add(inner);
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), eyeDark);
-      eye.position.set(0.075 * sx, 0.31, 0.275);
-      g.add(eye);
-      const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 8), earPink);
-      cheek.scale.set(1, 0.6, 0.3);
-      cheek.position.set(0.085 * sx, 0.265, 0.255);
-      g.add(cheek);
-      const paw = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), fur);
-      paw.position.set(0.07 * sx, 0.04, 0.2);
-      g.add(paw);
+
+    // 地面柔影（跳跃时留在草地上并随高度缩放淡出）
+    const shadowDisc = new THREE.Mesh(new THREE.CircleGeometry(0.19, 16), bunnyShadowMat.clone());
+    shadowDisc.rotation.x = -Math.PI / 2;
+    shadowDisc.position.y = 0.012;
+    g.add(shadowDisc);
+
+    // 地面小草丛（吃草动作时显现于嘴前草地）
+    const grassGrp = new THREE.Group();
+    grassGrp.position.set(0, 0.01, 0.25);
+    for (let k = 0; k < 5; k++) {
+      const ba = (k / 5) * Math.PI * 2 + 0.3;
+      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.017, 0.12, 4), tuftBladeMat);
+      blade.position.set(Math.cos(ba) * 0.036, 0.05, Math.sin(ba) * 0.036);
+      blade.rotation.set(Math.sin(ba) * 0.28, 0, -Math.cos(ba) * 0.28);
+      grassGrp.add(blade);
     }
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), nosePink);
-    nose.position.set(0, 0.28, 0.31);
-    g.add(nose);
-    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 10), furWhite);
-    tail.position.set(0, 0.14, -0.22);
-    g.add(tail);
+    grassGrp.visible = false;
+    g.add(grassGrp);
+
+    // 地洞土堆与飞溅土块（打洞钻洞动作时显现）
+    const burrowGrp = new THREE.Group();
+    burrowGrp.position.set(0, 0.014, 0.27);
+    const holeDisc = new THREE.Mesh(new THREE.CircleGeometry(0.165, 16), burrowHoleMat);
+    holeDisc.rotation.x = -Math.PI / 2;
+    holeDisc.position.y = 0.004;
+    burrowGrp.add(holeDisc);
+
+    const soilRim = new THREE.Mesh(new THREE.TorusGeometry(0.175, 0.048, 7, 16), burrowSoilMat);
+    soilRim.rotation.x = Math.PI / 2;
+    soilRim.scale.set(1.06, 1.0, 0.72);
+    soilRim.position.y = 0.008;
+    burrowGrp.add(soilRim);
+
+    const dirtChips: THREE.Mesh[] = [];
+    for (let k = 0; k < 4; k++) {
+      const chip = new THREE.Mesh(new THREE.DodecahedronGeometry(0.025, 0), burrowSoilMat);
+      chip.visible = false;
+      burrowGrp.add(chip);
+      dirtChips.push(chip);
+    }
+    burrowGrp.visible = false;
+    g.add(burrowGrp);
+
+    const bodyPivot = new THREE.Group();
+    bodyPivot.position.set(0, 0.02, 0);
+    g.add(bodyPivot);
+
+    // 梨形圆润臀背 + 蓬松白肚兜
+    const rump = new THREE.Mesh(new THREE.SphereGeometry(0.155, 16, 14), palette.main);
+    rump.scale.set(1.02, 0.94, 1.18);
+    rump.position.set(0, 0.145, -0.045);
+    bodyPivot.add(rump);
+
+    const chest = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 12), palette.main);
+    chest.scale.set(0.95, 0.96, 1.05);
+    chest.position.set(0, 0.155, 0.075);
+    bodyPivot.add(chest);
+
+    const bib = new THREE.Mesh(new THREE.SphereGeometry(0.092, 12, 10), palette.belly);
+    bib.scale.set(0.9, 0.95, 0.68);
+    bib.position.set(0, 0.148, 0.145);
+    bodyPivot.add(bib);
+
+    // 饱满后腿枢轴（跳跃向后蹬腿）
+    const hindPivot = new THREE.Group();
+    hindPivot.position.set(0, 0.09, -0.055);
+    bodyPivot.add(hindPivot);
+    for (const sx of [-1, 1]) {
+      const thigh = new THREE.Mesh(new THREE.SphereGeometry(0.078, 12, 10), palette.main);
+      thigh.scale.set(0.72, 1.02, 1.18);
+      thigh.position.set(0.105 * sx, 0.01, -0.01);
+      hindPivot.add(thigh);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 8), palette.belly);
+      foot.scale.set(0.85, 0.52, 1.68);
+      foot.position.set(0.1 * sx, -0.062, 0.06);
+      hindPivot.add(foot);
+    }
+
+    // 小前爪枢轴（支持捧胡萝卜、刨土打洞）
+    const pawPivots: THREE.Group[] = [];
+    for (const sx of [-1, 1]) {
+      const pawPivot = new THREE.Group();
+      pawPivot.position.set(0.068 * sx, 0.095, 0.135);
+      const arm = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), palette.belly);
+      arm.scale.set(0.82, 1.32, 0.96);
+      arm.position.set(0, -0.04, 0.025);
+      arm.rotation.x = 0.25;
+      pawPivot.add(arm);
+      bodyPivot.add(pawPivot);
+      pawPivots.push(pawPivot);
+    }
+
+    // 捧在双爪间的胡萝卜（吃萝卜动作时显现）
+    const carrotGrp = new THREE.Group();
+    carrotGrp.position.set(0, 0.165, 0.228);
+    const carrotBody = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.145, 8), carrotOrangeMat);
+    carrotBody.rotation.x = -Math.PI * 0.62;
+    carrotGrp.add(carrotBody);
+    for (let k = -1; k <= 1; k++) {
+      const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.055, 5), carrotLeafMat);
+      leaf.position.set(k * 0.013, 0.036, 0.062);
+      leaf.rotation.set(0.65, 0, -k * 0.32);
+      carrotGrp.add(leaf);
+    }
+    carrotGrp.visible = false;
+    bodyPivot.add(carrotGrp);
+
+    // 圆滚棉花糖尾巴
+    const tailPivot = new THREE.Group();
+    tailPivot.position.set(0, 0.135, -0.2);
+    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.062, 12, 10), furWhite);
+    tail.scale.set(1, 0.95, 0.95);
+    tailPivot.add(tail);
+    bodyPivot.add(tailPivot);
+
+    // 灵动小脑袋（可独立歪头、嗅闻）
+    const headPivot = new THREE.Group();
+    headPivot.position.set(0, 0.25, 0.14);
+    bodyPivot.add(headPivot);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.125, 16, 14), palette.main);
+    head.scale.set(1.06, 0.94, 1.02);
+    head.position.set(0, 0.045, 0.03);
+    headPivot.add(head);
+
+    for (const sx of [-1, 1]) {
+      const cheekPuff = new THREE.Mesh(new THREE.SphereGeometry(0.056, 10, 8), palette.main);
+      cheekPuff.scale.set(1.08, 0.85, 0.92);
+      cheekPuff.position.set(0.064 * sx, 0.02, 0.095);
+      headPivot.add(cheekPuff);
+
+      const blush = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 8), earPink);
+      blush.scale.set(1.1, 0.62, 0.32);
+      blush.position.set(0.094 * sx, 0.024, 0.112);
+      headPivot.add(blush);
+
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.021, 10, 10), eyeDark);
+      eye.position.set(0.068 * sx, 0.065, 0.132);
+      headPivot.add(eye);
+
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 6), eyeShineMat);
+      shine.position.set(0.072 * sx + 0.004, 0.073, 0.149);
+      headPivot.add(shine);
+    }
+
+    const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), palette.belly);
+    muzzle.scale.set(1.15, 0.82, 0.85);
+    muzzle.position.set(0, 0.024, 0.142);
+    headPivot.add(muzzle);
+
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 8), nosePink);
+    nose.scale.set(1.25, 0.85, 0.9);
+    nose.position.set(0, 0.036, 0.168);
+    headPivot.add(nose);
+
+    // 双耳独立枢轴（可分别颤动、微垂、扑风向后掠）
+    const earPivots: THREE.Group[] = [];
+    for (const sx of [-1, 1]) {
+      const earPivot = new THREE.Group();
+      earPivot.position.set(0.055 * sx, 0.135, 0.015);
+      earPivot.rotation.set(-0.12, 0, -0.18 * sx);
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.038, 12, 10), palette.main);
+      ear.scale.set(0.76, 2.55, 0.5);
+      ear.position.set(0, 0.085, 0);
+      earPivot.add(ear);
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.023, 10, 8), earPink);
+      inner.scale.set(0.65, 2.05, 0.32);
+      inner.position.set(0, 0.082, 0.014);
+      earPivot.add(inner);
+      headPivot.add(earPivot);
+      earPivots.push(earPivot);
+    }
+
+    g.userData.bodyPivot = bodyPivot;
+    g.userData.headPivot = headPivot;
+    g.userData.earL = earPivots[0];
+    g.userData.earR = earPivots[1];
+    g.userData.pawL = pawPivots[0];
+    g.userData.pawR = pawPivots[1];
+    g.userData.hindPivot = hindPivot;
+    g.userData.tailPivot = tailPivot;
+    g.userData.shadowDisc = shadowDisc;
+    g.userData.carrotGrp = carrotGrp;
+    g.userData.grassGrp = grassGrp;
+    g.userData.burrowGrp = burrowGrp;
+    g.userData.dirtChips = dirtChips;
     g.rotation.y = rnd(0, 6.28);
     return g;
   };
 
-  const birdCols = [mat(0x526475, 0.65), mat(0x7c583c, 0.65), mat(0x3f6e5c, 0.65)];
-  const bellyMat = mat(0xf28b66, 0.7);
-  const beakMat = mat(0xf5b83d, 0.5);
-  const makeCuteBird = () => {
-    const m = birdCols[(Math.random() * 3) | 0];
+  const makeCuteBird = (): { g: THREE.Group; mode: BirdFlightMode; scale: number; dur: number } => {
+    const speciesRoll = Math.random();
+    const species =
+      speciesRoll < 0.24
+        ? 'egret'
+        : speciesRoll < 0.48
+          ? 'swallow'
+          : speciesRoll < 0.72
+            ? 'kingfisher'
+            : speciesRoll < 0.88
+              ? 'oriole'
+              : 'robin';
+
+    const palette = {
+      egret: {
+        back: mat(0xfbf9f4, 0.62),
+        belly: mat(0xf5f2ea, 0.65),
+        wingTip: mat(0xe8e4da, 0.65),
+        beak: mat(0xeba128, 0.45),
+        accent: mat(0xdfdbd0, 0.65),
+        mode: (Math.random() < 0.65 ? 'soar' : 'circle') as BirdFlightMode,
+        scale: rnd(1.12, 1.38),
+        dur: rnd(11, 16),
+      },
+      swallow: {
+        back: mat(0x28364c, 0.52),
+        belly: mat(0xf6f0e4, 0.65),
+        wingTip: mat(0x1f2838, 0.52),
+        beak: mat(0x3a3532, 0.5),
+        accent: mat(0xd86b4a, 0.65),
+        mode: (Math.random() < 0.7 ? 'swoop' : 'bound') as BirdFlightMode,
+        scale: rnd(0.86, 1.05),
+        dur: rnd(7.5, 10.5),
+      },
+      kingfisher: {
+        back: mat(0x1e8fa6, 0.5),
+        belly: mat(0xe6843c, 0.62),
+        wingTip: mat(0x16687c, 0.52),
+        beak: mat(0x2e2a28, 0.45),
+        accent: mat(0x4fc3d9, 0.5),
+        mode: (Math.random() < 0.6 ? 'swoop' : 'bound') as BirdFlightMode,
+        scale: rnd(0.84, 1.02),
+        dur: rnd(8, 11.5),
+      },
+      oriole: {
+        back: mat(0xf2be35, 0.58),
+        belly: mat(0xf9d866, 0.62),
+        wingTip: mat(0x262426, 0.58),
+        beak: mat(0xd96e52, 0.5),
+        accent: mat(0x262426, 0.58),
+        mode: (Math.random() < 0.65 ? 'circle' : 'soar') as BirdFlightMode,
+        scale: rnd(0.95, 1.15),
+        dur: rnd(10, 14),
+      },
+      robin: {
+        back: mat(0x7c5a42, 0.66),
+        belly: mat(0xf08458, 0.68),
+        wingTip: mat(0x5b4230, 0.66),
+        beak: mat(0xf2b942, 0.5),
+        accent: mat(0xefe6d8, 0.68),
+        mode: 'bound' as BirdFlightMode,
+        scale: rnd(0.82, 1.05),
+        dur: rnd(8.5, 12),
+      },
+    }[species];
+
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 12), m);
-    body.scale.set(0.95, 0.88, 1.3);
+    const isEgret = species === 'egret';
+    const isSwallow = species === 'swallow';
+
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 12), palette.back);
+    body.scale.set(isEgret ? 0.72 : 0.92, isEgret ? 0.7 : 0.86, isEgret ? 1.52 : 1.3);
     g.add(body);
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), bellyMat);
-    belly.position.set(0, -0.02, 0.04);
+
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.092, 12, 10), palette.belly);
+    belly.scale.set(0.86, 0.78, 1.12);
+    belly.position.set(0, -0.022, 0.032);
     g.add(belly);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), m);
-    head.position.set(0, 0.08, 0.12);
+
+    if (species === 'swallow') {
+      const throat = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), palette.accent);
+      throat.position.set(0, 0.02, 0.115);
+      g.add(throat);
+    } else if (species === 'oriole') {
+      const mask = new THREE.Mesh(new THREE.SphereGeometry(0.056, 10, 8), palette.accent);
+      mask.scale.set(1.12, 0.75, 0.85);
+      mask.position.set(0, 0.082, 0.145);
+      g.add(mask);
+    } else if (species === 'kingfisher') {
+      const crest = new THREE.Mesh(new THREE.ConeGeometry(0.032, 0.085, 6), palette.accent);
+      crest.rotation.x = -0.65;
+      crest.position.set(0, 0.135, 0.075);
+      g.add(crest);
+    }
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(isEgret ? 0.062 : 0.08, 12, 10),
+      palette.back,
+    );
+    head.position.set(0, isEgret ? 0.115 : 0.08, isEgret ? 0.195 : 0.118);
     g.add(head);
-    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.026, 0.07, 6), beakMat);
+
+    if (isEgret) {
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.036, 0.15, 8), palette.back);
+      neck.rotation.x = 0.88;
+      neck.position.set(0, 0.065, 0.145);
+      g.add(neck);
+      const plume = new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.11, 5), palette.accent);
+      plume.rotation.x = -1.25;
+      plume.position.set(0, 0.13, 0.135);
+      g.add(plume);
+      for (const sx of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.006, 0.28, 5), palette.beak);
+        leg.rotation.x = Math.PI / 2 - 0.06;
+        leg.position.set(0.026 * sx, -0.02, -0.22);
+        g.add(leg);
+      }
+    }
+
+    const beakLen = isEgret ? 0.16 : species === 'kingfisher' ? 0.11 : 0.068;
+    const beak = new THREE.Mesh(
+      new THREE.ConeGeometry(isEgret ? 0.02 : 0.024, beakLen, 6),
+      palette.beak,
+    );
     beak.rotation.x = Math.PI / 2;
-    beak.position.set(0, 0.07, 0.22);
+    beak.position.set(
+      0,
+      isEgret ? 0.108 : 0.072,
+      (isEgret ? 0.195 : 0.118) + beakLen * 0.5 + 0.045,
+    );
     g.add(beak);
+
     for (const sx of [-1, 1]) {
       const e = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), eyeDark);
-      e.position.set(0.05 * sx, 0.1, 0.175);
+      e.position.set(
+        (isEgret ? 0.038 : 0.048) * sx,
+        isEgret ? 0.128 : 0.096,
+        isEgret ? 0.225 : 0.172,
+      );
       g.add(e);
     }
-    const lw = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), m);
-    lw.scale.set(1.4, 0.12, 0.65);
-    lw.position.set(-0.18, 0.02, 0);
-    g.add(lw);
-    const rw = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), m);
-    rw.scale.set(1.4, 0.12, 0.65);
-    rw.position.set(0.18, 0.02, 0);
-    g.add(rw);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.018, 0.14), m);
-    tail.position.set(0, 0.03, -0.18);
-    tail.rotation.x = 0.22;
-    g.add(tail);
+
+    // 肩关节铰链双翼（主翼 + 翼梢飞羽）
+    const wingSpan = isEgret ? 0.34 : isSwallow ? 0.29 : 0.24;
+    const wingChord = isEgret ? 0.15 : isSwallow ? 0.11 : 0.13;
+    const lw = new THREE.Group();
+    lw.position.set(-0.075, 0.025, 0.02);
+    const rw = new THREE.Group();
+    rw.position.set(0.075, 0.025, 0.02);
+    for (const [wg, sx] of [
+      [lw, -1],
+      [rw, 1],
+    ] as const) {
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), palette.back);
+      inner.scale.set(wingSpan, 0.032, wingChord);
+      inner.position.set(sx * wingSpan * 0.45, 0, -0.01);
+      wg.add(inner);
+
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(wingChord * 0.42, wingSpan * 0.58, 5), palette.wingTip);
+      tip.scale.set(1, 1, 0.25);
+      tip.rotation.z = sx * -Math.PI / 2;
+      tip.rotation.y = sx * -0.28;
+      tip.position.set(sx * wingSpan * 0.92, 0, -0.035);
+      wg.add(tip);
+      g.add(wg);
+    }
+
+    // 尾羽（燕子使用标志性剪刀叉尾，其它鸟类为扇形尾羽）
+    if (isSwallow) {
+      for (const sx of [-1, 1]) {
+        const fork = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.2, 4), palette.wingTip);
+        fork.scale.set(0.9, 1, 0.22);
+        fork.rotation.x = -Math.PI / 2 + 0.12;
+        fork.rotation.z = sx * 0.24;
+        fork.position.set(0.035 * sx, 0.022, -0.22);
+        g.add(fork);
+      }
+    } else {
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(isEgret ? 0.11 : 0.09, 0.016, 0.14), palette.wingTip);
+      tail.position.set(0, 0.025, -0.18);
+      tail.rotation.x = 0.18;
+      g.add(tail);
+    }
+
     g.userData.lw = lw;
     g.userData.rw = rw;
-    g.scale.setScalar(rnd(0.85, 1.25));
-    return g;
+    g.scale.setScalar(palette.scale);
+    return { g, mode: palette.mode, scale: palette.scale, dur: palette.dur };
   };
 
   const fMats = [0xff8ab8, 0x67b8e3, 0xffcf56, 0xb896ff].map(
@@ -1756,28 +2792,149 @@ export function buildAncientWorld(
     return g;
   };
 
-  const koiRed = mat(0xf26430, 0.35);
-  const koiWhite = mat(0xfffaf2, 0.35);
-  const koiGold = mat(0xf5b731, 0.35);
-  const makeKoi = () => {
-    const m = Math.random() < 0.5 ? koiRed : koiGold;
+  const koiRed = mat(0xe6643a, 0.48);
+  const koiWhite = mat(0xf4efe4, 0.52);
+  const koiGold = mat(0xe7ac38, 0.48);
+  const koiJade = mat(0x527d78, 0.52);
+  const koiSilver = mat(0xd7e1db, 0.54);
+  const koiInk = mat(0x2d3238, 0.55);
+  const koiFinGold = new THREE.MeshStandardMaterial({
+    color: 0xf4c76b,
+    roughness: 0.55,
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+  });
+  const koiFinWhite = new THREE.MeshStandardMaterial({
+    color: 0xf6f3ea,
+    roughness: 0.55,
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+  });
+
+  const makeKoi = (variantIdx?: number) => {
+    const kindIdx = variantIdx ?? ((Math.random() * 4) | 0);
+    const fishKind = (['kohaku', 'tricolor', 'goldfish', 'jadeCarp'] as const)[kindIdx % 4];
+    const isGoldfish = fishKind === 'goldfish';
+    const baseM =
+      fishKind === 'goldfish'
+        ? koiGold
+        : fishKind === 'jadeCarp'
+          ? koiJade
+          : koiWhite;
+    const patchM =
+      fishKind === 'jadeCarp' ? koiSilver : fishKind === 'goldfish' ? koiRed : koiRed;
+    const finM = fishKind === 'goldfish' ? koiFinGold : koiFinWhite;
+
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), m);
-    body.scale.set(0.62, 0.68, 1.75);
+
+    // 头部微摆枢轴（流线鼻吻 + 双眼）
+    const headPivot = new THREE.Group();
+    headPivot.position.set(0, 0, 0.075);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.072, 12, 10), baseM);
+    head.scale.set(isGoldfish ? 0.92 : 0.76, isGoldfish ? 0.88 : 0.74, 1.08);
+    head.position.set(0, 0, 0.03);
+    headPivot.add(head);
+    if (fishKind === 'kohaku' || fishKind === 'tricolor') {
+      const crownSpot = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 8), patchM);
+      crownSpot.scale.set(0.88, 0.62, 1.05);
+      crownSpot.position.set(0, 0.03, 0.035);
+      headPivot.add(crownSpot);
+    }
+    for (const sx of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.013, 6, 6), eyeDark);
+      eye.position.set((isGoldfish ? 0.048 : 0.039) * sx, 0.018, 0.072);
+      headPivot.add(eye);
+    }
+    g.add(headPivot);
+
+    // 主躯干 + 斑纹 + 背鳍 + 双侧胸鳍
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.095, 14, 12), baseM);
+    body.scale.set(isGoldfish ? 0.84 : 0.68, isGoldfish ? 0.92 : 0.72, isGoldfish ? 1.35 : 1.55);
+    body.position.set(0, 0, 0.01);
     g.add(body);
-    const spot = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), koiWhite);
-    spot.scale.set(0.68, 0.72, 1.1);
-    spot.position.set(0, 0.01, 0.04);
-    g.add(spot);
+
+    const belly = new THREE.Mesh(
+      new THREE.SphereGeometry(0.078, 12, 10),
+      fishKind === 'jadeCarp' ? koiSilver : koiWhite,
+    );
+    belly.scale.set(isGoldfish ? 0.82 : 0.64, 0.62, 1.25);
+    belly.position.set(0, -0.025, 0.015);
+    g.add(belly);
+
+    const saddle = new THREE.Mesh(new THREE.SphereGeometry(0.068, 10, 8), patchM);
+    saddle.scale.set(0.76, 0.56, 1.18);
+    saddle.position.set(0, isGoldfish ? 0.045 : 0.032, 0.02);
+    g.add(saddle);
+
+    if (fishKind === 'tricolor') {
+      const inkSpot = new THREE.Mesh(new THREE.SphereGeometry(0.042, 8, 8), koiInk);
+      inkSpot.scale.set(0.85, 0.6, 0.95);
+      inkSpot.position.set(0.016, 0.035, -0.045);
+      g.add(inkSpot);
+    }
+
+    const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.045, isGoldfish ? 0.12 : 0.09, 4), finM);
+    dorsal.scale.set(0.2, 1, 1.65);
+    dorsal.rotation.x = -0.35;
+    dorsal.position.set(0, isGoldfish ? 0.09 : 0.07, -0.02);
+    g.add(dorsal);
+
+    const finGeo = new THREE.CircleGeometry(isGoldfish ? 0.058 : 0.046, 8);
+    const finL = new THREE.Group();
+    finL.position.set(isGoldfish ? -0.068 : -0.054, -0.016, 0.05);
+    const finR = new THREE.Group();
+    finR.position.set(isGoldfish ? 0.068 : 0.054, -0.016, 0.05);
+    for (const [fg, sx] of [
+      [finL, -1],
+      [finR, 1],
+    ] as const) {
+      const fm = new THREE.Mesh(finGeo, finM);
+      fm.rotation.x = -Math.PI / 2;
+      fm.scale.set(1.25, 0.72, 1);
+      fm.position.set(sx * 0.04, 0, -0.015);
+      fg.add(fm);
+      g.add(fg);
+    }
+
+    // 中段尾柄枢轴 + 尾鳍枢轴（实现真正游动的S型波浪传导）
+    const midPivot = new THREE.Group();
+    midPivot.position.set(0, 0, -0.085);
+    const midBody = new THREE.Mesh(new THREE.SphereGeometry(0.058, 10, 8), baseM);
+    midBody.scale.set(0.56, 0.66, 1.32);
+    midBody.position.set(0, 0, -0.045);
+    midPivot.add(midBody);
+    g.add(midPivot);
+
     const tailPivot = new THREE.Group();
-    tailPivot.position.set(0, 0, -0.18);
-    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.18, 4), m);
-    tail.scale.set(0.22, 1, 1);
-    tail.rotation.x = Math.PI / 2;
-    tail.position.z = -0.07;
-    tailPivot.add(tail);
-    g.add(tailPivot);
+    tailPivot.position.set(0, 0, -0.1);
+    if (isGoldfish) {
+      for (const sx of [-1, 1]) {
+        const lobe = new THREE.Mesh(new THREE.ConeGeometry(0.068, 0.2, 5), finM);
+        lobe.scale.set(0.24, 1, 0.95);
+        lobe.rotation.x = Math.PI / 2;
+        lobe.rotation.z = sx * 0.28;
+        lobe.position.set(0.025 * sx, -0.008, -0.095);
+        tailPivot.add(lobe);
+      }
+    } else {
+      for (const sy of [-1, 1]) {
+        const lobe = new THREE.Mesh(new THREE.ConeGeometry(0.042, 0.145, 4), finM);
+        lobe.scale.set(0.22, 1, 0.85);
+        lobe.rotation.x = Math.PI / 2 - sy * 0.36;
+        lobe.position.set(0, 0.024 * sy, -0.068);
+        tailPivot.add(lobe);
+      }
+    }
+    midPivot.add(tailPivot);
+
+    g.userData.headPivot = headPivot;
+    g.userData.midPivot = midPivot;
     g.userData.tail = tailPivot;
+    g.userData.finL = finL;
+    g.userData.finR = finR;
+    g.scale.setScalar(isGoldfish ? 0.88 : rnd(0.92, 1.12));
     return g;
   };
 
@@ -1812,54 +2969,93 @@ export function buildAncientWorld(
     moatDucks.push({
       g: d,
       th: idx * 3.14 + 0.8,
-      speed: 0.06 * (idx === 0 ? 1 : -1),
-      rOff: idx === 0 ? 0.7 : -0.7,
+      speed: 0.042 * (idx === 0 ? 1 : -1),
+      rOff: idx === 0 ? 0.72 : -0.72,
       bob: idx * 2,
     });
   });
 
+  const swimStyles: FishSwimStyle[] = ['cruise', 'burst', 'dart', 'cruise', 'burst', 'hover'];
   for (let i = 0; i < 6; i++) {
-    const k = makeKoi();
+    const k = makeKoi(i);
     scene.add(k);
+    const baseROff = rnd(-1.05, 1.05);
     swimKois.push({
       g: k,
       th: i * 1.05,
-      speed: (i % 2 ? 1 : -1) * rnd(0.1, 0.15),
-      rOff: rnd(-1.05, 1.05),
+      speed: (i % 2 ? 1 : -1) * rnd(0.022, 0.036),
+      rOff: baseROff,
+      baseROff,
       phase: i * 1.7,
+      swimPhase: i * 1.3,
+      style: swimStyles[i],
     });
   }
 
   const spawnCritter = (kind: 'rabbit' | 'bird' | 'fly' | 'fish') => {
     if (kind === 'rabbit') {
       const g = makeCuteBunny();
-      const a = rnd(0, 6.28);
-      const r = rnd(18.5, 33);
-      g.position.set(Math.cos(a) * r, -0.66, Math.sin(a) * r);
+      let x = 25.0;
+      let z = 6;
+      for (let tTry = 0; tTry < 24; tTry++) {
+        const a = rnd(0, 6.28);
+        const r = rnd(22.1, 30.0);
+        const cx = Math.cos(a) * r;
+        const cz = Math.sin(a) * r;
+        if (r >= moatOuterR(a) + 1.55 && Math.min(Math.abs(cx), Math.abs(cz)) >= 1.85) {
+          x = cx;
+          z = cz;
+          break;
+        }
+      }
+      const baseScale = rnd(0.65, 0.77);
+      g.scale.setScalar(baseScale);
+      g.position.set(x, hillH(x, z), z);
+      const dir = rnd(0, 6.28);
+      g.rotation.y = -dir + Math.PI / 2;
       scene.add(g);
       critters.push({
         kind: 'rabbit',
         g,
-        ttl: rnd(12, 22),
+        ttl: rnd(18, 30),
         state: 'rest',
-        rest: rnd(0.3, 1.2),
+        rest: rnd(0.32, 0.95),
+        stateT: 0,
+        stateDur: 0,
         hopT: 0,
-        hopDur: rnd(0.34, 0.48),
-        dir: rnd(0, 6.28),
+        hopDur: rnd(0.34, 0.45),
+        dir,
+        phase: rnd(0, 6.28),
+        hopH: rnd(0.26, 0.36),
+        baseScale,
       });
     } else if (kind === 'bird') {
-      const g = makeCuteBird();
+      const { g, mode, dur } = makeCuteBird();
       const a = rnd(0, 6.28);
-      const R = rnd(20, 26);
-      const h = rnd(6.5, 11);
+      const R = rnd(24.5, 30.5);
+      const h =
+        mode === 'soar' || mode === 'circle'
+          ? rnd(7.2, 10.6)
+          : mode === 'swoop'
+            ? rnd(6.8, 9.2)
+            : rnd(4.5, 7.2);
       const from = new THREE.Vector3(Math.cos(a) * R, h, Math.sin(a) * R);
       const to = new THREE.Vector3(
-        -from.x + rnd(-8, 8),
-        h + rnd(-1.5, 2),
-        -from.z + rnd(-8, 8),
+        -from.x + rnd(-9, 9),
+        h + rnd(-1.4, 1.8),
+        -from.z + rnd(-9, 9),
       );
+      const midAngle = a + (Math.random() < 0.5 ? 1 : -1) * rnd(0.9, 1.5);
+      const ctrlR = mode === 'swoop' ? rnd(15.0, 19.0) : rnd(10.0, 16.5);
+      const ctrlY =
+        mode === 'swoop'
+          ? rnd(2.5, 3.8)
+          : mode === 'soar'
+            ? h + rnd(1.0, 2.2)
+            : (from.y + to.y) * 0.5 + rnd(-0.6, 1.2);
+      const ctrl = new THREE.Vector3(Math.cos(midAngle) * ctrlR, ctrlY, Math.sin(midAngle) * ctrlR);
       g.position.copy(from);
-      g.lookAt(to);
+      g.lookAt(ctrl);
       scene.add(g);
       critters.push({
         kind: 'bird',
@@ -1867,14 +3063,19 @@ export function buildAncientWorld(
         ttl: 40,
         from,
         to,
+        ctrl,
         prog: 0,
-        dur: rnd(9, 14),
+        dur,
         flap: rnd(0, 6),
+        mode,
+        phase: rnd(0, 6.28),
+        circleR: rnd(13.5, 19.0),
+        circleSpeed: (Math.random() < 0.5 ? 1 : -1) * rnd(4.5, 6.5),
       });
     } else if (kind === 'fly') {
       const g = makeButterfly();
       const a = rnd(0, 6.28);
-      const r = rnd(17.8, 33);
+      const r = rnd(21.5, 36.0);
       const cx = Math.cos(a) * r;
       const cz = Math.sin(a) * r;
       g.position.set(cx, -0.2, cz);
@@ -1889,134 +3090,388 @@ export function buildAncientWorld(
         cz,
       });
     } else {
+      let a = rnd(0, 6.28);
+      let rr = moatChannelR(a, rnd(-0.8, 0.8), 1.05);
+      for (let tTry = 0; tTry < 8; tTry++) {
+        if (Math.min(Math.abs(Math.cos(a) * rr), Math.abs(Math.sin(a) * rr)) >= 1.5) break;
+        a = rnd(0, 6.28);
+        rr = moatChannelR(a, rnd(-0.8, 0.8), 1.05);
+      }
       const g = makeKoi();
-      const a = rnd(0, 6.28);
-      const rr = moatMid(a) + rnd(-0.8, 0.8);
-      g.position.set(Math.cos(a) * rr, -0.54, Math.sin(a) * rr);
-      g.rotation.y = rnd(0, 6.28);
+      g.position.set(Math.cos(a) * rr, WATER_Y - 0.08, Math.sin(a) * rr);
+      g.rotation.y = a + Math.PI / 2;
       scene.add(g);
       critters.push({
         kind: 'fish',
         g,
         ttl: 2,
         prog: 0,
-        h: rnd(0.55, 0.85),
+        h: rnd(0.5, 0.78),
       });
     }
   };
 
   spawnCritter('rabbit');
   spawnCritter('rabbit');
+  spawnCritter('rabbit');
+  spawnCritter('bird');
+  spawnCritter('bird');
 
-  // 小木船
+  // 乌篷画舫小木船与船夫、游船人物
   {
-    const hullGeo = new THREE.BoxGeometry(0.38, 0.16, 1.38);
-    const tipGeo = new THREE.ConeGeometry(0.16, 0.44, 4);
-    const woodMat2 = mat(0x8a643e, 0.75);
-    const woodDark = mat(0x5c422a, 0.8);
-    const canopyMat = mat(0x524538, 0.88);
-    const bodyMat = mat(0x55687a, 0.75);
-    const hatMat = mat(0xd4c291, 0.8);
-    const oarMat = mat(0x7a5c3a, 0.75);
-    const skinMat = mat(0xf0d9b8, 0.65);
-    const hairMat = mat(0x2b2b30, 0.5);
+    const hullW = 0.48;
+    const hullH = 0.16;
+    const hullL = 1.86;
+    const hullGeo = new THREE.BoxGeometry(hullW, hullH, hullL, 10, 4, 28);
+    const hPos = hullGeo.attributes.position;
+    for (let i = 0; i < hPos.count; i++) {
+      let x = hPos.getX(i);
+      let y = hPos.getY(i);
+      const z = hPos.getZ(i);
+      const t = z / (hullL / 2); // -1 stern .. +1 bow
+      const at = Math.min(1, Math.abs(t));
+      const widthTaper = Math.pow(Math.max(0.05, 1 - Math.pow(at, 2.1)), 0.56);
+      const flare = y > 0 ? 1.1 : 0.72;
+      const rocker = 0.145 * Math.pow(at, 2.35);
+      const depthTaper = 1 - 0.38 * Math.pow(at, 2.2);
+      x *= widthTaper * flare;
+      y = y * depthTaper + rocker;
+      hPos.setXYZ(i, x, y, z);
+    }
+    hullGeo.computeVertexNormals();
+
+    const woodMat2 = mat(0x9a6f44, 0.72);
+    const woodDeckMat = mat(0xb88b5a, 0.76);
+    const woodDark = mat(0x5c4028, 0.78);
+    const canopyOuterMat = new THREE.MeshStandardMaterial({
+      color: 0x3b3530,
+      roughness: 0.85,
+      side: THREE.DoubleSide,
+    });
+    const canopyInnerMat = new THREE.MeshStandardMaterial({
+      color: 0x9b744b,
+      roughness: 0.82,
+      side: THREE.DoubleSide,
+    });
+    const bodyMat = mat(0x465e73, 0.72);
+    const pantsMat = mat(0x2d3843, 0.78);
+    const sashRedMat = mat(0xc84d3b, 0.65);
+    const hatMat = mat(0xd8c38a, 0.78);
+    const hatRimMat = mat(0x8e7242, 0.8);
+    const oarMat = mat(0x7c5b37, 0.74);
+    const skinMat = mat(0xf5d9bc, 0.62);
+    const blushMat = mat(0xf39ca3, 0.7);
+    const eyeDark = mat(0x1f1916, 0.25);
+    const hairMat = mat(0x28252a, 0.52);
+    const goldAccent = mat(0xd8b14a, 0.38);
+    const jadeMat = mat(0x6ec2a8, 0.42);
+    const teaPotMat = mat(0x88c2b2, 0.35);
+    const wakeTex = createWakeTexture(anisotropy);
+    const hullFoamTex = createHullFoamTexture(anisotropy);
     const wakeMat = new THREE.MeshBasicMaterial({
-      color: 0xe8fbff,
+      map: wakeTex,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.58,
       side: THREE.DoubleSide,
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const hullFoamMat = new THREE.MeshBasicMaterial({
+      map: hullFoamTex,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
     const lantMat = new THREE.MeshStandardMaterial({
-      color: 0xffb84d,
-      emissive: 0xe88a1a,
-      emissiveIntensity: 0.85,
+      color: 0xffbc4d,
+      emissive: 0xe68419,
+      emissiveIntensity: 0.9,
       roughness: 0.35,
     });
 
-    const makeBoat = (dir: number, passenger?: { cloth: number }) => {
+    const addCuteFace = (parent: THREE.Group, headY: number, zOff: number) => {
+      for (const sx of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0085, 8, 6), eyeDark);
+        eye.position.set(0.02 * sx, headY + 0.004, zOff);
+        parent.add(eye);
+        const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), blushMat);
+        cheek.scale.set(1.1, 0.65, 0.45);
+        cheek.position.set(0.03 * sx, headY - 0.012, zOff - 0.006);
+        parent.add(cheek);
+      }
+    };
+
+    const makeBoat = (dir: number, passenger: { cloth: number; variant: 'scholar' | 'maiden' }) => {
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(hullGeo, woodMat2));
-      const bow = new THREE.Mesh(tipGeo, woodDark);
-      bow.rotation.x = Math.PI / 2;
-      bow.position.z = 0.88;
-      g.add(bow);
-      const stern = new THREE.Mesh(tipGeo, woodDark);
-      stern.rotation.x = -Math.PI / 2;
-      stern.position.z = -0.88;
-      g.add(stern);
-      const awning = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.22, 0.22, 0.62, 12, 1, false, 0, Math.PI),
-        canopyMat,
-      );
-      awning.rotation.set(Math.PI / 2, 0, Math.PI / 2);
-      awning.position.set(0, 0.1, -0.14);
-      g.add(awning);
-      const bowLight = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), lantMat);
-      bowLight.position.set(0, 0.22, 0.72);
-      g.add(bowLight);
 
-      const man = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.22, 8), bodyMat);
-      body.position.y = 0.17;
-      man.add(body);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), skinMat);
-      head.position.y = 0.32;
-      man.add(head);
-      const hat = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.075, 10), hatMat);
-      hat.position.y = 0.38;
-      man.add(hat);
-      man.position.set(0.02, 0.05, 0.24);
-      man.rotation.y = 0.5;
-      g.add(man);
+      // 流畅弯翘木船身 + 内舱木板 + 船舷压条（不再向水底投射浮空黑影）
+      const hull = new THREE.Mesh(hullGeo, woodMat2);
+      hull.castShadow = false;
+      hull.receiveShadow = true;
+      g.add(hull);
 
-      const oar = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.62), oarMat);
-      oar.position.set(0.21, -0.02, -0.06);
-      oar.rotation.set(0.25, 0.6, -0.5);
-      g.add(oar);
+      const deckPlank = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.024, 1.12), woodDeckMat);
+      deckPlank.position.set(0, 0.082, 0);
+      deckPlank.receiveShadow = true;
+      g.add(deckPlank);
 
-      if (passenger) {
-        const p = new THREE.Group();
-        const robe = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.055, 0.095, 0.22, 8),
-          mat(passenger.cloth),
-        );
-        robe.position.y = 0.16;
-        p.add(robe);
-        const ph = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), skinMat);
-        ph.position.y = 0.3;
-        p.add(ph);
-        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 6), hairMat);
-        bun.position.set(0, 0.355, 0.005);
-        p.add(bun);
-        p.position.set(0, 0.05, -0.22);
-        p.rotation.y = -0.35;
-        g.add(p);
+      for (const sx of [-1, 1]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.034, 1.06), woodDark);
+        rail.position.set(0.21 * sx, 0.095, 0);
+        g.add(rail);
+      }
+      for (const bz of [-0.54, 0.14]) {
+        const bench = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.028, 0.14), woodDark);
+        bench.position.set(0, 0.102, bz);
+        g.add(bench);
       }
 
-      const wake = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.9), wakeMat.clone());
+      // 乌篷拱顶（几何体正确沿船身 Z 轴展开、向上拱起，含竹篾拱骨与红穗）
+      const canopyGrp = new THREE.Group();
+      canopyGrp.position.set(0, 0.09, -0.16);
+      const canopyOuterGeo = new THREE.CylinderGeometry(0.225, 0.225, 0.48, 16, 1, true, 0, Math.PI);
+      canopyOuterGeo.rotateZ(Math.PI / 2);
+      canopyOuterGeo.rotateY(Math.PI / 2);
+      const canopyOuter = new THREE.Mesh(canopyOuterGeo, canopyOuterMat);
+      canopyOuter.scale.set(1.0, 1.32, 1);
+      canopyOuter.castShadow = true;
+      canopyGrp.add(canopyOuter);
+
+      const canopyInnerGeo = new THREE.CylinderGeometry(0.208, 0.208, 0.46, 14, 1, true, 0, Math.PI);
+      canopyInnerGeo.rotateZ(Math.PI / 2);
+      canopyInnerGeo.rotateY(Math.PI / 2);
+      const canopyInner = new THREE.Mesh(canopyInnerGeo, canopyInnerMat);
+      canopyInner.scale.set(1.0, 1.3, 1);
+      canopyGrp.add(canopyInner);
+
+      for (const rz of [-0.22, 0, 0.22]) {
+        const rib = new THREE.Mesh(
+          new THREE.TorusGeometry(0.228, 0.011, 6, 18, Math.PI),
+          Math.abs(rz) > 0.18 ? woodDark : hatRimMat,
+        );
+        rib.scale.set(1.0, 1.32, 1);
+        rib.position.z = rz;
+        canopyGrp.add(rib);
+      }
+      for (const sx of [-1, 1]) {
+        const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.016, 0.09, 6), sashRedMat);
+        tassel.position.set(0.165 * sx, 0.18, 0.235);
+        canopyGrp.add(tassel);
+      }
+      g.add(canopyGrp);
+
+      // 船头弯杆暖灯
+      const pole1 = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.012, 0.26, 6), woodDark);
+      pole1.position.set(0.06, 0.2, 0.7);
+      pole1.rotation.x = 0.22;
+      g.add(pole1);
+      const poleArm = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 6), woodDark);
+      poleArm.position.set(0.03, 0.31, 0.76);
+      poleArm.rotation.set(0.25, 0, 0.45);
+      g.add(poleArm);
+      const bowLight = new THREE.Mesh(new THREE.SphereGeometry(0.048, 12, 10), lantMat);
+      bowLight.scale.y = 1.15;
+      bowLight.position.set(0, 0.26, 0.81);
+      g.add(bowLight);
+      for (const ly of [0.31, 0.21]) {
+        const lCap = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.015, 8), goldAccent);
+        lCap.position.set(0, ly, 0.81);
+        g.add(lCap);
+      }
+
+      // 船头小茶席（茶盘 + 青瓷茶壶 + 两只小茶杯）
+      const tray = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.016, 0.13), woodDark);
+      tray.position.set(-0.02, 0.104, 0.4);
+      g.add(tray);
+      const pot = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), teaPotMat);
+      pot.scale.set(1.05, 0.85, 1.05);
+      pot.position.set(-0.02, 0.128, 0.4);
+      g.add(pot);
+      for (const cx of [-0.045, 0.032]) {
+        const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.008, 0.016, 8), hatMat);
+        cup.position.set(cx, 0.12, 0.43);
+        g.add(cup);
+      }
+
+      // 船尾船夫（Q版比例 + 斗笠 + 腰带 + 双臂划桨动画）
+      const man = new THREE.Group();
+      const baseLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.078, 0.088, 0.075, 10), pantsMat);
+      baseLeg.position.y = 0.04;
+      man.add(baseLeg);
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.078, 0.15, 10), bodyMat);
+      torso.position.y = 0.145;
+      torso.castShadow = true;
+      man.add(torso);
+      const sash = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.078, 0.026, 10), sashRedMat);
+      sash.position.y = 0.09;
+      man.add(sash);
+      const mHead = new THREE.Mesh(new THREE.SphereGeometry(0.056, 12, 10), skinMat);
+      mHead.position.y = 0.26;
+      mHead.castShadow = true;
+      man.add(mHead);
+      addCuteFace(man, 0.258, 0.049);
+
+      const hat = new THREE.Mesh(new THREE.ConeGeometry(0.135, 0.068, 16), hatMat);
+      hat.position.y = 0.315;
+      hat.castShadow = true;
+      man.add(hat);
+      const hatTop = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), hatRimMat);
+      hatTop.position.y = 0.35;
+      man.add(hatTop);
+      for (const sx of [-1, 1]) {
+        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.12, 8), bodyMat);
+        arm.position.set(0.065 * sx, 0.165, 0.045);
+        arm.rotation.set(-0.65, 0, -0.25 * sx);
+        man.add(arm);
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), skinMat);
+        hand.position.set(0.08 * sx, 0.125, 0.085);
+        man.add(hand);
+      }
+      man.position.set(-0.02, 0.112, -0.56);
+      man.rotation.y = 0.42;
+      man.scale.setScalar(1.12);
+      g.add(man);
+
+      // 船舷木橹枢轴（实时划桨）
+      const oarLock = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.05, 6), woodDark);
+      oarLock.position.set(0.21, 0.11, -0.46);
+      g.add(oarLock);
+      const oarPivot = new THREE.Group();
+      oarPivot.position.set(0.21, 0.125, -0.46);
+      const oarShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.68, 8), oarMat);
+      oarShaft.rotation.x = Math.PI / 2;
+      oarShaft.position.set(0, -0.05, -0.14);
+      oarShaft.rotation.z = -0.35;
+      oarPivot.add(oarShaft);
+      const oarBlade = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.014, 0.22), woodDark);
+      oarBlade.position.set(0.11, -0.12, -0.44);
+      oarBlade.rotation.set(0.32, -0.3, 0.35);
+      oarPivot.add(oarBlade);
+      g.add(oarPivot);
+
+      // 船舱前端雅士/少女游船人物（安坐于乌篷前口前坐垫，手持折扇或团扇）
+      const p = new THREE.Group();
+      const clothMat = mat(passenger.cloth, 0.68);
+      const cushion = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.115, 0.032, 12), sashRedMat);
+      cushion.position.y = 0.016;
+      p.add(cushion);
+      const lap = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), clothMat);
+      lap.scale.set(1.08, 0.46, 0.95);
+      lap.position.y = 0.052;
+      p.add(lap);
+      const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.082, 0.15, 10), clothMat);
+      robe.position.y = 0.135;
+      robe.castShadow = true;
+      p.add(robe);
+      const pSash = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.072, 0.022, 10),
+        passenger.variant === 'maiden' ? goldAccent : jadeMat,
+      );
+      pSash.position.y = 0.095;
+      p.add(pSash);
+      const pHead = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 10), skinMat);
+      pHead.position.y = 0.25;
+      pHead.castShadow = true;
+      p.add(pHead);
+      addCuteFace(p, 0.246, 0.046);
+
+      const hairCap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.055, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        hairMat,
+      );
+      hairCap.position.set(0, 0.255, -0.004);
+      hairCap.rotation.x = -0.25;
+      p.add(hairCap);
+
+      if (passenger.variant === 'scholar') {
+        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), hairMat);
+        bun.position.set(0, 0.312, -0.008);
+        p.add(bun);
+        const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.085, 6), jadeMat);
+        pin.rotation.z = Math.PI / 2;
+        pin.position.set(0, 0.314, -0.008);
+        p.add(pin);
+        // 手持折扇
+        const fan = new THREE.Mesh(
+          new THREE.CircleGeometry(0.052, 8, 0.25, Math.PI * 0.65),
+          hatMat,
+        );
+        fan.position.set(0.068, 0.145, 0.065);
+        fan.rotation.set(0.3, -0.4, 0.2);
+        p.add(fan);
+      } else {
+        for (const sx of [-1, 1]) {
+          const bun = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), hairMat);
+          bun.position.set(0.046 * sx, 0.292, -0.004);
+          p.add(bun);
+          const flower = new THREE.Mesh(new THREE.SphereGeometry(0.011, 6, 6), blushMat);
+          flower.position.set(0.056 * sx, 0.296, 0.01);
+          p.add(flower);
+        }
+        // 手持团扇
+        const roundFan = new THREE.Mesh(new THREE.CircleGeometry(0.048, 12), hatMat);
+        roundFan.position.set(-0.068, 0.148, 0.068);
+        roundFan.rotation.set(0.25, 0.45, 0);
+        p.add(roundFan);
+        const fanHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.06, 6), woodDark);
+        fanHandle.position.set(-0.062, 0.105, 0.062);
+        p.add(fanHandle);
+      }
+      for (const sx of [-1, 1]) {
+        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.028, 0.1, 8), clothMat);
+        sleeve.position.set(0.058 * sx, 0.145, 0.036);
+        sleeve.rotation.set(-0.7, 0, -0.22 * sx);
+        p.add(sleeve);
+      }
+      p.position.set(0, 0.115, 0.16);
+      p.rotation.y = -0.18;
+      p.scale.setScalar(1.12);
+      g.add(p);
+
+      // 船体吃水线白沫环 + 船尾 V 形水波纹（贴合水面，彻底告别浮空感）
+      const hullFoam = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 1.98), hullFoamMat.clone());
+      hullFoam.rotation.x = -Math.PI / 2;
+      hullFoam.position.set(0, 0.028, 0);
+      hullFoam.renderOrder = 2;
+      g.add(hullFoam);
+
+      const wake = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 1.08), wakeMat.clone());
       wake.rotation.x = -Math.PI / 2;
-      wake.position.set(0, 0.01, -1.15);
+      wake.position.set(0, 0.028, -1.32);
+      wake.renderOrder = 2;
       g.add(wake);
 
+      g.scale.setScalar(1.36);
       g.userData.man = man;
+      g.userData.oar = oarPivot;
+      g.userData.passenger = p;
+      g.userData.hullFoam = hullFoam;
       g.userData.wake = wake;
       boats.push({
         g,
         th: Math.random() * Math.PI * 2,
-        speed: dir * (0.045 + Math.random() * 0.015),
+        speed: dir * (0.04 + Math.random() * 0.012),
         bob: Math.random() * 6,
       });
       scene.add(g);
     };
 
-    makeBoat(1, { cloth: 0xf7f3ec });
-    makeBoat(-1, { cloth: 0x4a9a8a });
+    makeBoat(1, { cloth: 0xf7f3ec, variant: 'scholar' });
+    makeBoat(-1, { cloth: 0x4a9a8a, variant: 'maiden' });
   }
 
   return {
     waterMesh,
     moatTex,
+    waterNormalTex,
+    waterUniforms,
+    waterY: WATER_Y,
     rideToys,
     lotusList,
     willowDrapeList,
@@ -2026,6 +3481,9 @@ export function buildAncientWorld(
     boats,
     critters,
     moatMid,
+    moatOuterR,
+    moatChannelR,
+    hillH,
     spawnCritter,
   };
 }
