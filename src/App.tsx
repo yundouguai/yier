@@ -61,6 +61,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   splashVisible: false,
   shakeKey: 0,
   winnerPid: null,
+  gmDie: null,
   players: [],
 };
 
@@ -195,6 +196,7 @@ export default function App() {
         <GameHUD
           snap={snap}
           showSetup={showSetup}
+          onSetGmDie={(val) => engineRef.current?.setGmDie(val)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onSetCamMode={(mode) => engineRef.current?.setCamMode(mode)}
           onResetView={() => engineRef.current?.resetView()}

@@ -37,6 +37,7 @@ import {
   buildPickHints,
   buildPlaneMesh,
   buildTurnArrow,
+  makePilotPlaneModel,
   makePlaneModel,
 } from './pieces';
 import { WorldRefs, buildAncientWorld } from './world';
@@ -155,6 +156,7 @@ export class FlightChessEngine {
   private camFollowObj: THREE.Object3D | null = null;
   private camUserInteracting = false;
   private winnerPid: number | null = null;
+  private gmNextDie: number | null = null;
   private lastSec = -1;
 
   private message: string | null = null;
@@ -740,6 +742,7 @@ export class FlightChessEngine {
       splashVisible: this.splashVisible,
       shakeKey: this.shakeKey,
       winnerPid: this.winnerPid,
+      gmDie: this.gmNextDie,
       players: this.players.map((pl, i) => ({
         name: pl.name,
         species: pl.species,
@@ -780,6 +783,16 @@ export class FlightChessEngine {
     if (this.phase === 'over' || this.phase === 'idle') return;
     this.paused = !this.paused;
     this.emitSnapshot();
+  }
+
+  public setGmDie(val: number | null): void {
+    if (val !== null && (val < 1 || val > 6)) return;
+    this.gmNextDie = val;
+    this.emitSnapshot();
+    if (val !== null && this.phase === 'awaitRoll' && !this.isAI() && !this.paused && !this.disposed) {
+      ensureAudio();
+      this.doRoll();
+    }
   }
 
   public setPaused(paused: boolean): void {
@@ -971,7 +984,11 @@ export class FlightChessEngine {
     this.clearHL();
     this.emitSnapshot();
 
-    const die = 1 + Math.floor(Math.random() * 6);
+    let die = 1 + Math.floor(Math.random() * 6);
+    if (this.gmNextDie !== null && this.gmNextDie >= 1 && this.gmNextDie <= 6) {
+      die = this.gmNextDie;
+      this.gmNextDie = null;
+    }
     this.die = die;
     await this.animDice(die);
     if (this.disposed) return;
@@ -1167,19 +1184,20 @@ export class FlightChessEngine {
     stack: PlaneData[],
     cFrom: Point2D,
     cTo: Point2D,
-    color: number,
+    _color: number,
     dur: number,
   ): Promise<void> {
     const yaw = Math.atan2(cTo[0] - cFrom[0], cTo[1] - cFrom[1]);
     const flyers = stack.map((p, i) => {
       const off = STACK_OFF[Math.min(i, STACK_OFF.length - 1)];
       p.animating = true;
-      const fp = makePlaneModel(color);
+      const P = this.players[p.pid];
+      const fp = makePilotPlaneModel(P, this.anisotropy);
       const sx = cFrom[0] + off[0];
       const sz = cFrom[1] + off[1];
       const tx = cTo[0] + off[0];
       const tz = cTo[1] + off[1];
-      fp.position.set(sx, 0.12, sz);
+      fp.position.set(sx, 0.14, sz);
       fp.rotation.y = yaw;
       p.mesh.visible = false;
       this.scene.add(fp);
@@ -1195,9 +1213,16 @@ export class FlightChessEngine {
       for (const f of flyers) {
         f.fp.position.x = f.sx + (f.tx - f.sx) * k;
         f.fp.position.z = f.sz + (f.tz - f.sz) * k;
-        f.fp.position.y = 0.12 + Math.sin(k * Math.PI) * 2.0;
+        f.fp.position.y = 0.14 + Math.sin(k * Math.PI) * 2.15;
         f.fp.rotation.y = yaw;
-        f.fp.rotation.x = -Math.sin(k * Math.PI) * 0.35;
+        f.fp.rotation.x = -Math.cos(k * Math.PI) * 0.28;
+        f.fp.rotation.z = Math.sin(k * Math.PI * 4) * 0.08;
+        if (f.fp.userData.propeller) {
+          (f.fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 32;
+        }
+        if (f.fp.userData.pilotHead) {
+          (f.fp.userData.pilotHead as THREE.Group).rotation.z = Math.sin(k * Math.PI * 6) * 0.09;
+        }
       }
     });
 

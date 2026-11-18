@@ -1020,3 +1020,104 @@ export function createHullFoamTexture(anisotropy: number): THREE.CanvasTexture {
 }
 
 
+
+export function createPropellerDiscTexture(anisotropy = 4): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 256, 256);
+
+  const cx = 128;
+  const cy = 128;
+  const R = 118;
+
+  const grad = g.createRadialGradient(cx - 16, cy - 18, 12, cx, cy, R);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.78, '#fdfaf6');
+  grad.addColorStop(1, '#f3ece4');
+
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(cx, cy, R, 0, Math.PI * 2);
+  g.fill();
+
+  g.strokeStyle = '#4a3228';
+  g.lineWidth = 8;
+  g.beginPath();
+  g.arc(cx, cy, R - 4, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = '#4a3228';
+  g.lineCap = 'round';
+  const ringRadii = [44, 64, 84, 101];
+  const groupAngles = [0.25, 2.35, 4.45];
+
+  ringRadii.forEach((r, rIdx) => {
+    g.lineWidth = rIdx === 3 ? 4.2 : 4.8;
+    groupAngles.forEach((baseAng, gIdx) => {
+      const span = 0.52 + (rIdx % 2) * 0.12;
+      const a0 = baseAng + rIdx * 0.11;
+      const a1 = a0 + span;
+      g.beginPath();
+      g.arc(cx, cy, r, a0, a1);
+      g.stroke();
+
+      if ((rIdx + gIdx) % 2 === 0) {
+        g.beginPath();
+        g.arc(cx, cy, r, a1 + 0.14, a1 + 0.26);
+        g.stroke();
+      }
+    });
+  });
+
+  g.fillStyle = 'rgba(74, 50, 40, 0.10)';
+  g.beginPath();
+  g.arc(cx, cy, 20, 0, Math.PI * 2);
+  g.fill();
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
+export function createLandingPadTexture(P: PlayerConfig, anisotropy = 4): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 256, 256);
+
+  const isYier = P.key === 'yier';
+  const mainCol = isYier ? '#553720' : toColorHex(P.color);
+  const ringCol = '#fdf7ea';
+
+  // 底盘圆面
+  g.fillStyle = mainCol;
+  g.beginPath();
+  g.arc(128, 128, 120, 0, Math.PI * 2);
+  g.fill();
+
+  // 停机坪外圈双环与四角刻度线
+  g.strokeStyle = ringCol;
+  g.lineWidth = 12;
+  g.beginPath();
+  g.arc(128, 128, 106, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = 'rgba(253, 247, 234, 0.55)';
+  g.lineWidth = 5;
+  g.setLineDash([18, 12]);
+  g.beginPath();
+  g.arc(128, 128, 86, 0, Math.PI * 2);
+  g.stroke();
+  g.setLineDash([]);
+
+  // 中央醒目停机坪 P 字标识
+  g.fillStyle = ringCol;
+  g.font = '900 132px "Inter", "PingFang SC", "Microsoft YaHei", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(28, 16, 8, 0.35)';
+  g.shadowBlur = 6;
+  g.shadowOffsetY = 3;
+  g.fillText('P', 128, 134);
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}

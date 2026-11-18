@@ -27,6 +27,7 @@ import {
   createMoatTexture,
   createRiverbedTexture,
   createShoreEarthTexture,
+  createLandingPadTexture,
   createStartPadTexture,
   createStoneDeckTexture,
   createWakeTexture,
@@ -2325,22 +2326,82 @@ export function buildAncientWorld(
       cellDisc(t.cx, t.cz, P, 0.245);
     }
     if (i % 13 === 0 && P) {
+      // 终点航道拐弯点：使用平贴格面的 90° 圆弧拐弯箭头（从上一格方向弯折指向终点走廊首格）
       const hc = SLOTS[i / 13].home[0];
-      const arrow = new THREE.Mesh(
-        new THREE.ConeGeometry(0.135, 0.25, 3),
+      const prevTile = RING_TILES[(i + 51) % 52];
+      // uVec: 指向来路方向 (prevTile)，vVec: 指向终点走廊入口 (hc)
+      const uLen = Math.hypot(prevTile.cx - t.cx, prevTile.cz - t.cz) || 1;
+      const uVecX = (prevTile.cx - t.cx) / uLen;
+      const uVecZ = (prevTile.cz - t.cz) / uLen;
+      const vLen = Math.hypot(hc[0] - t.cx, hc[1] - t.cz) || 1;
+      const vVecX = (hc[0] - t.cx) / vLen;
+      const vVecZ = (hc[1] - t.cz) / vLen;
+
+      // 在 (u, v) 局部平面构建 90° 圆角弯折箭头轮廓，再映射到世界 (X, -Z) 平面
+      const toShapeXY = (u: number, v: number): [number, number] => {
+        const wx = u * uVecX + v * vVecX;
+        const wz = u * uVecZ + v * vVecZ;
+        return [wx, -wz];
+      };
+
+      const pts2d: [number, number][] = [];
+      // 箭尾底边与外侧直段 (来自 u 正方向)
+      pts2d.push(toShapeXY(0.165, -0.008));
+      pts2d.push(toShapeXY(0.165, -0.076));
+      pts2d.push(toShapeXY(0.036, -0.076));
+
+      // 外侧 90° 圆弧弯折 (围绕圆心 (0.036, 0.036)，半径 0.112)
+      const arcSteps = 12;
+      for (let k = 1; k <= arcSteps; k++) {
+        const ang = -Math.PI / 2 - (k / arcSteps) * (Math.PI / 2);
+        const u = 0.036 + Math.cos(ang) * 0.112;
+        const v = 0.036 + Math.sin(ang) * 0.112;
+        pts2d.push(toShapeXY(u, v));
+      }
+
+      // 箭头左侧外翼 -> 箭头尖端 (指向 +v 终点航道) -> 箭头右侧内翼
+      pts2d.push(toShapeXY(-0.076, 0.052));
+      pts2d.push(toShapeXY(-0.132, 0.052));
+      pts2d.push(toShapeXY(-0.042, 0.195));
+      pts2d.push(toShapeXY(0.048, 0.052));
+      pts2d.push(toShapeXY(-0.008, 0.052));
+
+      // 内侧 90° 圆弧弯折 (围绕圆心 (0.036, 0.036)，半径 0.044)
+      for (let k = 0; k <= arcSteps; k++) {
+        const ang = -Math.PI + (k / arcSteps) * (Math.PI / 2);
+        const u = 0.036 + Math.cos(ang) * 0.044;
+        const v = 0.036 + Math.sin(ang) * 0.044;
+        pts2d.push(toShapeXY(u, v));
+      }
+
+      const turnShape = new THREE.Shape();
+      turnShape.moveTo(pts2d[0][0], pts2d[0][1]);
+      for (let k = 1; k < pts2d.length; k++) {
+        turnShape.lineTo(pts2d[k][0], pts2d[k][1]);
+      }
+      turnShape.closePath();
+
+      const turnGeo = new THREE.ExtrudeGeometry(turnShape, {
+        depth: 0.012,
+        bevelEnabled: true,
+        bevelThickness: 0.003,
+        bevelSize: 0.003,
+        bevelSegments: 2,
+      });
+      turnGeo.rotateX(-Math.PI / 2);
+
+      const turnArrowMesh = new THREE.Mesh(
+        turnGeo,
         new THREE.MeshStandardMaterial({
           color: lineOf(P),
-          roughness: 0.42,
-          metalness: 0.22,
+          roughness: 0.36,
+          metalness: 0.12,
         }),
       );
-      arrow.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(hc[0] - t.cx, 0, hc[1] - t.cz).normalize(),
-      );
-      arrow.scale.set(1.1, 0.28, 1);
-      arrow.position.set(t.cx, 0.142, t.cz);
-      scene.add(arrow);
+      turnArrowMesh.position.set(t.cx, 0.123, t.cz);
+      turnArrowMesh.castShadow = true;
+      turnArrowMesh.receiveShadow = true;
+      scene.add(turnArrowMesh);
     }
   });
 
@@ -2367,29 +2428,36 @@ export function buildAncientWorld(
     scene.add(line);
 
     const fyaw = Math.atan2(b[0] - a[0], b[1] - a[1]);
-    const planeMark = makePlaneModel(lineOf(P));
-    planeMark.scale.setScalar(0.8);
-    planeMark.position.set(a[0], 0.2, a[1]);
+    const planeMark = makePlaneModel(lineOf(P), P.colorLight, anisotropy, true);
+    planeMark.scale.setScalar(0.86);
+    planeMark.position.set(a[0], 0.22, a[1]);
     planeMark.rotation.y = fyaw;
     scene.add(planeMark);
 
-    const d = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.155),
+    // 飞机航线落点：使用停机坪「P」字圆盘标识替代原先的八面体三角堆
+    const pPadTop = new THREE.Mesh(
+      new THREE.CircleGeometry(0.225, 32),
       new THREE.MeshStandardMaterial({
-        color: lineOf(P),
-        roughness: 0.38,
-        metalness: 0.28,
+        map: createLandingPadTexture(P, anisotropy),
+        roughness: 0.48,
       }),
     );
-    d.scale.y = 0.36;
-    d.rotation.y = Math.PI / 4;
-    d.position.set(b[0], 0.158, b[1]);
-    scene.add(d);
+    pPadTop.rotation.x = -Math.PI / 2;
+    pPadTop.position.set(b[0], 0.124, b[1]);
+    pPadTop.receiveShadow = true;
+    scene.add(pPadTop);
 
-    const dRing = new THREE.Mesh(new THREE.RingGeometry(0.155, 0.195, 20), slateTrimMat);
-    dRing.rotation.x = -Math.PI / 2;
-    dRing.position.set(b[0], 0.123, b[1]);
-    scene.add(dRing);
+    const pPadRim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.228, 0.012, 8, 32),
+      new THREE.MeshStandardMaterial({
+        color: lineOf(P),
+        roughness: 0.42,
+        metalness: 0.15,
+      }),
+    );
+    pPadRim.rotation.x = -Math.PI / 2;
+    pPadRim.position.set(b[0], 0.125, b[1]);
+    scene.add(pPadRim);
   });
 
   players.forEach((P) =>

@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CameraMode, GameHudSnapshot, HUD_PIPS } from '../game/constants';
 
 interface GameHUDProps {
   snap: GameHudSnapshot;
   showSetup: boolean;
+  onSetGmDie: (val: number | null) => void;
   onActionPod: () => void;
   onSetCamMode: (mode: CameraMode) => void;
   onResetView: () => void;
@@ -14,6 +15,7 @@ interface GameHUDProps {
 export const GameHUD: React.FC<GameHUDProps> = ({
   snap,
   showSetup,
+  onSetGmDie,
   onActionPod,
   onSetCamMode,
   onResetView,
@@ -22,6 +24,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 }) => {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [gmOpen, setGmOpen] = useState(false);
+  const secretTapCount = useRef(0);
+  const secretTapTimer = useRef<number | null>(null);
+
+  const handleSecretTap = () => {
+    secretTapCount.current += 1;
+    if (secretTapTimer.current !== null) {
+      window.clearTimeout(secretTapTimer.current);
+    }
+    if (secretTapCount.current >= 5) {
+      secretTapCount.current = 0;
+      setGmOpen((v) => !v);
+      return;
+    }
+    secretTapTimer.current = window.setTimeout(() => {
+      secretTapCount.current = 0;
+    }, 1400);
+  };
 
   useEffect(() => {
     if (!rulesOpen) return;
@@ -191,6 +211,46 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
         {/* Bottom-center focal point: Turn Owner + Action/Event Pills side-by-side above Dice Pod */}
         <div className="pointer-events-auto absolute bottom-3 md:bottom-4 left-1/2 -translate-x-1/2 flex max-w-[calc(100vw-20px)] flex-col items-center gap-1.5">
+          {gmOpen && (
+            <div className="anim-card-pop mb-0.5 flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
+              <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 border border-emerald-400/30">
+                GM 控骰
+              </span>
+              <button
+                type="button"
+                onClick={() => onSetGmDie(null)}
+                className={`rounded-lg px-2 py-1 text-[11px] font-bold transition cursor-pointer ${
+                  snap.gmDie === null
+                    ? 'bg-emerald-500 text-white shadow-sm'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                随机
+              </button>
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => onSetGmDie(n)}
+                  className={`h-7 w-7 rounded-lg font-mono text-xs font-extrabold transition cursor-pointer ${
+                    snap.gmDie === n
+                      ? 'bg-emerald-500 text-white ring-2 ring-emerald-300 shadow-sm'
+                      : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setGmOpen(false)}
+                className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white cursor-pointer"
+                title="关闭 GM 面板"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <div className="flex max-w-full items-center justify-center gap-1.5 md:gap-2">
             <div
               className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-3 md:px-4 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
@@ -262,9 +322,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 ))}
               </button>
 
-              <div className="min-w-[56px] text-xs leading-snug text-slate-600 tabular-nums">
-                <b className="block text-[15px] text-slate-900">
-                  {snap.die !== null ? `点数 ${snap.die}` : '点数 -'}
+              <div
+                onClick={handleSecretTap}
+                className="min-w-[56px] text-xs leading-snug text-slate-600 tabular-nums select-none cursor-default"
+              >
+                <b className="flex items-center gap-1 text-[15px] text-slate-900">
+                  <span>{snap.die !== null ? `点数 ${snap.die}` : '点数 -'}</span>
+                  {snap.gmDie !== null && (
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  )}
                 </b>
                 连6 ×{snap.sixChain}
               </div>

@@ -104,6 +104,7 @@ export interface GameHudSnapshot {
   splashVisible: boolean;
   shakeKey: number;
   winnerPid: number | null;
+  gmDie: number | null;
   players: HudPlayerSnapshot[];
 }
 
