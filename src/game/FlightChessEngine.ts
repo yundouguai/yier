@@ -23,6 +23,7 @@ import {
   Point2D,
   RING,
   SEAT_ORDER,
+  SLOTS,
   STACK_OFF,
   SeatConfig,
   lineOf,
@@ -110,7 +111,7 @@ export class FlightChessEngine {
   private timeMs = 0;
   private paused = false;
   private deadline: number | null = null;
-  private camMode: CameraMode = 'free';
+  private camMode: CameraMode = 'follow';
   private camGoalActive = false;
   private camGoalTarget = new THREE.Vector3(0, 0.06, 1.15);
   private camGoalSpherical = new THREE.Spherical(16.4, 0.96, 0.18);
@@ -400,42 +401,7 @@ export class FlightChessEngine {
   }
 
   private getSlot(slotId: number) {
-    const q = slotId;
-    const BASE_YAWS = [Math.PI / 2, 0, -Math.PI / 2, Math.PI];
-    const rotCW = ([x, z]: Point2D, qq: number): Point2D => {
-      if (qq === 0) return [x, z];
-      if (qq === 1) return [-z, x];
-      if (qq === 2) return [-x, -z];
-      return [z, -x];
-    };
-    return {
-      slotId: q,
-      start: q * 13,
-      court: rotCW([-5.68, -5.68], q),
-      launch: rotCW([-7.08, -3.28], q),
-      gate: rotCW([-6.85, -3.77], q),
-      gateAxis: (q % 2 === 0 ? 'z' : 'x') as 'x' | 'z',
-      home: (
-        [
-          [-5.26, 0],
-          [-4.4, 0],
-          [-3.54, 0],
-          [-2.68, 0],
-          [-1.82, 0],
-        ] as Point2D[]
-      ).map((p) => rotCW(p, q)),
-      final: rotCW([-0.86, 0], q),
-      base: (
-        [
-          [-6.88, -6.88],
-          [-5.62, -6.88],
-          [-6.88, -5.62],
-          [-5.62, -5.62],
-        ] as Point2D[]
-      ).map((p) => rotCW(p, q)),
-      toy: rotCW([-4.42, -4.42], q),
-      finalYaw: BASE_YAWS[q],
-    };
+    return SLOTS[slotId];
   }
 
   private fitOrientation(): void {
@@ -457,11 +423,11 @@ export class FlightChessEngine {
     const h = window.innerHeight || 720;
     const aspect = w / h;
     if (h > w) {
-      const radius = THREE.MathUtils.clamp(20.6 / Math.max(0.55, aspect * 1.12), 18.2, 24.0);
-      return { radius, phi: 0.9, targetPull: 1.15 };
+      const radius = THREE.MathUtils.clamp(18.6 / Math.max(0.55, aspect * 1.12), 16.4, 21.6);
+      return { radius, phi: 0.92, targetPull: 1.0 };
     }
-    const radius = aspect < 1.35 ? 17.8 : 16.4;
-    return { radius, phi: 0.96, targetPull: 1.45 };
+    const radius = aspect < 1.35 ? 16.0 : 14.8;
+    return { radius, phi: 0.96, targetPull: 1.3 };
   }
 
   private getHomeCameraPose(): {
@@ -548,7 +514,7 @@ export class FlightChessEngine {
     return this.players.find((P) => P.slotId === j);
   }
 
-  private setMsg(t: string, color?: string | null, duration = 2400): void {
+  private setMsg(t: string, color?: string | null, duration = 3200): void {
     this.message = t;
     this.messageColor = color ?? (this.cur() ? this.cur().uiColor : null);
     this.messageKey++;
@@ -806,15 +772,24 @@ export class FlightChessEngine {
     sndRoll();
     this.hudDieRolling = true;
     this.emitSnapshot();
-    const rx = Math.random() * 8 - 4;
-    const rz = Math.random() * 8 - 4;
+    const sx = this.diceRig.dice.rotation.x;
+    const sy = this.diceRig.dice.rotation.y;
+    const sz = this.diceRig.dice.rotation.z;
+    const [tx, ty, tz] = ORIENT[die];
+    const dirX = Math.random() < 0.5 ? 1 : -1;
+    const dirY = Math.random() < 0.5 ? 1 : -1;
+    const dirZ = Math.random() < 0.5 ? 1 : -1;
+    const turnsX = (5 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dirX;
+    const turnsY = (4 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dirY;
+    const turnsZ = (4 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dirZ;
     let lastHudTick = 0;
-    await this.tween(840, (t) => {
-      this.diceRig.dice.rotation.x = t * Math.PI * 4 + rx;
-      this.diceRig.dice.rotation.y = t * Math.PI * 2.6;
-      this.diceRig.dice.rotation.z = t * Math.PI * 3.2 + rz;
-      this.diceRig.dice.position.y = 3.8 + Math.sin(t * Math.PI) * 1.15;
-      if (t - lastHudTick > 0.12) {
+    await this.tween(1650, (t) => {
+      const ease = 1 - Math.pow(1 - t, 3);
+      this.diceRig.dice.rotation.x = THREE.MathUtils.lerp(sx, tx + turnsX, ease);
+      this.diceRig.dice.rotation.y = THREE.MathUtils.lerp(sy, ty + turnsY, ease);
+      this.diceRig.dice.rotation.z = THREE.MathUtils.lerp(sz, tz + turnsZ, ease);
+      this.diceRig.dice.position.y = 0.4 + Math.sin(t * Math.PI) * 1.45;
+      if (t < 0.9 && t - lastHudTick > 0.1) {
         lastHudTick = t;
         this.hudDieFace = 1 + Math.floor(Math.random() * 6);
         this.emitSnapshot();
@@ -823,10 +798,11 @@ export class FlightChessEngine {
     if (this.disposed) return;
     this.hudDieRolling = false;
     this.diceRig.dice.rotation.set(...ORIENT[die]);
-    this.diceRig.dice.position.y = 3.8;
+    this.diceRig.dice.position.y = 0.4;
     this.hudDieFace = die;
     this.hudDiePopKey++;
     this.emitSnapshot();
+    await this.sleep(150);
   }
 
   private async doRoll(): Promise<void> {
@@ -863,13 +839,13 @@ export class FlightChessEngine {
     const cands = this.movablePlanes(this.turn, die);
     if (cands.length === 0) {
       this.setMsg(`🎲 掷出 ${die} 点，暂无可移动飞机`);
-      await this.sleep(1400);
+      await this.sleep(1000);
       if (!this.disposed) this.endTurn(die === 6);
       return;
     }
     if (this.isAI()) {
       this.emitSnapshot();
-      await this.sleep(1100);
+      await this.sleep(1350);
       if (!this.disposed) await this.performMove(this.aiPick(cands).plane, die);
     } else {
       this.phase = 'awaitMove';
@@ -933,7 +909,7 @@ export class FlightChessEngine {
     const pt = m.userData.parts as PlaneParts;
     const baseYaw = this.players[plane.pid].finalYaw;
     this.spawnImpact(m.position.x, m.position.z);
-    await this.tween(820, (t) => {
+    await this.tween(1300, (t) => {
       const hop = Math.abs(Math.sin(t * Math.PI * 2));
       m.position.y = 0.12 + hop * 0.55;
       m.rotation.y = baseYaw + t * Math.PI * 2;
@@ -958,7 +934,7 @@ export class FlightChessEngine {
     const sz = m.position.z;
     const syaw = m.rotation.y;
 
-    await this.tween(780, (k) => {
+    await this.tween(1250, (k) => {
       m.position.x = sx + (x - sx) * k;
       m.position.z = sz + (z - sz) * k;
       m.position.y = sy + Math.sin(k * Math.PI) * 3.2;
@@ -1057,12 +1033,7 @@ export class FlightChessEngine {
     });
 
     const prevFollowObj = this.camFollowObj;
-    if (
-      this.camMode === 'follow' &&
-      this.camFollowPlane &&
-      stack.includes(this.camFollowPlane) &&
-      flyers[0]
-    ) {
+    if (this.camFollowPlane && stack.includes(this.camFollowPlane) && flyers[0]) {
       this.camFollowObj = flyers[0].fp;
     }
 
@@ -1137,10 +1108,8 @@ export class FlightChessEngine {
     this.phase = 'moving';
     this.deadline = null;
     this.clearHL();
-    if (this.camMode === 'follow' && !this.camUserInteracting) {
-      this.camFollowPlane = plane;
-      this.camFollowObj = plane.mesh;
-    }
+    this.camFollowPlane = plane;
+    this.camFollowObj = plane.mesh;
     this.emitSnapshot();
 
     const P = this.players[plane.pid];
@@ -1174,9 +1143,10 @@ export class FlightChessEngine {
         c[1] + o[1],
         this.faceTravelDir(plane),
         0.95,
-        440,
+        820,
         1,
       );
+      await this.sleep(320);
     } else {
       let curStep = plane.pos;
       let dir = 1;
@@ -1187,8 +1157,12 @@ export class FlightChessEngine {
         const c = this.posToCell(P, curStep);
         const yaw = curStep === HOME_END ? P.finalYaw : this.faceTravelDir(plane);
         sndHop();
-        await hopAll(c, yaw, 0.5, 220, i % 2 === 0 ? 1 : -1);
+        await hopAll(c, yaw, 0.5, 460, i % 2 === 0 ? 1 : -1);
         if (this.disposed) return;
+        if (i < die - 1) {
+          await this.sleep(80);
+          if (this.disposed) return;
+        }
       }
       if (dir === -1) {
         this.setMsg(`↩️ 点数超出，回弹至航道第 ${curStep - 50} 格`);
@@ -1196,6 +1170,8 @@ export class FlightChessEngine {
       await this.captureAt(plane);
 
       if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
+        await this.sleep(320);
+        if (this.disposed) return;
         if (plane.pos === FLIGHT_FROM) {
           this.setMsg('🌀 踏上飞行航线，直飞对面！');
           sndCap();
@@ -1203,14 +1179,16 @@ export class FlightChessEngine {
           setPos(plane.pos + FLIGHT_STEP);
           const cTo = this.posToCell(P, plane.pos);
           await Promise.all([
-            this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 1250),
+            this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 2200),
             new Promise<void>((res) =>
-              this.after(550, () => {
+              this.after(980, () => {
                 this.captureFlyCross(plane.pid).then(res);
               }),
             ),
           ]);
           await this.captureAt(plane);
+          await this.sleep(320);
+          if (this.disposed) return;
           this.setMsg('⚡ 同色顺风再跳 4 格！');
           beep(540, 0.12, 'triangle', 0.14);
           setPos(plane.pos + 4);
@@ -1218,7 +1196,7 @@ export class FlightChessEngine {
             this.posToCell(P, plane.pos),
             this.faceTravelDir(plane),
             1.15,
-            400,
+            820,
             1,
           );
           await this.captureAt(plane);
@@ -1230,20 +1208,22 @@ export class FlightChessEngine {
             this.posToCell(P, plane.pos),
             this.faceTravelDir(plane),
             1.15,
-            400,
+            820,
             1,
           );
           await this.captureAt(plane);
           if (plane.pos === FLIGHT_FROM) {
+            await this.sleep(320);
+            if (this.disposed) return;
             this.setMsg('🌀 连跳触发飞行航线，直飞对面！');
             sndCap();
             const cFrom = this.posToCell(P, plane.pos);
             setPos(plane.pos + FLIGHT_STEP);
             const cTo = this.posToCell(P, plane.pos);
             await Promise.all([
-              this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 1250),
+              this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 2200),
               new Promise<void>((res) =>
-                this.after(550, () => {
+                this.after(980, () => {
                   this.captureFlyCross(plane.pid).then(res);
                 }),
               ),
@@ -1254,6 +1234,22 @@ export class FlightChessEngine {
       }
     }
 
+    if (this.disposed) return;
+    if (plane.pos === HOME_END) {
+      beep(784, 0.2, 'triangle', 0.16);
+      this.setMsg('🏁 一架飞机到达终点！');
+      await Promise.all(stack.map((p) => this.celebrateGoal(p)));
+    }
+    this.relayout();
+    this.emitSnapshot();
+    if (this.planesOf(plane.pid).every((p) => p.pos === HOME_END)) {
+      this.camFollowPlane = null;
+      this.camFollowObj = null;
+      this.showWin(plane.pid);
+      return;
+    }
+    await this.sleep(500);
+    if (this.disposed) return;
     if (this.camFollowPlane && this.camMode === 'follow' && !this.camUserInteracting) {
       const home = this.getHomeCameraPose();
       _scratchCamOffset.copy(this.camera.position).sub(this.controls.target);
@@ -1269,18 +1265,6 @@ export class FlightChessEngine {
     }
     this.camFollowPlane = null;
     this.camFollowObj = null;
-    if (this.disposed) return;
-    if (plane.pos === HOME_END) {
-      beep(784, 0.2, 'triangle', 0.16);
-      this.setMsg('🏁 一架飞机到达终点！');
-      await Promise.all(stack.map((p) => this.celebrateGoal(p)));
-    }
-    this.relayout();
-    this.emitSnapshot();
-    if (this.planesOf(plane.pid).every((p) => p.pos === HOME_END)) {
-      this.showWin(plane.pid);
-      return;
-    }
     this.endTurn(die === 6 || plane.pos === HOME_END);
   }
 
@@ -1313,10 +1297,10 @@ export class FlightChessEngine {
       _scratchCamOffset.copy(this.camera.position).sub(this.controls.target);
       _scratchCamSpherical.setFromVector3(_scratchCamOffset);
       this.setCamGoal(
-        home.tx * 0.72 + P.court[0] * 0.24,
+        home.tx * 0.55 + P.court[0] * 0.45,
         home.ty,
-        home.tz * 0.72 + P.court[1] * 0.24,
-        home.radius * 0.94,
+        home.tz * 0.55 + P.court[1] * 0.45,
+        home.radius * 0.78,
         home.phi,
         _scratchCamSpherical.theta,
       );
@@ -1329,7 +1313,7 @@ export class FlightChessEngine {
       this.phase = 'aiWait';
       this.deadline = null;
       this.emitSnapshot();
-      this.after(1500, () => this.doRoll());
+      this.after(2000, () => this.doRoll());
     } else {
       this.phase = 'awaitRoll';
       this.deadline = this.timeMs + TIMEOUT;
@@ -1612,32 +1596,41 @@ export class FlightChessEngine {
       });
 
       const targetDiceScale =
-        this.phase === 'awaitRoll' && !this.isAI() && this.diceHovered ? 1.52 : 1.35;
+        this.phase === 'awaitRoll' && !this.isAI() && this.diceHovered ? 0.58 : 0.52;
       _scratchDiceScale.set(targetDiceScale, targetDiceScale, targetDiceScale);
       this.diceRig.dice.scale.lerp(_scratchDiceScale, Math.min(1, dt * 12));
 
       if (this.diceRig.diceHint.visible) {
-        const br = 0.5 + 0.5 * Math.sin(t * 2.6);
-        (this.diceRig.dhGlow.material as THREE.MeshBasicMaterial).opacity =
-          (this.diceHovered ? 0.22 : 0.08) + br * 0.14;
-        this.diceRig.dhGlow.scale.setScalar(1 + br * 0.12);
-        (this.diceRig.dhRingH.material as THREE.MeshBasicMaterial).opacity = 0.35 + br * 0.5;
-        (this.diceRig.dhRingV.material as THREE.MeshBasicMaterial).opacity = 0.35 + br * 0.5;
-        this.diceRig.dhRingV.rotation.y += dt * 1.2;
-        this.diceRig.dhSparks.forEach((s) => {
-          const u = s.userData as { a: number; sp: number; r: number; ph: number };
-          u.a += dt * u.sp;
-          s.position.set(
-            Math.cos(u.a) * u.r,
-            Math.sin(t * 1.8 + u.ph) * 0.55,
-            Math.sin(u.a) * u.r,
-          );
-        });
+        const pulse = 0.5 + 0.5 * Math.sin(t * 2.8);
+        const rippleCycle = (t * 0.55) % 1;
+        this.diceRig.dhRing.scale.setScalar(
+          (this.diceHovered ? 1.08 : 1.0) + pulse * 0.05,
+        );
+        (this.diceRig.dhRing.material as THREE.MeshBasicMaterial).opacity =
+          (this.diceHovered ? 0.88 : 0.62) + pulse * 0.2;
+        this.diceRig.dhRipple.scale.setScalar(1 + rippleCycle * 0.62);
+        (this.diceRig.dhRipple.material as THREE.MeshBasicMaterial).opacity =
+          (1 - rippleCycle) * (this.diceHovered ? 0.52 : 0.36);
+
+        const idleFloatY =
+          0.4 + (this.diceHovered ? 0.08 : 0.03) + Math.sin(t * 2.8) * 0.025;
+        this.diceRig.dice.position.y = THREE.MathUtils.lerp(
+          this.diceRig.dice.position.y,
+          idleFloatY,
+          Math.min(1, dt * 10),
+        );
         this.diceRig.diceMaterials.forEach((m) => {
-          m.emissive.setHex(0xcc8a00);
-          m.emissiveIntensity = (this.diceHovered ? 0.35 : 0.15) + br * 0.35;
+          m.emissive.setHex(0xfff4d8);
+          m.emissiveIntensity = this.diceHovered ? 0.12 : 0.04;
         });
       } else {
+        if (this.phase !== 'rolling') {
+          this.diceRig.dice.position.y = THREE.MathUtils.lerp(
+            this.diceRig.dice.position.y,
+            0.4,
+            Math.min(1, dt * 12),
+          );
+        }
         this.diceRig.diceMaterials.forEach((m) => {
           m.emissiveIntensity = 0;
         });
@@ -1650,9 +1643,12 @@ export class FlightChessEngine {
         }
       });
 
-      const hd = this.diceRig.dice.position.y - 2.8;
-      (this.diceRig.diceShadow.material as THREE.MeshBasicMaterial).opacity = 0.3 - 0.06 * hd;
-      this.diceRig.diceShadow.scale.setScalar(1 + 0.08 * hd);
+      const hd = this.diceRig.dice.position.y - 0.4;
+      (this.diceRig.diceShadow.material as THREE.MeshBasicMaterial).opacity = Math.max(
+        0.06,
+        0.28 - 0.12 * hd,
+      );
+      this.diceRig.diceShadow.scale.setScalar(1 + 0.15 * hd);
 
       for (let i = this.world.critters.length - 1; i >= 0; i--) {
         const c = this.world.critters[i];
@@ -1804,13 +1800,13 @@ export class FlightChessEngine {
       _scratchCamOffset.copy(this.camera.position).sub(this.controls.target);
       _scratchCamSpherical.setFromVector3(_scratchCamOffset);
       this.camGoalTarget.set(
-        home.tx * 0.35 + pos.x * 0.65,
-        home.ty + Math.min(Math.max(pos.y - 0.12, 0) * 0.35, 0.8),
-        home.tz * 0.35 + pos.z * 0.65,
+        pos.x,
+        0.25 + Math.min(Math.max(pos.y - 0.12, 0) * 0.55, 1.1),
+        pos.z,
       );
       this.camGoalSpherical.set(
-        THREE.MathUtils.clamp(home.radius * 0.78, 5.5, 32),
-        0.88,
+        THREE.MathUtils.clamp(home.radius * 0.48, 6.8, 9.2),
+        0.94,
         _scratchCamSpherical.theta,
       );
       this.camGoalActive = true;
@@ -1818,7 +1814,7 @@ export class FlightChessEngine {
 
     if (!this.camGoalActive) return;
 
-    const rate = this.camMode === 'follow' && this.camFollowPlane ? 5.2 : 3.8;
+    const rate = this.camMode === 'follow' && this.camFollowPlane ? 7.0 : 3.8;
     const alpha = 1 - Math.exp(-rate * Math.min(dt, 0.1));
     this.controls.target.lerp(this.camGoalTarget, alpha);
 

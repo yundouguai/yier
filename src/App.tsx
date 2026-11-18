@@ -50,7 +50,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   sixChain: 0,
   movableCount: 0,
   paused: false,
-  camMode: 'free',
+  camMode: 'follow',
   secondsLeft: null,
   message: null,
   messageColor: null,

@@ -279,19 +279,19 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
       }),
   );
   const dice = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), diceMaterials);
-  dice.position.set(0, 3.8, 0);
-  dice.scale.setScalar(1.35);
-  dice.castShadow = false;
+  dice.position.set(0, 0.4, 0);
+  dice.scale.setScalar(0.52);
+  dice.castShadow = true;
   scene.add(dice);
 
   const diceHitMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1.15, 12, 10),
+    new THREE.SphereGeometry(0.95, 12, 10),
     new THREE.MeshBasicMaterial({ visible: false }),
   );
   dice.add(diceHitMesh);
 
   const diceShadow = new THREE.Mesh(
-    new THREE.CircleGeometry(1.15, 24),
+    new THREE.CircleGeometry(0.36, 24),
     new THREE.MeshBasicMaterial({
       color: 0x14231c,
       transparent: true,
@@ -300,42 +300,36 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
     }),
   );
   diceShadow.rotation.x = -Math.PI / 2;
-  diceShadow.position.set(0, 0.21, 0);
+  diceShadow.position.set(0, 0.156, 0);
   scene.add(diceShadow);
 
   const diceHint = new THREE.Group();
-  diceHint.position.set(0, 3.8, 0);
-  diceHint.scale.setScalar(1.35);
+  diceHint.position.set(0, 0.162, 0);
   scene.add(diceHint);
 
-  const dhMat = (op = 0.5) =>
-    new THREE.MeshBasicMaterial({
-      color: 0xffc83d,
-      transparent: true,
-      opacity: op,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-  const dhGlow = new THREE.Mesh(new THREE.SphereGeometry(1.08, 24, 18), dhMat(0.12));
-  diceHint.add(dhGlow);
-  const dhRingH = new THREE.Mesh(new THREE.TorusGeometry(0.98, 0.035, 10, 48), dhMat(0.5));
-  dhRingH.rotation.x = -Math.PI / 2;
-  diceHint.add(dhRingH);
-  const dhRingV = new THREE.Mesh(new THREE.TorusGeometry(0.98, 0.035, 10, 48), dhMat(0.5));
-  diceHint.add(dhRingV);
+  const dhRingMat = new THREE.MeshBasicMaterial({
+    color: 0x3aa66b,
+    transparent: true,
+    opacity: 0.78,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const dhRing = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.52, 36), dhRingMat);
+  dhRing.rotation.x = -Math.PI / 2;
+  diceHint.add(dhRing);
 
-  const dhSparks: THREE.Mesh[] = [];
-  for (let i = 0; i < 10; i++) {
-    const s = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), dhMat(0.9));
-    s.userData = {
-      a: (i / 10) * Math.PI * 2,
-      sp: 0.9 + Math.random() * 0.5,
-      r: 0.95 + Math.random() * 0.18,
-      ph: Math.random() * Math.PI * 2,
-    };
-    diceHint.add(s);
-    dhSparks.push(s);
-  }
+  const dhRippleMat = new THREE.MeshBasicMaterial({
+    color: 0x5ed192,
+    transparent: true,
+    opacity: 0.45,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const dhRipple = new THREE.Mesh(new THREE.RingGeometry(0.46, 0.52, 36), dhRippleMat);
+  dhRipple.rotation.x = -Math.PI / 2;
+  dhRipple.position.y = -0.002;
+  diceHint.add(dhRipple);
+
   diceHint.visible = false;
 
   return {
@@ -344,10 +338,8 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
     diceHitMesh,
     diceShadow,
     diceHint,
-    dhGlow,
-    dhRingH,
-    dhRingV,
-    dhSparks,
+    dhRing,
+    dhRipple,
   };
 }
 

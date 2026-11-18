@@ -1164,8 +1164,8 @@ export function buildAncientWorld(
 
   players.forEach((P) =>
     P.home.forEach((c) => {
-      rectTile(c[0], c[1], 0.8, 0.8, P.colorLight);
-      cellDisc(c[0], c[1], ringColor(P), 0.22, 0.28);
+      rectTile(c[0], c[1], 0.72, 0.72, P.colorLight);
+      cellDisc(c[0], c[1], ringColor(P), 0.2, 0.26);
     }),
   );
 
@@ -1487,18 +1487,18 @@ export function buildAncientWorld(
     }
   }
 
-  // 中央终点区
-  addBox(0, 0, 2.82, 0.1, 2.82, 0x767e86, 0.05);
+  // 中央终点区（放大版）
+  addBox(0, 0, 3.64, 0.1, 3.64, 0x767e86, 0.05);
   const trimMat = new THREE.MeshStandardMaterial({
     color: 0xc9a227,
     roughness: 0.35,
     metalness: 0.55,
   });
   [
-    [0, 1.4, 2.88, 0.07],
-    [0, -1.4, 2.88, 0.07],
-    [1.4, 0, 0.07, 2.88],
-    [-1.4, 0, 0.07, 2.88],
+    [0, 1.8, 3.68, 0.07],
+    [0, -1.8, 3.68, 0.07],
+    [1.8, 0, 0.07, 3.68],
+    [-1.8, 0, 0.07, 3.68],
   ].forEach(([x, z, w, d]) => {
     const t2 = new THREE.Mesh(new THREE.BoxGeometry(w, 0.03, d), trimMat);
     t2.position.set(x, 0.12, z);
@@ -1524,44 +1524,44 @@ export function buildAncientWorld(
   };
   tri(
     [
-      [-1.38, -1.38],
-      [-1.38, 1.38],
+      [-1.78, -1.78],
+      [-1.78, 1.78],
       [0, 0],
     ],
     triTint(0),
   );
   tri(
     [
-      [1.38, -1.38],
-      [1.38, 1.38],
+      [1.78, -1.78],
+      [1.78, 1.78],
       [0, 0],
     ],
     triTint(2),
   );
   tri(
     [
-      [-1.38, 1.38],
-      [1.38, 1.38],
+      [-1.78, 1.78],
+      [1.78, 1.78],
       [0, 0],
     ],
     triTint(1),
   );
   tri(
     [
-      [-1.38, -1.38],
-      [1.38, -1.38],
+      [-1.78, -1.78],
+      [1.78, -1.78],
       [0, 0],
     ],
     triTint(3),
   );
 
   players.forEach((P) => {
-    const rim = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.28, 24), mat(ringColor(P)));
+    const rim = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.31, 24), mat(ringColor(P)));
     rim.rotation.x = -Math.PI / 2;
     rim.position.set(P.final[0], 0.118, P.final[1]);
     scene.add(rim);
   });
-  const centerCap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.05, 16), trimMat);
+  const centerCap = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, 0.05, 24), trimMat);
   centerCap.position.y = 0.125;
   scene.add(centerCap);
 
