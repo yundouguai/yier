@@ -6,6 +6,9 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Relative base so the built site works on GitHub Pages
+    // (https://yundouguai.github.io/yier_bubu/) under a subpath.
+    base: './',
     plugins: [
       react(),
       tailwindcss(),
