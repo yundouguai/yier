@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PlayerConfig, SLOTS } from './constants';
+import { PlayerConfig, SLOTS, lineOf } from './constants';
 import {
   createDiceFaceTexture,
   createHeadFaceTexture,
