@@ -317,26 +317,406 @@ export function createCourtyardGrassTexture(anisotropy: number): THREE.CanvasTex
   return prepColorTex(t, anisotropy);
 }
 
+function mixHexWithWood(hex: number, woodRatio: number): string {
+  const r0 = (hex >> 16) & 255;
+  const g0 = (hex >> 8) & 255;
+  const b0 = hex & 255;
+  // Warm honey-elm / light sandalwood (#ceae86) so stained wood stays bright, warm, and antique
+  const r = Math.round(r0 * (1 - woodRatio) + 206 * woodRatio);
+  const g = Math.round(g0 * (1 - woodRatio) + 174 * woodRatio);
+  const b = Math.round(b0 * (1 - woodRatio) + 134 * woodRatio);
+  return `rgb(${r},${g},${b})`;
+}
+
+function paintWoodGrain(
+  g: CanvasRenderingContext2D,
+  size: number,
+  seed: number,
+  darkAlpha = 0.12,
+  lightAlpha = 0.085,
+) {
+  // Subtle organic timber fiber bands & gentle growth-ring waves
+  const step = Math.max(3, Math.round(size / 48));
+  for (let y = 0; y < size; y += step) {
+    const isLight = ((y / step + seed) | 0) % 3 === 0;
+    g.strokeStyle = isLight
+      ? `rgba(252, 236, 206, ${lightAlpha})`
+      : `rgba(56, 32, 16, ${darkAlpha * (0.65 + ((y * 7 + seed) % 5) * 0.1)})`;
+    g.lineWidth = 1 + (((y + seed) % 3) === 0 ? 1.0 : 0.4);
+    const freq = (Math.PI * 2) / size;
+    const phase = (y * 0.27 + seed * 1.3) % 6.28;
+    const amp = 1.6 + ((y + seed) % 4) * 0.85;
+    g.beginPath();
+    for (let x = 0; x <= size; x += 12) {
+      const wy = y + Math.sin(x * freq + phase) * amp + Math.cos(x * freq * 2 - phase) * 0.6;
+      if (x === 0) g.moveTo(x, wy);
+      else g.lineTo(x, wy);
+    }
+    g.stroke();
+  }
+
+  // Fine wood pores / flecks along grain
+  for (let i = 0; i < 110; i++) {
+    const px = (i * 83 + seed * 41) % size;
+    const py = (i * 107 + seed * 29) % size;
+    const len = 6 + (i % 5) * 4;
+    g.strokeStyle =
+      i % 2 === 0
+        ? `rgba(54, 30, 14, ${darkAlpha * 0.78})`
+        : `rgba(252, 236, 204, ${lightAlpha * 0.85})`;
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(px, py);
+    g.lineTo(px + len, py + ((i % 3) - 1) * 0.8);
+    g.stroke();
+  }
+}
+
+export function createHardwoodFrameTexture(anisotropy: number): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#9c6d49';
+  g.fillRect(0, 0, 256, 256);
+
+  const grad = g.createLinearGradient(0, 0, 256, 256);
+  grad.addColorStop(0, 'rgba(255, 232, 196, 0.1)');
+  grad.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+  grad.addColorStop(1, 'rgba(44, 24, 12, 0.1)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+
+  paintWoodGrain(g, 256, 17, 0.14, 0.09);
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 2);
+  return prepColorTex(t, anisotropy);
+}
+
+export function createAncientTileTexture(
+  colorHex: number,
+  isNeutral: boolean,
+  isYier: boolean,
+  anisotropy: number,
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 192;
+  const g = c.getContext('2d')!;
+
+  const baseFill = isNeutral
+    ? '#b6906a'
+    : isYier
+      ? '#e5d6b8'
+      : mixHexWithWood(colorHex, 0.24);
+  g.fillStyle = baseFill;
+  g.fillRect(0, 0, 192, 192);
+
+  // Gentle hand-rubbed wood oil sheen & soft edge patina
+  const rad = g.createRadialGradient(96, 96, 16, 96, 96, 132);
+  rad.addColorStop(0, 'rgba(255, 244, 218, 0.14)');
+  rad.addColorStop(0.72, 'rgba(255, 244, 218, 0.0)');
+  rad.addColorStop(1, 'rgba(56, 32, 16, 0.11)');
+  g.fillStyle = rad;
+  g.fillRect(0, 0, 192, 192);
+
+  paintWoodGrain(g, 192, colorHex & 255, isNeutral ? 0.14 : 0.1, isYier ? 0.11 : 0.08);
+
+  // Carved mortise wood chamfer & inlaid border groove
+  g.strokeStyle = 'rgba(58, 32, 16, 0.30)';
+  g.lineWidth = 4;
+  g.strokeRect(4, 4, 184, 184);
+
+  g.strokeStyle = isYier
+    ? 'rgba(84, 52, 28, 0.36)'
+    : isNeutral
+      ? 'rgba(246, 232, 206, 0.42)'
+      : 'rgba(252, 242, 222, 0.42)';
+  g.lineWidth = 2;
+  g.strokeRect(14, 14, 164, 164);
+
+  // Subtle carved wooden corner fretwork
+  const corners: [number, number, number, number][] = [
+    [14, 14, 1, 1],
+    [178, 14, -1, 1],
+    [14, 178, 1, -1],
+    [178, 178, -1, -1],
+  ];
+  g.strokeStyle = isYier
+    ? 'rgba(78, 48, 26, 0.42)'
+    : isNeutral
+      ? 'rgba(248, 234, 208, 0.46)'
+      : 'rgba(252, 244, 226, 0.48)';
+  g.lineWidth = 2;
+  for (const [cx, cy, sx, sy] of corners) {
+    g.beginPath();
+    g.moveTo(cx + sx * 16, cy);
+    g.lineTo(cx + sx * 16, cy + sy * 10);
+    g.lineTo(cx + sx * 8, cy + sy * 10);
+    g.moveTo(cx, cy + sy * 16);
+    g.lineTo(cx + sx * 10, cy + sy * 16);
+    g.stroke();
+  }
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
+export function createCellMedallionTexture(
+  accentHex: number,
+  isNeutral: boolean,
+  isYier: boolean,
+  anisotropy: number,
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 192;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 192, 192);
+
+  const ringStroke = isNeutral
+    ? 'rgba(248, 236, 212, 0.84)'
+    : isYier
+      ? 'rgba(82, 52, 28, 0.78)'
+      : 'rgba(250, 242, 224, 0.88)';
+  const innerStroke = isNeutral
+    ? 'rgba(74, 46, 24, 0.48)'
+    : isYier
+      ? 'rgba(132, 92, 54, 0.58)'
+      : mixHexWithWood(accentHex, 0.34);
+
+  // Outer boxwood / dark-walnut inlaid circle ring
+  g.strokeStyle = ringStroke;
+  g.lineWidth = 9;
+  g.beginPath();
+  g.arc(96, 96, 76, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = innerStroke;
+  g.lineWidth = 4;
+  g.beginPath();
+  g.arc(96, 96, 61, 0, Math.PI * 2);
+  g.stroke();
+
+  g.fillStyle = ringStroke;
+  for (let k = 0; k < 4; k++) {
+    const a = (k * Math.PI) / 2;
+    const nx = 96 + Math.cos(a) * 68;
+    const ny = 96 + Math.sin(a) * 68;
+    g.beginPath();
+    g.arc(nx, ny, 3.6, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
+export function createGoalTriangleTexture(
+  colorHex: number | null,
+  isYier: boolean,
+  anisotropy: number,
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d')!;
+
+  const fillCol =
+    colorHex === null
+      ? '#b28c66'
+      : isYier
+        ? '#e4d4b6'
+        : mixHexWithWood(colorHex, 0.24);
+
+  g.fillStyle = fillCol;
+  g.fillRect(0, 0, 512, 512);
+
+  // Warm wood oil patina from center toward outer rail
+  const grad = g.createLinearGradient(256, 0, 256, 512);
+  grad.addColorStop(0, 'rgba(54, 30, 14, 0.11)');
+  grad.addColorStop(0.5, 'rgba(255, 242, 214, 0.08)');
+  grad.addColorStop(1, 'rgba(52, 28, 12, 0.13)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 512, 512);
+
+  paintWoodGrain(g, 512, (colorHex ?? 90) & 255, 0.11, 0.08);
+
+  // Carved wooden plank joinery seams fanning radially
+  g.strokeStyle = 'rgba(56, 30, 14, 0.18)';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(256, 0);
+  g.lineTo(128, 512);
+  g.moveTo(256, 0);
+  g.lineTo(384, 512);
+  g.stroke();
+
+  for (const r of [170, 290, 425]) {
+    g.beginPath();
+    g.arc(256, 0, r, Math.PI * 0.28, Math.PI * 0.72);
+    g.stroke();
+  }
+
+  // Burned-wood / boxwood key-fret (回纹) band near outer wood rail
+  const fretCol =
+    isYier || colorHex === null
+      ? 'rgba(72, 44, 24, 0.38)'
+      : 'rgba(248, 236, 210, 0.46)';
+  g.strokeStyle = fretCol;
+  g.lineWidth = 4;
+  g.strokeRect(20, 464, 472, 34);
+  for (let x = 36; x <= 468; x += 36) {
+    g.beginPath();
+    g.moveTo(x, 498);
+    g.lineTo(x, 474);
+    g.lineTo(x + 20, 474);
+    g.lineTo(x + 20, 488);
+    g.lineTo(x + 10, 488);
+    g.stroke();
+  }
+
+  g.strokeStyle =
+    isYier || colorHex === null
+      ? 'rgba(76, 48, 26, 0.32)'
+      : 'rgba(250, 240, 216, 0.40)';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(32, 456);
+  g.lineTo(480, 456);
+  g.lineTo(256, 30);
+  g.closePath();
+  g.stroke();
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
+export function createDiceAltarTexture(anisotropy: number): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d')!;
+
+  // Warm antique rosewood wooden dial inlaid with pale boxwood
+  const bg = g.createRadialGradient(256, 256, 24, 256, 256, 256);
+  bg.addColorStop(0, '#8e5f3d');
+  bg.addColorStop(0.66, '#71482b');
+  bg.addColorStop(0.9, '#57361f');
+  bg.addColorStop(1, '#432815');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 512, 512);
+
+  paintWoodGrain(g, 512, 64, 0.15, 0.08);
+
+  // Warm boxwood inlaid outer rings
+  g.strokeStyle = '#dac39a';
+  g.lineWidth = 11;
+  g.beginPath();
+  g.arc(256, 256, 236, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = '#b4986d';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.arc(256, 256, 218, 0, Math.PI * 2);
+  g.stroke();
+
+  // 24 boxwood compass ticks
+  g.strokeStyle = 'rgba(242, 226, 196, 0.65)';
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const r0 = i % 3 === 0 ? 194 : 204;
+    g.lineWidth = i % 3 === 0 ? 4 : 2;
+    g.beginPath();
+    g.moveTo(256 + Math.cos(a) * r0, 256 + Math.sin(a) * r0);
+    g.lineTo(256 + Math.cos(a) * 215, 256 + Math.sin(a) * 215);
+    g.stroke();
+  }
+
+  // Octagonal timber inlay lines
+  g.strokeStyle = 'rgba(236, 216, 182, 0.48)';
+  g.lineWidth = 3;
+  g.beginPath();
+  for (let i = 0; i <= 8; i++) {
+    const a = (i * Math.PI) / 4 + Math.PI / 8;
+    const px = 256 + Math.cos(a) * 182;
+    const py = 256 + Math.sin(a) * 182;
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
+  }
+  g.stroke();
+
+  // Inner boxwood circle & carved 8-petal lotus
+  g.strokeStyle = '#dcc7a0';
+  g.lineWidth = 6;
+  g.beginPath();
+  g.arc(256, 256, 132, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = 'rgba(238, 220, 188, 0.48)';
+  g.lineWidth = 3;
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    g.beginPath();
+    g.arc(256 + Math.cos(a) * 84, 256 + Math.sin(a) * 84, 34, a - 1.0, a + 1.0);
+    g.stroke();
+  }
+
+  g.strokeStyle = 'rgba(244, 228, 198, 0.66)';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.arc(256, 256, 46, 0, Math.PI * 2);
+  g.stroke();
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
 export function createStartPadTexture(P: PlayerConfig, anisotropy: number): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const g = c.getContext('2d')!;
-  const hexColor = toColorHex(P.color);
-  const strokeCol = P.key === 'yier' ? '#4A4A55' : '#FFFFFF';
-  g.fillStyle = hexColor;
+  const isYier = P.key === 'yier';
+  const fillCol = isYier ? '#e4d4b6' : mixHexWithWood(P.color, 0.22);
+  const inkCol = isYier ? '#553720' : '#fcf5e6';
+  const subCol = isYier ? '#785435' : 'rgba(246, 234, 208, 0.88)';
+
+  g.fillStyle = fillCol;
   g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = strokeCol;
-  g.lineWidth = 14;
+
+  const grad = g.createRadialGradient(128, 128, 22, 128, 128, 128);
+  grad.addColorStop(0, 'rgba(255, 244, 218, 0.14)');
+  grad.addColorStop(1, 'rgba(56, 32, 16, 0.12)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+
+  paintWoodGrain(g, 256, P.color & 255, 0.11, 0.08);
+
+  // Carved wooden seal rings
+  g.strokeStyle = inkCol;
+  g.lineWidth = 10;
   g.beginPath();
-  g.arc(128, 128, 108, 0, Math.PI * 2);
+  g.arc(128, 128, 110, 0, Math.PI * 2);
   g.stroke();
-  g.fillStyle = strokeCol;
-  g.font = 'bold 46px system-ui,"PingFang SC",sans-serif';
+
+  g.strokeStyle = subCol;
+  g.lineWidth = 4;
+  g.beginPath();
+  g.arc(128, 128, 94, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = subCol;
+  g.lineWidth = 3;
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    g.beginPath();
+    g.moveTo(128 + Math.cos(a) * 94, 128 + Math.sin(a) * 94);
+    g.lineTo(128 + Math.cos(a) * 107, 128 + Math.sin(a) * 107);
+    g.stroke();
+  }
+
+  g.fillStyle = inkCol;
+  g.font = 'bold 54px "Songti SC","Noto Serif SC",Georgia,serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText('START', 128, 104);
-  g.font = 'bold 34px system-ui,"PingFang SC",sans-serif';
-  g.fillText('起点', 128, 158);
+  g.fillText('起 程', 128, 108);
+  g.font = 'bold 26px Georgia,"Times New Roman",serif';
+  g.fillStyle = subCol;
+  g.fillText('START', 128, 162);
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }
 
@@ -352,50 +732,102 @@ export function createHeadFaceTexture(P: PlayerConfig, anisotropy: number): THRE
 
 export function createDiceFaceTexture(n: number, anisotropy: number): THREE.CanvasTexture {
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
+  c.width = c.height = 256;
   const g = c.getContext('2d')!;
-  g.fillStyle = '#FBF7EF';
-  g.fillRect(0, 0, 128, 128);
-  g.strokeStyle = '#D8CDB8';
-  g.lineWidth = 6;
-  g.strokeRect(6, 6, 116, 116);
-  g.fillStyle = '#3A352C';
+
+  // Smooth creamy porcelain-ivory Q-version die surface
+  const bg = g.createRadialGradient(112, 108, 18, 128, 128, 178);
+  bg.addColorStop(0, '#fffdf9');
+  bg.addColorStop(0.65, '#f7efe0');
+  bg.addColorStop(1, '#e8dac2');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 256, 256);
+
+  // Subtle rounded cushion inset line (no sharp boxy corners)
+  g.strokeStyle = 'rgba(186, 158, 122, 0.22)';
+  g.lineWidth = 4;
+  g.beginPath();
+  g.roundRect(34, 34, 188, 188, 46);
+  g.stroke();
+
   const P: Record<number, [number, number][]> = {
-    1: [[64, 64]],
+    1: [[128, 128]],
     2: [
-      [38, 38],
-      [90, 90],
+      [82, 82],
+      [174, 174],
     ],
     3: [
-      [34, 34],
-      [64, 64],
-      [94, 94],
+      [76, 76],
+      [128, 128],
+      [180, 180],
     ],
     4: [
-      [38, 38],
-      [90, 38],
-      [38, 90],
-      [90, 90],
+      [82, 82],
+      [174, 82],
+      [82, 174],
+      [174, 174],
     ],
     5: [
-      [38, 38],
-      [90, 38],
-      [64, 64],
-      [38, 90],
-      [90, 90],
+      [80, 80],
+      [176, 80],
+      [128, 128],
+      [80, 176],
+      [176, 176],
     ],
     6: [
-      [38, 34],
-      [90, 34],
-      [38, 64],
-      [90, 64],
-      [38, 94],
-      [90, 94],
+      [82, 72],
+      [174, 72],
+      [82, 128],
+      [174, 128],
+      [82, 184],
+      [174, 184],
     ],
   };
+
+  const isRed = n === 1 || n === 4;
+  const pipRadius = n === 1 ? 35 : 22.5;
   for (const [x, y] of P[n]) {
+    // Soft recessed cushion halo under each pip
+    g.fillStyle = 'rgba(255, 252, 244, 0.85)';
     g.beginPath();
-    g.arc(x, y, 11, 0, Math.PI * 2);
+    g.arc(x, y + 2, pipRadius + 3.5, 0, Math.PI * 2);
+    g.fill();
+
+    if (n === 1) {
+      g.strokeStyle = 'rgba(235, 92, 74, 0.22)';
+      g.lineWidth = 4;
+      g.beginPath();
+      g.arc(x, y, pipRadius + 7, 0, Math.PI * 2);
+      g.stroke();
+    }
+
+    const pg = g.createRadialGradient(x - pipRadius * 0.25, y - pipRadius * 0.25, 2, x, y, pipRadius);
+    if (isRed) {
+      pg.addColorStop(0, '#f06352');
+      pg.addColorStop(0.75, '#d94434');
+      pg.addColorStop(1, '#ae2e20');
+    } else {
+      pg.addColorStop(0, '#624b3e');
+      pg.addColorStop(0.75, '#46342b');
+      pg.addColorStop(1, '#2f221b');
+    }
+    g.fillStyle = pg;
+    g.beginPath();
+    g.arc(x, y, pipRadius, 0, Math.PI * 2);
+    g.fill();
+
+    // Cute Q-version glossy bead shine
+    g.fillStyle = 'rgba(255, 255, 255, 0.42)';
+    g.beginPath();
+    g.ellipse(
+      x - pipRadius * 0.3,
+      y - pipRadius * 0.32,
+      pipRadius * 0.26,
+      pipRadius * 0.16,
+      -0.6,
+      0,
+      Math.PI * 2,
+    );
     g.fill();
   }
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
@@ -417,6 +849,64 @@ export function createNumberBadgeTexture(num: number, anisotropy: number): THREE
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.fillText(String(num), 64, 68);
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
+export function createGatePlaqueTexture(
+  title: string,
+  anisotropy: number,
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 160;
+  const g = c.getContext('2d')!;
+
+  // 古城黑青大漆匾底
+  const bg = g.createRadialGradient(256, 80, 24, 256, 80, 280);
+  bg.addColorStop(0, '#253543');
+  bg.addColorStop(0.7, '#1b2833');
+  bg.addColorStop(1, '#121b23');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 512, 160);
+
+  // 描金回纹内框与四角装饰
+  g.strokeStyle = '#dbb348';
+  g.lineWidth = 4;
+  g.strokeRect(10, 10, 492, 140);
+
+  g.strokeStyle = 'rgba(232, 194, 88, 0.55)';
+  g.lineWidth = 2;
+  g.strokeRect(18, 18, 476, 124);
+
+  const corners: [number, number, number, number][] = [
+    [18, 18, 1, 1],
+    [494, 18, -1, 1],
+    [18, 142, 1, -1],
+    [494, 142, -1, -1],
+  ];
+  g.fillStyle = '#e4be55';
+  for (const [cx, cy, sx, sy] of corners) {
+    g.fillRect(cx, cy, sx * 12, sy * 4);
+    g.fillRect(cx, cy, sx * 4, sy * 12);
+  }
+
+  // 金字楷书「熊 熊 坊」
+  const chars = Array.from(title);
+  const display = chars.join(' ');
+  g.font = 'bold 76px "STKaiti","KaiTi","Songti SC","Noto Serif SC",Georgia,serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+
+  g.fillStyle = 'rgba(8, 12, 16, 0.65)';
+  g.fillText(display, 258, 86);
+
+  const textGrad = g.createLinearGradient(0, 32, 0, 128);
+  textGrad.addColorStop(0, '#fae28c');
+  textGrad.addColorStop(0.5, '#eab949');
+  textGrad.addColorStop(1, '#c99327');
+  g.fillStyle = textGrad;
+  g.fillText(display, 256, 83);
+
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }
 

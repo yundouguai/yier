@@ -69,12 +69,18 @@ export default function App() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<FlightChessEngine | null>(null);
 
-  const [seats, setSeats] = useState<SeatConfig[]>(initialParsed.current.seats);
+  const [activeSeats, setActiveSeats] = useState<SeatConfig[]>(initialParsed.current.seats);
+  const [draftSeats, setDraftSeats] = useState<SeatConfig[]>(
+    initialParsed.current.seats.map((s) => ({ ...s })),
+  );
   const [showSetup, setShowSetup] = useState(!initialParsed.current.hasParam);
   const [sessionId, setSessionId] = useState(0);
   const [autoStart, setAutoStart] = useState(initialParsed.current.hasParam);
   const [snap, setSnap] = useState<GameHudSnapshot>(INITIAL_SNAPSHOT);
   const [contextLost, setContextLost] = useState(false);
+
+  const canResume = snap.phase !== 'idle' && snap.winnerPid === null;
+  const hasSeatChanges = JSON.stringify(draftSeats) !== JSON.stringify(activeSeats);
 
   // Mount & manage WebGL engine lifecycle cleanly
   useEffect(() => {
@@ -83,7 +89,7 @@ export default function App() {
 
     const engine = new FlightChessEngine(
       container,
-      seats,
+      activeSeats,
       autoStart,
       (nextSnap) => setSnap(nextSnap),
       (lost) => setContextLost(lost),
@@ -99,18 +105,31 @@ export default function App() {
   }, [sessionId]);
 
   const handleStartGame = useCallback(() => {
-    const active = seats.filter((s) => s.on);
+    const active = draftSeats.filter((s) => s.on);
     if (active.length < 2) return;
+    setActiveSeats(draftSeats.map((s) => ({ ...s })));
     setShowSetup(false);
     setAutoStart(true);
     setSessionId((id) => id + 1);
-  }, [seats]);
+  }, [draftSeats]);
 
   const handleReturnSetup = useCallback(() => {
-    setShowSetup(true);
-    setAutoStart(false);
-    setSessionId((id) => id + 1);
-  }, []);
+    if (snap.phase !== 'idle' && snap.winnerPid === null) {
+      setDraftSeats(activeSeats.map((s) => ({ ...s })));
+      engineRef.current?.setPaused(true);
+      setShowSetup(true);
+    } else {
+      setShowSetup(true);
+      setAutoStart(false);
+      setSessionId((id) => id + 1);
+    }
+  }, [activeSeats, snap.phase, snap.winnerPid]);
+
+  const handleResumeFromSetup = useCallback(() => {
+    setDraftSeats(activeSeats.map((s) => ({ ...s })));
+    setShowSetup(false);
+    engineRef.current?.setPaused(false);
+  }, [activeSeats]);
 
   const handlePlayAgain = useCallback(() => {
     setShowSetup(false);
@@ -122,10 +141,6 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
-      if (e.key === 'p' || e.key === 'P') {
-        engineRef.current?.togglePause();
-        return;
-      }
       if (e.key === 'v' || e.key === 'V') {
         engineRef.current?.cycleCamMode();
         return;
@@ -134,7 +149,12 @@ export default function App() {
         engineRef.current?.resetView();
         return;
       }
-      if (showSetup || snap.paused || snap.winnerPid !== null) return;
+      if (showSetup) return;
+      if (e.key === 'p' || e.key === 'P') {
+        engineRef.current?.togglePause();
+        return;
+      }
+      if (snap.paused || snap.winnerPid !== null) return;
 
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
@@ -177,6 +197,7 @@ export default function App() {
           showSetup={showSetup}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onSetCamMode={(mode) => engineRef.current?.setCamMode(mode)}
+          onResetView={() => engineRef.current?.resetView()}
           onReturnSetup={handleReturnSetup}
           onTogglePause={() => engineRef.current?.togglePause()}
         />
@@ -184,13 +205,16 @@ export default function App() {
 
       <SetupModal
         open={showSetup}
-        seats={seats}
-        onChangeSeats={setSeats}
+        seats={draftSeats}
+        canResume={canResume}
+        hasChanges={hasSeatChanges}
+        onChangeSeats={setDraftSeats}
+        onResume={handleResumeFromSetup}
         onStart={handleStartGame}
       />
 
       <Overlays
-        paused={snap.paused}
+        paused={snap.paused && !showSetup}
         winner={winner}
         contextLost={contextLost}
         onResume={() => engineRef.current?.togglePause()}

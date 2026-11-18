@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CameraMode, GameHudSnapshot, HUD_PIPS } from '../game/constants';
 
 interface GameHUDProps {
@@ -6,6 +6,7 @@ interface GameHUDProps {
   showSetup: boolean;
   onActionPod: () => void;
   onSetCamMode: (mode: CameraMode) => void;
+  onResetView: () => void;
   onReturnSetup: () => void;
   onTogglePause: () => void;
 }
@@ -15,11 +16,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   showSetup,
   onActionPod,
   onSetCamMode,
+  onResetView,
   onReturnSetup,
   onTogglePause,
 }) => {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (!rulesOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRulesOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [rulesOpen]);
 
   const cur = snap.players[snap.turn] ?? snap.players[0];
   if (!cur) return null;
@@ -276,41 +287,52 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
 
-        {/* Left Vertical Control Bar */}
+        {/* Independent Top-Right Camera View Switcher (always visible, never collapsed) */}
+        <div
+          className="pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-xl bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
+          role="group"
+          aria-label="视角模式"
+        >
+          {(
+            [
+              ['follow', '跟随'],
+              ['top', '俯视'],
+              ['free', '自由'],
+            ] as [CameraMode, string][]
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onSetCamMode(mode)}
+              title="切换视角（快捷键 V）"
+              className={`rounded-lg px-2.5 md:px-3 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                snap.camMode === mode
+                  ? 'bg-[#2c9a60] text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={onResetView}
+            title="回正视角（快捷键 R）"
+            className="rounded-lg px-2 py-1.5 text-[11px] md:text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            回正
+          </button>
+        </div>
+
+        {/* Left Vertical Control Bar (without camera switcher) */}
         <div className="pointer-events-auto absolute bottom-[132px] md:bottom-3.5 left-2.5 md:left-3.5 flex w-[90px] md:w-[102px] flex-col items-stretch gap-1.5">
           {!dockCollapsed && (
             <div className="flex flex-col items-stretch gap-1.5">
-              <div
-                className="flex flex-col gap-0.5 rounded-xl bg-white/95 p-1 shadow"
-                role="group"
-                aria-label="视角模式"
-              >
-                {(
-                  [
-                    ['follow', '跟随'],
-                    ['top', '俯视'],
-                    ['free', '自由'],
-                  ] as [CameraMode, string][]
-                ).map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onSetCamMode(mode)}
-                    title="点击切换并回正视角（快捷键 V 切换 / R 回正）"
-                    className={`w-full rounded-[8px] px-2 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
-                      snap.camMode === mode
-                        ? 'bg-[#2c9a60] text-white shadow-sm'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
               <button
                 type="button"
                 onClick={() => setRulesOpen((v) => !v)}
-                className={`w-full rounded-xl px-2.5 py-2 text-[11px] md:text-xs font-semibold shadow whitespace-nowrap cursor-pointer ${
+                className={`w-full rounded-xl px-2.5 py-2 text-[11px] md:text-xs font-semibold shadow whitespace-nowrap shrink-0 cursor-pointer ${
                   rulesOpen
                     ? 'bg-[#2c9a60] text-white'
                     : 'bg-white/95 text-slate-700 hover:bg-white'
@@ -321,14 +343,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <button
                 type="button"
                 onClick={onReturnSetup}
-                className="w-full rounded-xl bg-white/95 px-2.5 py-2 text-[11px] md:text-xs font-semibold text-slate-700 shadow hover:bg-white whitespace-nowrap cursor-pointer"
+                className="w-full rounded-xl bg-white/95 px-2.5 py-2 text-[11px] md:text-xs font-semibold text-slate-700 shadow hover:bg-white whitespace-nowrap shrink-0 cursor-pointer"
               >
                 返回设置
               </button>
               <button
                 type="button"
                 onClick={onTogglePause}
-                className="w-full rounded-xl bg-white/95 px-2.5 py-2 text-[11px] md:text-xs font-semibold text-slate-700 shadow hover:bg-white whitespace-nowrap cursor-pointer"
+                className="w-full rounded-xl bg-white/95 px-2.5 py-2 text-[11px] md:text-xs font-semibold text-slate-700 shadow hover:bg-white whitespace-nowrap shrink-0 cursor-pointer"
               >
                 {snap.paused ? '▶ 继续' : '⏸ 暂停'}
               </button>
@@ -338,44 +360,133 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <button
             type="button"
             onClick={() => setDockCollapsed((v) => !v)}
-            className="w-full rounded-xl bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow hover:text-slate-900 cursor-pointer"
+            className="w-full rounded-xl bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow hover:text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
           >
             {dockCollapsed ? '▴ 展开控制' : '▾ 收起控制'}
           </button>
         </div>
 
-        {/* Rules drawer */}
+        {/* Clean, Well-Structured Rules Modal */}
         {rulesOpen && (
-          <div className="pointer-events-auto anim-card-pop absolute bottom-[132px] left-[122px] right-2.5 md:bottom-3.5 md:left-[126px] md:right-auto md:w-[310px] max-h-[65vh] overflow-auto rounded-[14px] bg-white/95 p-4 text-[13px] leading-relaxed text-slate-700 shadow-2xl">
-            <div className="mb-1.5 flex items-center justify-between">
-              <h3 className="text-[15px] font-bold text-slate-900">玩法说明</h3>
-              <button
-                type="button"
-                onClick={() => setRulesOpen(false)}
-                className="rounded-md px-2 py-0.5 text-xs text-slate-500 hover:bg-slate-100 cursor-pointer"
-              >
-                关闭
-              </button>
+          <div
+            className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-950/45 p-4"
+            onClick={() => setRulesOpen(false)}
+          >
+            <div
+              className="anim-card-pop w-full max-w-[540px] max-h-[84vh] overflow-y-auto rounded-[20px] bg-white p-6 text-slate-700 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">玩法规则说明</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    经典 7 格边环道 · 4 架棋子全部抵达中心终点即获胜
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRulesOpen(false)}
+                  aria-label="关闭规则说明"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-5 text-[13px] leading-relaxed">
+                <section>
+                  <h4 className="mb-2 text-xs font-bold tracking-wide text-emerald-700">
+                    01. 起飞与连掷规则
+                  </h4>
+                  <ul className="space-y-2 text-slate-600">
+                    <li className="flex gap-2.5">
+                      <span className="shrink-0 font-semibold text-slate-800">5 或 6 起飞</span>
+                      <span>
+                        掷出 <b className="text-slate-900">5</b> 或 <b className="text-slate-900">6</b>{' '}
+                        点时，可选择让停机坪棋子登上 <b className="text-slate-900">START 起点台</b>，或移动场上已有棋子。
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <span className="shrink-0 font-semibold text-slate-800">仅 6 奖连掷</span>
+                      <span>
+                        只有掷出 <b className="text-slate-900">6</b> 点才可再掷一次（连续三个 6
+                        后第三次只走子不再投）；棋子抵达终点不额外奖励掷骰。
+                      </span>
+                    </li>
+                  </ul>
+                </section>
+
+                <section className="border-t border-slate-100 pt-4">
+                  <h4 className="mb-2 text-xs font-bold tracking-wide text-emerald-700">
+                    02. 跳跃、航线与撞击
+                  </h4>
+                  <ul className="space-y-2 text-slate-600">
+                    <li className="flex gap-2.5">
+                      <span className="shrink-0 font-semibold text-slate-800">同色跳 +4</span>
+                      <span>
+                        外圈 52 格四色循环，落在己方同色格可顺延向前跳跃 <b className="text-slate-900">4 格</b>。
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <span className="shrink-0 font-semibold text-slate-800">航线飞 +12</span>
+                      <span>
+                        落在带 <b className="text-slate-900">✈</b> 标记的己色斜角格，沿虚线直飞对岸{' '}
+                        <b className="text-slate-900">12 格</b>，并击落航线穿过的对家终点前第 4
+                        格敌机（直飞后仍可顺风连跳）。
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <span className="shrink-0 font-semibold text-slate-800">撞机与回弹</span>
+                      <span>
+                        落点有敌方棋子时将其全部撞回停机坪；己方同格叠机同行；点数超出终点格会向后回弹。
+                      </span>
+                    </li>
+                  </ul>
+                </section>
+
+                <section className="border-t border-slate-100 pt-4">
+                  <h4 className="mb-2.5 text-xs font-bold tracking-wide text-emerald-700">
+                    03. 快捷操控与视角
+                  </h4>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs text-slate-600">
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>掷骰 / 单子直走</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        空格 / 回车
+                      </kbd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>快速选棋子</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        数字键 1~4
+                      </kbd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>切换 / 回正视角</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        V / R
+                      </kbd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>暂停或继续</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        P
+                      </kbd>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div className="mt-5 flex justify-end border-t border-slate-100 pt-3.5">
+                <button
+                  type="button"
+                  onClick={() => setRulesOpen(false)}
+                  className="rounded-xl bg-[#2c9a60] px-6 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#258552] cursor-pointer"
+                >
+                  我知道了
+                </button>
+              </div>
             </div>
-            <p>
-              · <b>快捷操作</b>：轮到自己时按 <b>空格 / 回车</b>{' '}
-              即可掷骰子；若只有一个可走棋子再按空格直接走；选子时按数字键{' '}
-              <b>1~4</b> 选择小人；按 <b>V</b> 切换视角（跟随/俯视/自由），点击当前视角按钮或按{' '}
-              <b>R</b> 自动回正视角，鼠标拖拽可随时自由转动。
-            </p>
-            <p className="mt-1.5">
-              · 掷出 <b>6</b> 让飞机从停机坪登上外侧 <b>START 起点台</b>
-              ，并奖励再掷一次（连续三个 6 后第三次可移动但不再掷）。
-            </p>
-            <p className="mt-1.5">
-              · 棋盘每边 7 格，外圈 52 格四色交替循环。落在<b>己方同色格</b>可向前跳跃{' '}
-              <b>+4 格</b>；落在带 <b>✈ 标记的己色斜角格</b>
-              可沿虚线横跨支路直飞 <b>+12 格</b>（同时击落飞跃航道中段敌机）。
-            </p>
-            <p className="mt-1.5">
-              · 落点有敌方飞机时，将其<b>全部撞回停机坪</b>；到达终点格超出点数会
-              <b>向后回弹</b>。
-            </p>
           </div>
         )}
       </div>

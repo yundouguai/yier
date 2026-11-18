@@ -10,14 +10,20 @@ import {
 interface SetupModalProps {
   open: boolean;
   seats: SeatConfig[];
+  canResume: boolean;
+  hasChanges: boolean;
   onChangeSeats: (next: SeatConfig[]) => void;
+  onResume: () => void;
   onStart: () => void;
 }
 
 export const SetupModal: React.FC<SetupModalProps> = ({
   open,
   seats,
+  canResume,
+  hasChanges,
   onChangeSeats,
+  onResume,
   onStart,
 }) => {
   if (!open) return null;
@@ -55,13 +61,29 @@ export const SetupModal: React.FC<SetupModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/45 p-4">
-      <div className="anim-card-pop w-full max-w-[420px] max-h-[92vh] overflow-y-auto rounded-[22px] bg-white px-6 py-7 shadow-2xl">
-        <h2 className="text-[22px] font-bold text-slate-900">一二布布 · 3D 古城飞行棋</h2>
-        <p className="mt-1 mb-4 text-[13px] text-slate-500">
-          选择 2–4 位玩家，挑选角色与操控方式
-        </p>
+      <div className="anim-card-pop w-full max-w-[430px] max-h-[92vh] overflow-y-auto rounded-[22px] bg-white px-6 py-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-[22px] font-bold text-slate-900">一二布布 · 3D 古城飞行棋</h2>
+            <p className="mt-1 text-[13px] text-slate-500">
+              {canResume
+                ? '对局已暂停 · 可继续当前进度或修改阵容重新开局'
+                : '选择 2–4 位玩家，挑选角色与操控方式'}
+            </p>
+          </div>
+          {canResume && (
+            <button
+              type="button"
+              onClick={onResume}
+              aria-label="关闭并返回对局"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-sm text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
-        <div className="space-y-2">
+        <div className="mt-4 space-y-2">
           {seats.map((s, j) => {
             const C = CHARS[s.char];
             const humanIdx = seats
@@ -127,16 +149,40 @@ export const SetupModal: React.FC<SetupModalProps> = ({
           })}
         </div>
 
-        <button
-          type="button"
-          disabled={activeCount < 2}
-          onClick={onStart}
-          className="mt-4 w-full rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] transition-transform active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:grayscale disabled:shadow-none cursor-pointer"
-        >
-          {activeCount < 2
-            ? `至少选择 2 位玩家（当前 ${activeCount} 位）`
-            : `开始游戏（${activeCount} 位玩家）`}
-        </button>
+        {canResume ? (
+          <div className="mt-4 flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={onResume}
+              className="flex-1 rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] py-3 text-[15px] font-bold text-white shadow-[0_4px_0_#1f7a49] transition-transform active:translate-y-0.5 whitespace-nowrap cursor-pointer"
+            >
+              继续当前对局
+            </button>
+            <button
+              type="button"
+              disabled={activeCount < 2}
+              onClick={onStart}
+              className="flex-1 rounded-[14px] border border-slate-200 bg-slate-50 py-3 text-[14px] font-bold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap cursor-pointer"
+            >
+              {activeCount < 2
+                ? `至少选 2 人`
+                : hasChanges
+                  ? '应用并重开'
+                  : '重新开局'}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={activeCount < 2}
+            onClick={onStart}
+            className="mt-4 w-full rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] transition-transform active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:grayscale disabled:shadow-none cursor-pointer"
+          >
+            {activeCount < 2
+              ? `至少选择 2 位玩家（当前 ${activeCount} 位）`
+              : `开始游戏（${activeCount} 位玩家）`}
+          </button>
+        )}
 
         <p className="mt-3.5 text-center text-[11px] leading-relaxed text-slate-400">
           经典7格边棋盘 · 空格快捷掷骰 · 数字键1~4快捷选子 · 1:1 摇摇车手办

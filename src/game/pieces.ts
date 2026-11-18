@@ -246,6 +246,11 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
       ear.scale.set(1, 0.95, 0.85);
       ear.position.set(0.137 * s, 0.58, 0);
       headWrap.add(ear);
+
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.029, 14, 10), M(0x2a1a14));
+      inner.scale.set(1, 0.92, 0.48);
+      inner.position.set(0, -0.002, 0.035);
+      ear.add(inner);
     }
   }
 
@@ -269,17 +274,63 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   return g;
 }
 
+export const DICE_REST_Y = 0.502;
+
+function createChibiDiceGeometry(): THREE.BufferGeometry {
+  const half = 0.475;
+  const radius = 0.185;
+  const inner = half - radius;
+  const puffSphRadius = 0.51;
+  const puffRatio = 0.16;
+
+  const geo = new THREE.BoxGeometry(half * 2, half * 2, half * 2, 16, 16, 16);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const norm = geo.attributes.normal as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const nBox = new THREE.Vector3();
+  const nSph = new THREE.Vector3();
+  const pBox = new THREE.Vector3();
+  const pSph = new THREE.Vector3();
+
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    c.set(
+      THREE.MathUtils.clamp(v.x, -inner, inner),
+      THREE.MathUtils.clamp(v.y, -inner, inner),
+      THREE.MathUtils.clamp(v.z, -inner, inner),
+    );
+    nBox.subVectors(v, c);
+    if (nBox.lengthSq() > 1e-8) nBox.normalize();
+    else nBox.fromBufferAttribute(norm, i).normalize();
+
+    pBox.copy(c).addScaledVector(nBox, radius);
+    nSph.copy(pBox).normalize();
+    pSph.copy(nSph).multiplyScalar(puffSphRadius);
+
+    v.lerpVectors(pBox, pSph, puffRatio);
+    pos.setXYZ(i, v.x, v.y, v.z);
+
+    nBox.lerp(nSph, puffRatio).normalize();
+    norm.setXYZ(i, nBox.x, nBox.y, nBox.z);
+  }
+  pos.needsUpdate = true;
+  norm.needsUpdate = true;
+  return geo;
+}
+
 export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
   const faceOrder = [3, 4, 1, 6, 2, 5];
   const diceMaterials = faceOrder.map(
     (n) =>
       new THREE.MeshStandardMaterial({
         map: createDiceFaceTexture(n, anisotropy),
-        roughness: 0.4,
+        roughness: 0.24,
+        metalness: 0.03,
       }),
   );
-  const dice = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), diceMaterials);
-  dice.position.set(0, 0.4, 0);
+  const dice = new THREE.Mesh(createChibiDiceGeometry(), diceMaterials);
+  dice.position.set(0, DICE_REST_Y, 0);
   dice.scale.setScalar(0.52);
   dice.castShadow = true;
   scene.add(dice);
@@ -291,43 +342,43 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
   dice.add(diceHitMesh);
 
   const diceShadow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.36, 24),
+    new THREE.CircleGeometry(0.33, 24),
     new THREE.MeshBasicMaterial({
-      color: 0x14231c,
+      color: 0x201a12,
       transparent: true,
       opacity: 0.28,
       depthWrite: false,
     }),
   );
   diceShadow.rotation.x = -Math.PI / 2;
-  diceShadow.position.set(0, 0.156, 0);
+  diceShadow.position.set(0, 0.2515, 0);
   scene.add(diceShadow);
 
   const diceHint = new THREE.Group();
-  diceHint.position.set(0, 0.162, 0);
+  diceHint.position.set(0, 0.254, 0);
   scene.add(diceHint);
 
   const dhRingMat = new THREE.MeshBasicMaterial({
-    color: 0x3aa66b,
+    color: 0x5ec992,
     transparent: true,
-    opacity: 0.78,
+    opacity: 0.84,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const dhRing = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.52, 36), dhRingMat);
+  const dhRing = new THREE.Mesh(new THREE.RingGeometry(0.37, 0.43, 36), dhRingMat);
   dhRing.rotation.x = -Math.PI / 2;
   diceHint.add(dhRing);
 
   const dhRippleMat = new THREE.MeshBasicMaterial({
-    color: 0x5ed192,
+    color: 0x9ae8be,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.46,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const dhRipple = new THREE.Mesh(new THREE.RingGeometry(0.46, 0.52, 36), dhRippleMat);
+  const dhRipple = new THREE.Mesh(new THREE.RingGeometry(0.38, 0.43, 36), dhRippleMat);
   dhRipple.rotation.x = -Math.PI / 2;
-  dhRipple.position.y = -0.002;
+  dhRipple.position.y = -0.001;
   diceHint.add(dhRipple);
 
   diceHint.visible = false;
@@ -375,38 +426,6 @@ export function buildPickHints(scene: THREE.Scene, anisotropy: number): THREE.Gr
     hints.push(grp);
   }
   return hints;
-}
-
-export function buildCampFrames(scene: THREE.Scene): THREE.Group[] {
-  return [0, 1, 2, 3].map((j) => {
-    const slot = SLOTS[j];
-    const g = new THREE.Group();
-    const fm = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 0.6,
-      roughness: 0.4,
-    });
-    const L = 4.06;
-    const T = 0.1;
-    const H = L / 2 - T / 2;
-    const bars: [number, number, number, number][] = [
-      [L + T, T, 0, H],
-      [L + T, T, 0, -H],
-      [T, L + T, H, 0],
-      [T, L + T, -H, 0],
-    ];
-    for (const [w, d, x, z] of bars) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), fm);
-      m.position.set(x, 0.12, z);
-      g.add(m);
-    }
-    g.userData.mat = fm;
-    g.position.set(slot.court[0], 0, slot.court[1]);
-    g.visible = false;
-    scene.add(g);
-    return g;
-  });
 }
 
 export function buildTurnArrow(scene: THREE.Scene): THREE.Mesh {

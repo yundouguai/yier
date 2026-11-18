@@ -8,14 +8,21 @@ import {
   RING,
   RING_TILES,
   SLOTS,
+  Species,
   lineOf,
   ringColor,
 } from './constants';
 import { makePlaneModel } from './pieces';
 import {
+  createAncientTileTexture,
   createBrickBankTexture,
+  createCellMedallionTexture,
   createCourtyardGrassTexture,
+  createDiceAltarTexture,
+  createGatePlaqueTexture,
+  createGoalTriangleTexture,
   createGrassTexture,
+  createHardwoodFrameTexture,
   createHullFoamTexture,
   createMoatTexture,
   createRiverbedTexture,
@@ -33,6 +40,8 @@ export interface RideToyAnim {
   riderPivot: THREE.Group;
   headPivot: THREE.Group;
   phase: number;
+  species: Species;
+  charKey: string;
 }
 
 export interface PetalAnim {
@@ -77,11 +86,21 @@ export interface SwimKoiAnim {
 export interface BoatAnim {
   g: THREE.Group;
   th: number;
+  rOff: number;
   speed: number;
+  speedFactor: number;
   bob: number;
+  role: 'scholar' | 'maiden';
+  targetLookYaw: number;
+  currentLookYaw: number;
+  rowPhase: number;
 }
 
 export type BirdFlightMode = 'soar' | 'swoop' | 'bound' | 'circle';
+
+export type BirdSpecies = 'egret' | 'swallow' | 'kingfisher' | 'oriole' | 'robin' | 'seagull';
+
+export type BirdPerchPhase = 'approach' | 'perch' | 'depart';
 
 export type RabbitState =
   | 'rest'
@@ -122,6 +141,14 @@ export type CritterAnim =
       phase: number;
       circleR: number;
       circleSpeed: number;
+      species?: BirdSpecies;
+      perchTarget?: RideToyAnim;
+      perchPhase?: BirdPerchPhase;
+      perchT?: number;
+      perchDur?: number;
+      perchYaw?: number;
+      departCtrl?: THREE.Vector3;
+      departTo?: THREE.Vector3;
     }
   | {
       kind: 'fly';
@@ -140,6 +167,19 @@ export type CritterAnim =
       h: number;
     };
 
+export interface CourtFenceHighlight {
+  woodMat: THREE.MeshStandardMaterial;
+  trimMat: THREE.MeshStandardMaterial;
+  capMat: THREE.MeshStandardMaterial;
+  active: boolean;
+  accentHex: number;
+}
+
+export interface SpawnBirdOptions {
+  species?: BirdSpecies;
+  perch?: boolean;
+}
+
 export interface WorldRefs {
   waterMesh: THREE.Mesh;
   moatTex: THREE.CanvasTexture;
@@ -147,6 +187,7 @@ export interface WorldRefs {
   waterUniforms: { uTime: { value: number } };
   waterY: number;
   rideToys: RideToyAnim[];
+  courtFences: CourtFenceHighlight[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
   petals: PetalAnim[];
@@ -158,7 +199,10 @@ export interface WorldRefs {
   moatOuterR: (th: number) => number;
   moatChannelR: (th: number, rOff: number, margin?: number) => number;
   hillH: (x: number, z: number) => number;
-  spawnCritter: (kind: 'rabbit' | 'bird' | 'fly' | 'fish') => void;
+  spawnCritter: (
+    kind: 'rabbit' | 'bird' | 'fly' | 'fish',
+    opts?: SpawnBirdOptions,
+  ) => void;
 }
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -216,7 +260,7 @@ function buildToyRider(P: PlayerConfig) {
   const panda = P.species === 'panda';
   const M = (c: number, r = 0.52) => new THREE.MeshStandardMaterial({ color: c, roughness: r });
   const furCol = P.key === 'yier' ? 0xf6f4ef : P.key === 'bubu' ? 0x9e6839 : P.body;
-  const darkCol = P.key === 'yier' ? 0x2a1d17 : P.key === 'bubu' ? 0x2a1a14 : P.ear;
+  const darkCol = panda ? (P.key === 'yier' ? 0x2a1d17 : P.ear) : 0x2a1a14;
   const furM = M(furCol, 0.58);
   const darkM = M(darkCol, 0.42);
   const legM = M(panda ? darkCol : furCol, 0.58);
@@ -312,7 +356,7 @@ function buildToyRider(P: PlayerConfig) {
     if (!panda) {
       const inner = new THREE.Mesh(new THREE.SphereGeometry(0.032, 14, 10), darkM);
       inner.scale.set(1, 0.92, 0.45);
-      inner.position.set(0, -0.002, 0.024);
+      inner.position.set(0, -0.002, 0.039);
       ear.add(inner);
     }
   }
@@ -1529,7 +1573,20 @@ export function buildAncientWorld(
     const roofTileMat = mat(0x444f59, 0.52);
     const eaveTrimMat = mat(0x5a6773, 0.58);
     const stoneDrumMat = mat(0xa3acb2, 0.68);
-    const plaqueMat = mat(0x23313d, 0.42);
+    const plaqueSideMat = mat(0x1e2a35, 0.44);
+    const plaqueFaceMat = new THREE.MeshStandardMaterial({
+      map: createGatePlaqueTexture('熊熊坊', anisotropy),
+      roughness: 0.36,
+      metalness: 0.14,
+    });
+    const plaqueMaterials = [
+      plaqueSideMat,
+      plaqueSideMat,
+      plaqueSideMat,
+      plaqueSideMat,
+      plaqueFaceMat,
+      plaqueFaceMat,
+    ];
     const lantMat = new THREE.MeshStandardMaterial({
       color: 0xe5442b,
       emissive: 0xb83018,
@@ -1627,11 +1684,11 @@ export function buildAncientWorld(
         gate.add(b2);
       }
 
-      const plaqueFrame = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.22, 0.25), trimGold);
-      plaqueFrame.position.set(0, 1.04, 0);
+      const plaqueFrame = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.28, 0.27), trimGold);
+      plaqueFrame.position.set(0, 1.045, 0);
       gate.add(plaqueFrame);
-      const plaqueCore = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.15, 0.27), plaqueMat);
-      plaqueCore.position.set(0, 1.04, 0);
+      const plaqueCore = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.21, 0.29), plaqueMaterials);
+      plaqueCore.position.set(0, 1.045, 0);
       gate.add(plaqueCore);
 
       // 重檐屋顶（下檐 + 阁楼腰线 + 上檐 + 金脊吻兽）
@@ -1778,18 +1835,421 @@ export function buildAncientWorld(
       stairGrp.rotation.y = a;
       scene.add(stairGrp);
     }
+
+    // 唯一无台阶的城门外：福州古风爱心榕树（短粗古干 + 低矮繁茂立体心形树冠 + 垂须气根 + 54 盏小巧红灯笼 + 防闪烁抬升树池）
+    {
+      const ha = (skipStairGate * Math.PI) / 2;
+      const heartTree = new THREE.Group();
+
+      // 1. 抬升青石树池围边 + 实心隆起培土（严格高于 -0.63 地面，杜绝共面闪烁）
+      const curbMat = mat(0xaeb7bd, 0.8);
+      const soilMat = mat(0x5c3e26, 0.94);
+      const soilRimMat = mat(0x4c321d, 0.95);
+      const banyanBarkMat = mat(0x5b3b24, 0.9);
+      const aerialRootMat = mat(0x6b4e34, 0.88);
+
+      const planterCurb = new THREE.Mesh(new THREE.TorusGeometry(1.04, 0.115, 14, 36), curbMat);
+      planterCurb.rotation.x = Math.PI / 2;
+      planterCurb.position.y = 0.055;
+      planterCurb.castShadow = true;
+      planterCurb.receiveShadow = true;
+      heartTree.add(planterCurb);
+
+      // 实心土壤圆台底面沉入 -0.02、顶面抬升至 +0.10，彻底脱离地面 y=0 平面
+      const soilCollar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.96, 0.99, 0.12, 28),
+        soilRimMat,
+      );
+      soilCollar.position.y = 0.04;
+      soilCollar.receiveShadow = true;
+      heartTree.add(soilCollar);
+
+      const soilMound = new THREE.Mesh(
+        new THREE.SphereGeometry(0.96, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.46),
+        soilMat,
+      );
+      soilMound.scale.set(1, 0.16, 1);
+      soilMound.position.y = 0.085;
+      soilMound.receiveShadow = true;
+      heartTree.add(soilMound);
+
+      // 2. 短粗稳健古榕主干与板根（衬托上方高挺饱满的心形树冠）
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.27, 0.45, 1.42, 16),
+        banyanBarkMat,
+      );
+      trunk.position.y = 0.81;
+      trunk.castShadow = true;
+      trunk.receiveShadow = true;
+      heartTree.add(trunk);
+
+      for (let i = 0; i < 7; i++) {
+        const ra = (i / 7) * Math.PI * 2 + 0.18;
+        const root = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.44, 7), banyanBarkMat);
+        root.position.set(Math.cos(ra) * 0.38, 0.27, Math.sin(ra) * 0.38);
+        root.rotation.set(Math.sin(ra) * 0.58, 0, -Math.cos(ra) * 0.58);
+        root.castShadow = true;
+        heartTree.add(root);
+      }
+
+      for (const sx of [-1, 1]) {
+        const limb = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.12, 0.2, 0.92, 10),
+          banyanBarkMat,
+        );
+        limb.position.set(0.32 * sx, 1.56, 0);
+        limb.rotation.z = -0.58 * sx;
+        limb.castShadow = true;
+        heartTree.add(limb);
+      }
+      for (const sz of [-1, 1]) {
+        const subLimb = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.09, 0.15, 0.72, 8),
+          banyanBarkMat,
+        );
+        subLimb.position.set(0, 1.52, 0.2 * sz);
+        subLimb.rotation.x = 0.54 * sz;
+        subLimb.castShadow = true;
+        heartTree.add(subLimb);
+      }
+
+      // 12 缕榕树垂须气根（随高挑心形下缘自然垂落）
+      const aerialPts: [number, number, number, number][] = [
+        [-1.08, 1.92, 0.2, 0.68],
+        [-0.82, 1.66, -0.24, 0.68],
+        [-0.54, 1.44, 0.26, 0.54],
+        [0.54, 1.46, -0.22, 0.56],
+        [0.84, 1.68, 0.22, 0.66],
+        [1.1, 1.94, -0.18, 0.66],
+        [-1.32, 2.24, -0.12, 0.62],
+        [1.32, 2.26, 0.12, 0.62],
+        [-0.86, 1.82, 0.42, 0.54],
+        [0.86, 1.82, -0.42, 0.54],
+        [-0.5, 1.54, -0.44, 0.48],
+        [0.5, 1.54, 0.44, 0.48],
+      ];
+      aerialPts.forEach(([ax, ay, az, len]) => {
+        const rootStrand = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.013, 0.007, len, 5),
+          aerialRootMat,
+        );
+        rootStrand.position.set(ax, ay - len * 0.5, az);
+        heartTree.add(rootStrand);
+      });
+
+      // 3. 高大饱满、上瓣圆润且底部两侧内收的清晰大爱心树冠
+      let rngSeed = 73856093;
+      const nextRand = () => {
+        rngSeed = (rngSeed * 1664525 + 1013904223) >>> 0;
+        return rngSeed / 4294967296;
+      };
+
+      const heartCenterY = 2.88;
+      const heartScaleX = 1.95;
+      const heartScaleY = 1.88;
+      const heartPos = (t: number, s: number): [number, number, number] => {
+        const rawX = heartScaleX * s * Math.pow(Math.sin(t), 3);
+        const hy =
+          heartCenterY +
+          heartScaleY *
+            s *
+            ((13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) /
+              16);
+        // 底部两侧叶子向内收拢，收出饱满挺拔的 V 形爱心下弧（避免下腮外鼓）
+        const lowFrac = THREE.MathUtils.clamp((heartCenterY + 0.14 - hy) / (heartScaleY * 1.18), 0, 1);
+        const sideTuck = 1 - 0.28 * Math.sin(lowFrac * Math.PI * 0.85);
+        return [rawX * sideTuck, hy, lowFrac];
+      };
+
+      // 内层深绿实心叶芯（避开顶部心窝凹槽，下端内收）
+      const coreLeafMat = mat(0x1f5522, 0.86);
+      const corePuffGeo = new THREE.IcosahedronGeometry(1, 2);
+      const coreBlobs: [number, number, number, number, number, number][] = [
+        [-0.88, heartCenterY + 0.44, 0, 0.78, 0.74, 0.7],
+        [0.88, heartCenterY + 0.44, 0, 0.78, 0.74, 0.7],
+        [0, heartCenterY - 0.12, 0, 0.72, 0.68, 0.68],
+        [0, heartCenterY - 0.82, 0, 0.38, 0.48, 0.42],
+      ];
+      coreBlobs.forEach(([px, py, pz, rx, ry, rz]) => {
+        const cm = new THREE.Mesh(corePuffGeo, coreLeafMat);
+        cm.position.set(px, py, pz);
+        cm.scale.set(rx, ry, rz);
+        cm.castShadow = true;
+        cm.receiveShadow = true;
+        heartTree.add(cm);
+      });
+
+      // 密实蓬松榕叶簇 InstancedMesh（上丰下收、爱心轮廓清晰）
+      interface LeafTuft {
+        x: number;
+        y: number;
+        z: number;
+        sx: number;
+        sy: number;
+        sz: number;
+        rx: number;
+        ry: number;
+        rz: number;
+        colHex: number;
+      }
+      const tufts: LeafTuft[] = [];
+      const leafPalette = [0x1f5623, 0x286729, 0x32772f, 0x3d8836, 0x48963e];
+
+      const pushTuft = (x: number, y: number, z: number, sizeBias = 1) => {
+        const heightNorm = THREE.MathUtils.clamp((y - (heartCenterY - 1.85)) / 3.4, 0, 1);
+        const shadeIdx = Math.min(
+          leafPalette.length - 1,
+          Math.max(0, Math.floor(heightNorm * 3.7 + nextRand() * 1.2)),
+        );
+        const baseR = (0.28 + nextRand() * 0.11) * sizeBias;
+        tufts.push({
+          x,
+          y,
+          z,
+          sx: baseR * (0.98 + nextRand() * 0.2),
+          sy: baseR * (0.86 + nextRand() * 0.18),
+          sz: baseR * (0.94 + nextRand() * 0.2),
+          rx: (nextRand() - 0.5) * 0.6,
+          ry: nextRand() * Math.PI * 2,
+          rz: (nextRand() - 0.5) * 0.6,
+          colHex: leafPalette[shadeIdx],
+        });
+      };
+
+      const layers: { s: number; tCount: number; zRings: number[] }[] = [
+        { s: 1.0, tCount: 38, zRings: [-0.32, 0, 0.32] },
+        { s: 0.84, tCount: 32, zRings: [-0.64, -0.22, 0.22, 0.64] },
+        { s: 0.62, tCount: 24, zRings: [-0.84, -0.44, 0.44, 0.84] },
+        { s: 0.36, tCount: 14, zRings: [-0.94, 0.94] },
+      ];
+      for (const layer of layers) {
+        for (let i = 0; i < layer.tCount; i++) {
+          const t = ((i + (nextRand() - 0.5) * 0.22) / layer.tCount) * Math.PI * 2;
+          const [hx, hy, lowFrac] = heartPos(t, layer.s);
+          // 刻出清晰饱满的顶部心形凹槽，同时收紧底部两侧叶片大小与厚度
+          const inCleft = Math.abs(hx) < 0.44 && hy > heartCenterY + 0.22;
+          const isTip = hy < heartCenterY - 1.5;
+          const zTaper = 1 - 0.38 * lowFrac;
+          const flankSizeScale = 1 - 0.24 * lowFrac;
+          for (const zr of layer.zRings) {
+            if (inCleft && Math.abs(zr) < 0.58 && layer.s > 0.65) continue;
+            if (isTip && Math.abs(zr) > 0.32) continue;
+            const jitter = isTip ? 0.035 : 0.08;
+            pushTuft(
+              hx + (nextRand() - 0.5) * jitter,
+              hy + (nextRand() - 0.5) * jitter,
+              zr * zTaper + (nextRand() - 0.5) * 0.08,
+              (isTip ? 0.74 : layer.s === 1.0 ? 0.95 : 1.02) * flankSizeScale,
+            );
+          }
+        }
+      }
+
+      const leafGeo = new THREE.IcosahedronGeometry(1, 2);
+      const leafMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.78,
+        flatShading: false,
+      });
+      const leafMesh = new THREE.InstancedMesh(leafGeo, leafMat, tufts.length);
+      leafMesh.castShadow = true;
+      leafMesh.receiveShadow = true;
+
+      const dummy = new THREE.Object3D();
+      const tmpCol = new THREE.Color();
+      tufts.forEach((tf, idx) => {
+        dummy.position.set(tf.x, tf.y, tf.z);
+        dummy.rotation.set(tf.rx, tf.ry, tf.rz);
+        dummy.scale.set(tf.sx, tf.sy, tf.sz);
+        dummy.updateMatrix();
+        leafMesh.setMatrixAt(idx, dummy.matrix);
+        tmpCol.setHex(tf.colHex);
+        leafMesh.setColorAt(idx, tmpCol);
+      });
+      leafMesh.instanceMatrix.needsUpdate = true;
+      if (leafMesh.instanceColor) leafMesh.instanceColor.needsUpdate = true;
+      heartTree.add(leafMesh);
+
+      // 4. 沿收拢后的心形下缘 V 形弧线密密挂满 64 盏小巧暖红灯笼
+      const treeLantMat = new THREE.MeshStandardMaterial({
+        color: 0xec3422,
+        emissive: 0xd92512,
+        emissiveIntensity: 0.86,
+        roughness: 0.35,
+      });
+      const cordMat = mat(0x52341c, 0.7);
+      const lanternBodyGeo = new THREE.SphereGeometry(0.06, 12, 9);
+      const lanternCapGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.013, 8);
+      const lanternTasselGeo = new THREE.CylinderGeometry(0.01, 0.018, 0.056, 7);
+
+      const lanternSpecs: [number, number, number, number][] = [];
+      const zBandBase = [-0.58, -0.34, -0.14, 0.14, 0.34, 0.58];
+      for (let i = 0; i < 64; i++) {
+        const isLeft = i < 32;
+        const idxInSide = isLeft ? i : i - 32;
+        const frac = idxInSide / 31;
+        const t = isLeft
+          ? THREE.MathUtils.lerp(0.46 * Math.PI, 0.84 * Math.PI, frac)
+          : THREE.MathUtils.lerp(1.16 * Math.PI, 1.54 * Math.PI, frac);
+        const widthRatio = Math.max(0.42, Math.abs(Math.sin(t)));
+        let zBand = zBandBase[(i * 5 + (isLeft ? 0 : 3)) % zBandBase.length] * widthRatio;
+        const radialScale = THREE.MathUtils.clamp(1.03 - Math.abs(zBand) * 0.28, 0.8, 1.0);
+        const [lx, canopyY, lowFrac] = heartPos(t, radialScale);
+        zBand *= 1 - 0.32 * lowFrac;
+        const radialXZ = Math.hypot(lx, zBand);
+        if (radialXZ < 0.56) {
+          const minZ = Math.sqrt(Math.max(0, 0.56 * 0.56 - lx * lx));
+          zBand = (zBand >= 0 ? 1 : -1) * Math.max(Math.abs(zBand), minZ);
+        }
+        const dropTier = (i % 3) * 0.075;
+        const cordLen = 0.28 + dropTier;
+        const ly = canopyY - 0.26 - dropTier;
+        lanternSpecs.push([lx, ly, zBand, cordLen]);
+      }
+
+      lanternSpecs.forEach(([lx, ly, lz, cordLen]) => {
+        const lg = new THREE.Group();
+        const cord = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.005, 0.005, cordLen, 5),
+          cordMat,
+        );
+        cord.position.y = cordLen * 0.5;
+        lg.add(cord);
+
+        const body = new THREE.Mesh(lanternBodyGeo, treeLantMat);
+        body.scale.set(1, 0.84, 1);
+        body.position.y = -0.048;
+        lg.add(body);
+
+        for (const cy of [-0.003, -0.092]) {
+          const cap = new THREE.Mesh(lanternCapGeo, trimGold);
+          cap.position.y = cy;
+          lg.add(cap);
+        }
+
+        const tassel = new THREE.Mesh(lanternTasselGeo, trimGold);
+        tassel.position.y = -0.124;
+        lg.add(tassel);
+
+        lg.position.set(lx, ly, lz);
+        heartTree.add(lg);
+      });
+
+      heartTree.position.set(Math.sin(ha) * 12.15, -0.63, Math.cos(ha) * 12.15);
+      heartTree.rotation.y = ha;
+      scene.add(heartTree);
+    }
   }
 
-  /* ================= 4. 经典 7 格边棋盘格子 ================= */
-  const rectTile = (x: number, z: number, w: number, d: number, color: number) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), mat(color));
-    m.position.set(x, 0.06, z);
-    m.receiveShadow = true;
-    scene.add(m);
+  /* ================= 4. 古朴红木漆面棋盘格子 ================= */
+  const hardwoodTex = createHardwoodFrameTexture(anisotropy);
+  const tileCurbMat = new THREE.MeshStandardMaterial({
+    map: hardwoodTex,
+    color: 0xeedcc4,
+    roughness: 0.72,
+  });
+  const slateTrimMat = new THREE.MeshStandardMaterial({
+    color: 0x5b3a24,
+    roughness: 0.62,
+    metalness: 0.06,
+  });
+  const darkenToWoodHex = (hex: number, ratio: number) => {
+    const r = Math.round(((hex >> 16) & 255) * (1 - ratio) + 206 * ratio);
+    const g = Math.round(((hex >> 8) & 255) * (1 - ratio) + 174 * ratio);
+    const b = Math.round((hex & 255) * (1 - ratio) + 134 * ratio);
+    return (r << 16) | (g << 8) | b;
+  };
+  const tileTopMatCache = new Map<string, THREE.MeshStandardMaterial>();
+  const triTopMatCache = new Map<string, THREE.MeshStandardMaterial>();
+  const medallionMatCache = new Map<string, THREE.MeshStandardMaterial>();
+
+  const getTileTopMat = (P: PlayerConfig | null | undefined) => {
+    const key = P ? P.key : 'neutral';
+    let m = tileTopMatCache.get(key);
+    if (!m) {
+      const tex = createAncientTileTexture(
+        P ? P.color : NEUTRAL_CELL,
+        !P,
+        P?.key === 'yier',
+        anisotropy,
+      );
+      m = new THREE.MeshStandardMaterial({
+        map: tex,
+        roughness: P?.key === 'yier' || !P ? 0.66 : 0.58,
+      });
+      tileTopMatCache.set(key, m);
+    }
     return m;
   };
-  const triTile = (ptsXZ: Point2D[], color: number) => {
-    let p = ptsXZ.map(([x, z]) => [x, -z] as Point2D);
+
+  const getTriTopMat = (P: PlayerConfig | null | undefined) => {
+    const key = P ? P.key : 'neutral';
+    let m = triTopMatCache.get(key);
+    if (!m) {
+      const col = !P
+        ? 0xb6906a
+        : P.key === 'yier'
+          ? 0xe5d6b8
+          : darkenToWoodHex(P.color, 0.24);
+      m = new THREE.MeshStandardMaterial({
+        color: col,
+        roughness: P?.key === 'yier' || !P ? 0.66 : 0.58,
+      });
+      triTopMatCache.set(key, m);
+    }
+    return m;
+  };
+
+  const getMedallionMat = (P: PlayerConfig | null | undefined) => {
+    const key = P ? P.key : 'neutral';
+    let m = medallionMatCache.get(key);
+    if (!m) {
+      const tex = createCellMedallionTexture(
+        P ? ringColor(P) : 0xc6c0b0,
+        !P,
+        P?.key === 'yier',
+        anisotropy,
+      );
+      m = new THREE.MeshStandardMaterial({
+        map: tex,
+        transparent: true,
+        roughness: 0.55,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      medallionMatCache.set(key, m);
+    }
+    return m;
+  };
+
+  const rectTile = (
+    x: number,
+    z: number,
+    w: number,
+    d: number,
+    P: PlayerConfig | null | undefined,
+  ) => {
+    // 外框青石底托 + 内嵌矿彩石砖
+    const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), tileCurbMat);
+    base.position.set(x, 0.05, z);
+    base.receiveShadow = true;
+    base.castShadow = true;
+    scene.add(base);
+
+    const inlay = new THREE.Mesh(
+      new THREE.BoxGeometry(Math.max(0.2, w - 0.065), 0.024, Math.max(0.2, d - 0.065)),
+      getTileTopMat(P),
+    );
+    inlay.position.set(x, 0.108, z);
+    inlay.receiveShadow = true;
+    scene.add(inlay);
+    return inlay;
+  };
+
+  const makeTriShape = (pts: Point2D[]) => {
+    let p = pts.map(([x, z]) => [x, -z] as Point2D);
     const area =
       (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) -
       (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
@@ -1799,36 +2259,81 @@ export function buildAncientWorld(
     s.lineTo(p[1][0], p[1][1]);
     s.lineTo(p[2][0], p[2][1]);
     s.closePath();
-    const m = new THREE.Mesh(
-      new THREE.ExtrudeGeometry(s, { depth: 0.12, bevelEnabled: false }),
-      mat(color),
-    );
-    m.rotation.x = -Math.PI / 2;
-    m.position.y = 0;
-    m.receiveShadow = true;
-    scene.add(m);
-    return m;
+    return s;
   };
-  const cellDisc = (x: number, z: number, color: number, rIn = 0.24, rOut = 0.31) => {
-    const r = new THREE.Mesh(new THREE.RingGeometry(rIn, rOut, 24), mat(color));
+
+  const triTile = (
+    ptsXZ: Point2D[],
+    cx: number,
+    cz: number,
+    P: PlayerConfig | null | undefined,
+  ) => {
+    const outer = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(makeTriShape(ptsXZ), { depth: 0.1, bevelEnabled: false }),
+      tileCurbMat,
+    );
+    outer.rotation.x = -Math.PI / 2;
+    outer.position.y = 0;
+    outer.receiveShadow = true;
+    outer.castShadow = true;
+    scene.add(outer);
+
+    // 略微向质心内缩形成倒角青石嵌面
+    const insetPts = ptsXZ.map(([x, z]) => {
+      const dx = x - cx;
+      const dz = z - cz;
+      const len = Math.hypot(dx, dz) || 1;
+      return [x - (dx / len) * 0.045, z - (dz / len) * 0.045] as Point2D;
+    });
+    const inlay = new THREE.Mesh(
+      new THREE.ExtrudeGeometry(makeTriShape(insetPts), {
+        depth: 0.018,
+        bevelEnabled: true,
+        bevelThickness: 0.002,
+        bevelSize: 0.004,
+        bevelSegments: 1,
+      }),
+      getTriTopMat(P),
+    );
+    inlay.rotation.x = -Math.PI / 2;
+    inlay.position.y = 0.1;
+    inlay.receiveShadow = true;
+    scene.add(inlay);
+    return inlay;
+  };
+
+  const cellDisc = (
+    x: number,
+    z: number,
+    P: PlayerConfig | null | undefined,
+    rOut = 0.31,
+  ) => {
+    const r = new THREE.Mesh(new THREE.CircleGeometry(rOut, 28), getMedallionMat(P));
     r.rotation.x = -Math.PI / 2;
-    r.position.set(x, 0.124, z);
+    r.position.set(x, 0.1215, z);
+    r.receiveShadow = true;
     scene.add(r);
   };
 
   RING_TILES.forEach((t, i) => {
     const P = slotPlayer(i % 4);
-    const col = P ? P.colorLight : NEUTRAL_CELL;
     if (t.kind === 'rect') {
-      rectTile(t.x, t.z, t.w, t.d, col);
-      cellDisc(t.cx, t.cz, P ? ringColor(P) : 0xb7bdc0, 0.24, 0.31);
+      rectTile(t.x, t.z, t.w, t.d, P);
+      cellDisc(t.cx, t.cz, P, 0.31);
     } else {
-      triTile(t.pts, col);
-      cellDisc(t.cx, t.cz, P ? ringColor(P) : 0xb7bdc0, 0.19, 0.25);
+      triTile(t.pts, t.cx, t.cz, P);
+      cellDisc(t.cx, t.cz, P, 0.245);
     }
     if (i % 13 === 0 && P) {
       const hc = SLOTS[i / 13].home[0];
-      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.26, 3), mat(lineOf(P)));
+      const arrow = new THREE.Mesh(
+        new THREE.ConeGeometry(0.135, 0.25, 3),
+        new THREE.MeshStandardMaterial({
+          color: lineOf(P),
+          roughness: 0.42,
+          metalness: 0.22,
+        }),
+      );
       arrow.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 1, 0),
         new THREE.Vector3(hc[0] - t.cx, 0, hc[1] - t.cz).normalize(),
@@ -1868,23 +2373,37 @@ export function buildAncientWorld(
     planeMark.rotation.y = fyaw;
     scene.add(planeMark);
 
-    const d = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), mat(lineOf(P)));
-    d.scale.y = 0.38;
+    const d = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.155),
+      new THREE.MeshStandardMaterial({
+        color: lineOf(P),
+        roughness: 0.38,
+        metalness: 0.28,
+      }),
+    );
+    d.scale.y = 0.36;
     d.rotation.y = Math.PI / 4;
-    d.position.set(b[0], 0.16, b[1]);
+    d.position.set(b[0], 0.158, b[1]);
     scene.add(d);
+
+    const dRing = new THREE.Mesh(new THREE.RingGeometry(0.155, 0.195, 20), slateTrimMat);
+    dRing.rotation.x = -Math.PI / 2;
+    dRing.position.set(b[0], 0.123, b[1]);
+    scene.add(dRing);
   });
 
   players.forEach((P) =>
     P.home.forEach((c) => {
-      rectTile(c[0], c[1], 0.72, 0.72, P.colorLight);
-      cellDisc(c[0], c[1], ringColor(P), 0.2, 0.26);
+      rectTile(c[0], c[1], 0.72, 0.72, P);
+      cellDisc(c[0], c[1], P, 0.255);
     }),
   );
 
   /* ================= 5. 1:1 摇摇车手办与基地庭院 ================= */
   const rideToys: RideToyAnim[] = [];
-  const woodMat = mat(0x9b6b45);
+  const courtFences: CourtFenceHighlight[] = [];
+  const fenceStoneBaseMat = mat(0xa6aeb5, 0.88);
+  const fenceStonePlinthMat = mat(0xb6bec4, 0.84);
   const courtyardGrassTop = new THREE.MeshStandardMaterial({
     map: createCourtyardGrassTexture(anisotropy),
     roughness: 1,
@@ -2019,7 +2538,15 @@ export function buildAncientWorld(
     root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
     });
-    rideToys.push({ root, rockerPivot, riderPivot, headPivot, phase: slotId * 1.45 });
+    rideToys.push({
+      root,
+      rockerPivot,
+      riderPivot,
+      headPivot,
+      phase: slotId * 1.45,
+      species: P.species,
+      charKey: P.key,
+    });
     return root;
   };
 
@@ -2028,6 +2555,16 @@ export function buildAncientWorld(
     const P = slotPlayer(j);
     const cx = slot.court[0];
     const cz = slot.court[1];
+    const fenceWoodMat = mat(0xbdb9b1, 0.78);
+    const fenceTrimWoodMat = mat(0xa29f98, 0.72);
+    const fenceCapMat = mat(0xd4d0c8, 0.58);
+    courtFences.push({
+      woodMat: fenceWoodMat,
+      trimMat: fenceTrimWoodMat,
+      capMat: fenceCapMat,
+      active: false,
+      accentHex: 0x56c48c,
+    });
     const grass = new THREE.Mesh(new THREE.BoxGeometry(3.92, 0.16, 3.92), [
       courtyardGrassSide,
       courtyardGrassSide,
@@ -2049,62 +2586,157 @@ export function buildAncientWorld(
       slot.gateAxis === 'z' ? (gz > cz ? 'bottom' : 'top') : gx > cx ? 'right' : 'left';
 
     const sides = [
-      { name: 'top', ex: 0, ez: -R, w: H, d: 0.08 },
-      { name: 'bottom', ex: 0, ez: R, w: H, d: 0.08 },
-      { name: 'left', ex: -R, ez: 0, w: 0.08, d: H },
-      { name: 'right', ex: R, ez: 0, w: 0.08, d: H },
+      { name: 'top', ex: 0, ez: -R, nx: 0, nz: -1, horiz: true },
+      { name: 'bottom', ex: 0, ez: R, nx: 0, nz: 1, horiz: true },
+      { name: 'left', ex: -R, ez: 0, nx: -1, nz: 0, horiz: false },
+      { name: 'right', ex: R, ez: 0, nx: 1, nz: 0, horiz: false },
     ] as const;
 
+    const addWoodPillar = (
+      px: number,
+      pz: number,
+      postW: number,
+      postH: number,
+      plinthW: number,
+      capScale = 1,
+    ) => {
+      const plinth = new THREE.Mesh(
+        new THREE.BoxGeometry(plinthW, 0.068, plinthW),
+        fenceStonePlinthMat,
+      );
+      plinth.position.set(px, 0.112, pz);
+      plinth.castShadow = true;
+      plinth.receiveShadow = true;
+      scene.add(plinth);
+
+      const post = new THREE.Mesh(
+        new THREE.BoxGeometry(postW, postH, postW),
+        fenceWoodMat,
+      );
+      post.position.set(px, 0.146 + postH * 0.5, pz);
+      post.castShadow = true;
+      post.receiveShadow = true;
+      scene.add(post);
+
+      const collar = new THREE.Mesh(
+        new THREE.BoxGeometry(postW + 0.024, 0.026, postW + 0.024),
+        fenceTrimWoodMat,
+      );
+      collar.position.set(px, 0.146 + postH + 0.004, pz);
+      collar.castShadow = true;
+      scene.add(collar);
+
+      const cap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.044 * capScale, 12, 10),
+        fenceCapMat,
+      );
+      cap.scale.y = 0.88;
+      cap.position.set(px, 0.146 + postH + 0.044 * capScale, pz);
+      cap.castShadow = true;
+      scene.add(cap);
+    };
+
+    const addFenceSpan = (
+      a: number,
+      b: number,
+      horiz: boolean,
+      fixedX: number,
+      fixedZ: number,
+    ) => {
+      const len = b - a;
+      if (len <= 0.12) return;
+      const mid = (a + b) * 0.5;
+      const sx = horiz ? mid : fixedX;
+      const sz = horiz ? fixedZ : mid;
+
+      // 青石压脚条（防潮基座，衔接庭院青石与草坪）
+      const stoneCurb = new THREE.Mesh(
+        new THREE.BoxGeometry(horiz ? len : 0.115, 0.06, horiz ? 0.115 : len),
+        fenceStoneBaseMat,
+      );
+      stoneCurb.position.set(sx, 0.11, sz);
+      stoneCurb.castShadow = true;
+      stoneCurb.receiveShadow = true;
+      scene.add(stoneCurb);
+
+      // 下槛 + 腰枋 + 寻杖扶手（浅原木三层清雅栏杆）
+      const rails: [number, number, number, THREE.Material][] = [
+        [0.16, 0.036, 0.058, fenceWoodMat],
+        [0.255, 0.028, 0.048, fenceTrimWoodMat],
+        [0.355, 0.04, 0.084, fenceWoodMat],
+      ];
+      for (const [ry, rh, rw, rMat] of rails) {
+        const rail = new THREE.Mesh(
+          new THREE.BoxGeometry(horiz ? len : rw, rh, horiz ? rw : len),
+          rMat,
+        );
+        rail.position.set(sx, ry, sz);
+        rail.castShadow = true;
+        rail.receiveShadow = true;
+        scene.add(rail);
+      }
+
+      // 竖向清雅细木棂
+      const innerStart = a + 0.08;
+      const innerEnd = b - 0.08;
+      const innerSpan = innerEnd - innerStart;
+      if (innerSpan > 0.08) {
+        const count = Math.max(1, Math.round(innerSpan / 0.3));
+        for (let k = 0; k <= count; k++) {
+          const t = count === 0 ? innerSpan * 0.5 : (k / count) * innerSpan;
+          const pos = innerStart + t;
+          const baluster = new THREE.Mesh(
+            new THREE.BoxGeometry(0.032, 0.185, 0.032),
+            fenceWoodMat,
+          );
+          baluster.position.set(horiz ? pos : fixedX, 0.258, horiz ? fixedZ : pos);
+          baluster.castShadow = true;
+          scene.add(baluster);
+        }
+      }
+    };
+
     sides.forEach((s) => {
-      const horiz = s.w > s.d;
+      const horiz = s.horiz;
+      const fixedX = cx + s.ex;
+      const fixedZ = cz + s.ez;
+      const minEdge = (horiz ? cx : cz) - R + 0.07;
+      const maxEdge = (horiz ? cx : cz) + R - 0.07;
+
       if (s.name === gateOpenSide) {
         const doorCoord = horiz ? gx : gz;
-        const segments: [number, number][] = horiz
-          ? [
-              [cx - R, doorCoord - 0.46],
-              [doorCoord + 0.46, cx + R],
-            ]
-          : [
-              [cz - R, doorCoord - 0.46],
-              [doorCoord + 0.46, cz + R],
-            ];
-        segments.forEach(([a, b]) => {
-          const len = b - a;
-          if (len > 0.14) {
-            const mid = (a + b) / 2;
-            for (const y of [0.35, 0.19]) {
-              const rail = new THREE.Mesh(
-                new THREE.BoxGeometry(horiz ? len : 0.08, 0.055, horiz ? 0.08 : len),
-                woodMat,
-              );
-              rail.position.set(horiz ? mid : cx + s.ex, y, horiz ? cz + s.ez : mid);
-              scene.add(rail);
-            }
-          }
-        });
-        [-0.44, 0.44].forEach((off) => {
-          const p = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.48, 0.13), woodMat);
-          p.position.set(
-            horiz ? doorCoord + off : cx + s.ex,
-            0.32,
-            horiz ? cz + s.ez : doorCoord + off,
+        addFenceSpan(minEdge, doorCoord - 0.5, horiz, fixedX, fixedZ);
+        addFenceSpan(doorCoord + 0.5, maxEdge, horiz, fixedX, fixedZ);
+
+        [-0.5, 0.5].forEach((off) => {
+          const px = horiz ? doorCoord + off : fixedX;
+          const pz = horiz ? fixedZ : doorCoord + off;
+          addWoodPillar(px, pz, 0.12, 0.38, 0.155, 1.1);
+
+          // 门侧小青石抱鼓石（外沿点缀，不占门洞通道）
+          const drum = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.052, 0.058, 0.13, 14),
+            fenceStonePlinthMat,
           );
-          p.castShadow = true;
-          scene.add(p);
+          drum.rotation.z = horiz ? 0 : Math.PI / 2;
+          drum.rotation.x = horiz ? Math.PI / 2 : 0;
+          drum.position.set(px + s.nx * 0.08, 0.142, pz + s.nz * 0.08);
+          drum.castShadow = true;
+          drum.receiveShadow = true;
+          scene.add(drum);
         });
       } else {
-        for (let i = 1; i < 4; i++) {
-          const t = -R + i * (H / 4);
-          const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.38, 0.09), woodMat);
-          post.position.set(horiz ? cx + t : cx + s.ex, 0.27, horiz ? cz + s.ez : cz + t);
-          post.castShadow = true;
-          scene.add(post);
-        }
-        for (const y of [0.35, 0.19]) {
-          const rail = new THREE.Mesh(new THREE.BoxGeometry(s.w, 0.055, s.d), woodMat);
-          rail.position.set(cx + s.ex, y, cz + s.ez);
-          scene.add(rail);
-        }
+        const centerCoord = horiz ? cx : cz;
+        addFenceSpan(minEdge, centerCoord - 0.05, horiz, fixedX, fixedZ);
+        addFenceSpan(centerCoord + 0.05, maxEdge, horiz, fixedX, fixedZ);
+        addWoodPillar(
+          horiz ? cx : fixedX,
+          horiz ? fixedZ : cz,
+          0.1,
+          0.31,
+          0.135,
+          0.9,
+        );
       }
     });
 
@@ -2114,10 +2746,7 @@ export function buildAncientWorld(
       [-1, 1],
       [1, 1],
     ]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.44, 0.13), woodMat);
-      post.position.set(cx + sx * (R - 0.02), 0.3, cz + sz * (R - 0.02));
-      post.castShadow = true;
-      scene.add(post);
+      addWoodPillar(cx + sx * (R - 0.02), cz + sz * (R - 0.02), 0.115, 0.33, 0.15, 1.0);
     }
 
     if (P) {
@@ -2128,27 +2757,40 @@ export function buildAncientWorld(
 
       const bxCenter = P.base.reduce((s, b) => s + b[0], 0) / 4;
       const bzCenter = P.base.reduce((s, b) => s + b[1], 0) / 4;
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(2.26, 0.05, 2.26), mat(P.colorLight));
-      slab.position.set(bxCenter, 0.09, bzCenter);
+      const slabCurb = new THREE.Mesh(new THREE.BoxGeometry(2.36, 0.04, 2.36), tileCurbMat);
+      slabCurb.position.set(bxCenter, 0.084, bzCenter);
+      slabCurb.receiveShadow = true;
+      slabCurb.castShadow = true;
+      scene.add(slabCurb);
+
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(2.22, 0.044, 2.22), getTileTopMat(P));
+      slab.position.set(bxCenter, 0.092, bzCenter);
       slab.receiveShadow = true;
       slab.castShadow = true;
       scene.add(slab);
 
+      const boxwoodStandMat = mat(0xd4be96, 0.66);
+      const standRimMat = new THREE.MeshStandardMaterial({
+        color: lineOf(P),
+        roughness: 0.48,
+        metalness: 0.1,
+      });
       P.base.forEach((b) => {
         const pad = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.42, 0.42, 0.035, 28),
-          mat(0xffffff),
+          new THREE.CylinderGeometry(0.41, 0.44, 0.034, 8),
+          boxwoodStandMat,
         );
+        pad.rotation.y = Math.PI / 8;
         pad.position.set(b[0], 0.125, b[1]);
         pad.receiveShadow = true;
         pad.castShadow = true;
         scene.add(pad);
         const rim = new THREE.Mesh(
-          new THREE.TorusGeometry(0.4, 0.03, 10, 32),
-          mat(lineOf(P)),
+          new THREE.TorusGeometry(0.39, 0.024, 10, 32),
+          standRimMat,
         );
         rim.rotation.x = -Math.PI / 2;
-        rim.position.set(b[0], 0.14, b[1]);
+        rim.position.set(b[0], 0.141, b[1]);
         scene.add(rim);
       });
 
@@ -2162,124 +2804,314 @@ export function buildAncientWorld(
       const pathDir = lVec.clone().sub(gVec).normalize();
       const pathStart = gVec.clone().addScaledVector(pathDir, 0.12);
       const pathLen = Math.max(0.18, pathStart.distanceTo(lVec));
+
+      const gateCurb = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 0.032, pathLen + 0.04),
+        tileCurbMat,
+      );
+      gateCurb.position.copy(pathStart).lerp(lVec, 0.5);
+      gateCurb.position.y = 0.086;
+      gateCurb.rotation.y = Math.atan2(lx - gx, lz - gz);
+      gateCurb.receiveShadow = true;
+      scene.add(gateCurb);
+
       const gatePath = new THREE.Mesh(
-        new THREE.BoxGeometry(0.54, 0.036, pathLen),
-        mat(P.colorLight),
+        new THREE.BoxGeometry(0.48, 0.034, pathLen),
+        getTileTopMat(P),
       );
       gatePath.position.copy(pathStart).lerp(lVec, 0.5);
+      gatePath.position.y = 0.094;
       gatePath.rotation.y = Math.atan2(lx - gx, lz - gz);
       gatePath.receiveShadow = true;
       scene.add(gatePath);
 
-      const startBase = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.44, 0.48, 0.11, 32),
-        mat(P.color),
+      // 八角雕木启程台（老胡桃木底阶 + 漆木鼓座 + 乌木压箍 + 木刻篆印盘面）
+      const startPlinth = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.47, 0.52, 0.056, 8),
+        tileCurbMat,
       );
-      startBase.position.set(lx, 0.075, lz);
+      startPlinth.rotation.y = Math.PI / 8;
+      startPlinth.position.set(lx, 0.062, lz);
+      startPlinth.castShadow = true;
+      startPlinth.receiveShadow = true;
+      scene.add(startPlinth);
+
+      const startBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.41, 0.44, 0.034, 28),
+        mat(P.key === 'yier' ? 0xd9c6a3 : darkenToWoodHex(P.color, 0.24), 0.62),
+      );
+      startBase.position.set(lx, 0.104, lz);
       startBase.castShadow = true;
       startBase.receiveShadow = true;
       scene.add(startBase);
 
+      const startCollar = new THREE.Mesh(
+        new THREE.TorusGeometry(0.415, 0.018, 8, 28),
+        slateTrimMat,
+      );
+      startCollar.rotation.x = -Math.PI / 2;
+      startCollar.position.set(lx, 0.118, lz);
+      scene.add(startCollar);
+
       const startTop = new THREE.Mesh(
-        new THREE.CircleGeometry(0.42, 32),
+        new THREE.CircleGeometry(0.405, 32),
         new THREE.MeshStandardMaterial({
           map: createStartPadTexture(P, anisotropy),
-          roughness: 0.45,
+          roughness: 0.58,
         }),
       );
       startTop.rotation.x = -Math.PI / 2;
       startTop.rotation.z = Math.atan2(tx - lx, tz - lz);
-      startTop.position.set(lx, 0.132, lz);
+      startTop.position.set(lx, 0.123, lz);
+      startTop.receiveShadow = true;
       scene.add(startTop);
 
-      const stepArrow = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.26, 3), mat(lineOf(P)));
+      const stepArrow = new THREE.Mesh(
+        new THREE.ConeGeometry(0.135, 0.25, 3),
+        new THREE.MeshStandardMaterial({
+          color: lineOf(P),
+          roughness: 0.4,
+          metalness: 0.25,
+        }),
+      );
       stepArrow.quaternion.setFromUnitVectors(
         new THREE.Vector3(0, 1, 0),
         new THREE.Vector3(tx - lx, 0, tz - lz).normalize(),
       );
-      stepArrow.scale.set(1.1, 0.3, 1);
+      stepArrow.scale.set(1.1, 0.28, 1);
       stepArrow.position.set((lx + tx) / 2, 0.125, (lz + tz) / 2);
       scene.add(stepArrow);
     }
   }
 
-  // 中央终点区（放大版）
-  addBox(0, 0, 3.64, 0.1, 3.64, 0x767e86, 0.05);
-  const trimMat = new THREE.MeshStandardMaterial({
-    color: 0xc9a227,
-    roughness: 0.35,
-    metalness: 0.55,
+  // 中央终点区（古朴红木榫卯四方台 + 八角檀木螺钿骰盘）
+  const darkRosewoodMat = mat(0x6e472d, 0.7);
+  const chestnutWoodMat = new THREE.MeshStandardMaterial({
+    map: hardwoodTex,
+    color: 0xf7e6cf,
+    roughness: 0.64,
+  });
+  const ebonyInlayMat = new THREE.MeshStandardMaterial({
+    color: 0x4d2f1c,
+    roughness: 0.58,
+    metalness: 0.06,
+  });
+  const boxwoodStudMat = mat(0xdcc69e, 0.58);
+
+  // 底层老红木台基
+  addBox(0, 0, 3.88, 0.1, 3.88, 0x6e472d, 0.05);
+
+  // 外圈花梨木框 + 内嵌乌木压线（传统中式棋盘榫卯框）
+  const borderR = 1.83;
+  [
+    [0, borderR, 3.78, 0.11],
+    [0, -borderR, 3.78, 0.11],
+    [borderR, 0, 0.11, 3.78],
+    [-borderR, 0, 0.11, 3.78],
+  ].forEach(([x, z, w, d]) => {
+    const curb = new THREE.Mesh(new THREE.BoxGeometry(w, 0.034, d), chestnutWoodMat);
+    curb.position.set(x, 0.11, z);
+    curb.receiveShadow = true;
+    curb.castShadow = true;
+    scene.add(curb);
   });
   [
-    [0, 1.8, 3.68, 0.07],
-    [0, -1.8, 3.68, 0.07],
-    [1.8, 0, 0.07, 3.68],
-    [-1.8, 0, 0.07, 3.68],
+    [0, 1.755, 3.55, 0.044],
+    [0, -1.755, 3.55, 0.044],
+    [1.755, 0, 0.044, 3.55],
+    [-1.755, 0, 0.044, 3.55],
   ].forEach(([x, z, w, d]) => {
-    const t2 = new THREE.Mesh(new THREE.BoxGeometry(w, 0.03, d), trimMat);
-    t2.position.set(x, 0.12, z);
-    scene.add(t2);
+    const inlayBand = new THREE.Mesh(new THREE.BoxGeometry(w, 0.022, d), ebonyInlayMat);
+    inlayBand.position.set(x, 0.118, z);
+    inlayBand.receiveShadow = true;
+    scene.add(inlayBand);
   });
 
-  const tri = (pts: Point2D[], color: number) => {
-    const s = new THREE.Shape();
-    s.moveTo(pts[0][0], pts[0][1]);
-    s.lineTo(pts[1][0], pts[1][1]);
-    s.lineTo(pts[2][0], pts[2][1]);
-    s.closePath();
-    const m = new THREE.Mesh(new THREE.ShapeGeometry(s), mat(color));
-    m.rotation.x = -Math.PI / 2;
-    m.position.y = 0.11;
-    m.receiveShadow = true;
-    scene.add(m);
-    return m;
-  };
-  const triTint = (j: number) => {
-    const P = slotPlayer(j);
-    return P ? P.color : 0xe4dbc8;
-  };
-  tri(
-    [
-      [-1.78, -1.78],
-      [-1.78, 1.78],
-      [0, 0],
-    ],
-    triTint(0),
-  );
-  tri(
-    [
-      [1.78, -1.78],
-      [1.78, 1.78],
-      [0, 0],
-    ],
-    triTint(2),
-  );
-  tri(
-    [
-      [-1.78, 1.78],
-      [1.78, 1.78],
-      [0, 0],
-    ],
-    triTint(1),
-  );
-  tri(
-    [
-      [-1.78, -1.78],
-      [1.78, -1.78],
-      [0, 0],
-    ],
-    triTint(3),
-  );
+  // 四隅榫卯木柱墩 + 黄杨木圆顶
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.052, 0.19), darkRosewoodMat);
+      pier.position.set(1.82 * sx, 0.118, 1.82 * sz);
+      pier.castShadow = true;
+      pier.receiveShadow = true;
+      scene.add(pier);
 
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.02, 0.145), ebonyInlayMat);
+      cap.position.set(1.82 * sx, 0.15, 1.82 * sz);
+      cap.castShadow = true;
+      scene.add(cap);
+
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 8), boxwoodStudMat);
+      bead.scale.y = 0.82;
+      bead.position.set(1.82 * sx, 0.178, 1.82 * sz);
+      scene.add(bead);
+    }
+  }
+
+  // 四方大漆木板终点扇区
+  const buildGoalBay = (
+    p0: Point2D,
+    p1: Point2D,
+    apex: Point2D,
+    P: PlayerConfig | null | undefined,
+  ) => {
+    const v0 = new THREE.Vector3(p0[0], 0.112, p0[1]);
+    const v1 = new THREE.Vector3(p1[0], 0.112, p1[1]);
+    const v2 = new THREE.Vector3(apex[0], 0.112, apex[1]);
+    const crossY = (v1.x - v0.x) * (v2.z - v0.z) - (v1.z - v0.z) * (v2.x - v0.x);
+    const positions =
+      crossY < 0
+        ? new Float32Array([v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z])
+        : new Float32Array([v0.x, v0.y, v0.z, v2.x, v2.y, v2.z, v1.x, v1.y, v1.z]);
+    const uvs =
+      crossY < 0
+        ? new Float32Array([0, 0, 1, 0, 0.5, 1])
+        : new Float32Array([0, 0, 0.5, 1, 1, 0]);
+    const normals = new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+
+    const tex = createGoalTriangleTexture(P ? P.color : null, P?.key === 'yier', anisotropy);
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        map: tex,
+        roughness: P?.key === 'yier' || !P ? 0.66 : 0.58,
+      }),
+    );
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  };
+
+  buildGoalBay([-1.75, -1.75], [-1.75, 1.75], [0, 0], slotPlayer(0));
+  buildGoalBay([1.75, -1.75], [1.75, 1.75], [0, 0], slotPlayer(2));
+  buildGoalBay([-1.75, 1.75], [1.75, 1.75], [0, 0], slotPlayer(1));
+  buildGoalBay([-1.75, -1.75], [1.75, -1.75], [0, 0], slotPlayer(3));
+
+  // 四条对角乌木镶花梨分界梁
+  for (let k = 0; k < 4; k++) {
+    const a = k * (Math.PI / 2) + Math.PI / 4;
+    const rIn = 0.68;
+    const rOut = 2.46;
+    const midR = (rIn + rOut) * 0.5;
+    const len = rOut - rIn;
+
+    const woodRib = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.018, len), ebonyInlayMat);
+    woodRib.position.set(Math.cos(a) * midR, 0.114, Math.sin(a) * midR);
+    woodRib.rotation.y = Math.atan2(Math.cos(a), Math.sin(a));
+    woodRib.receiveShadow = true;
+    scene.add(woodRib);
+
+    const ridgeRib = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.022, len - 0.04), chestnutWoodMat);
+    ridgeRib.position.set(Math.cos(a) * midR, 0.117, Math.sin(a) * midR);
+    ridgeRib.rotation.y = woodRib.rotation.y;
+    scene.add(ridgeRib);
+  }
+
+  // 终点归位红木莲印垫座（顶面与 y=0.120 严丝合缝）
   players.forEach((P) => {
-    const rim = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.31, 24), mat(ringColor(P)));
-    rim.rotation.x = -Math.PI / 2;
-    rim.position.set(P.final[0], 0.118, P.final[1]);
-    scene.add(rim);
+    const baseDisc = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.32, 0.35, 0.014, 8),
+      darkRosewoodMat,
+    );
+    baseDisc.rotation.y = Math.PI / 8;
+    baseDisc.position.set(P.final[0], 0.113, P.final[1]);
+    baseDisc.receiveShadow = true;
+    scene.add(baseDisc);
+
+    const sealRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.22, 0.28, 24),
+      new THREE.MeshStandardMaterial({
+        color: P.key === 'yier' ? 0x5e3b24 : lineOf(P),
+        roughness: 0.48,
+        metalness: 0.08,
+      }),
+    );
+    sealRing.rotation.x = -Math.PI / 2;
+    sealRing.position.set(P.final[0], 0.1208, P.final[1]);
+    scene.add(sealRing);
+
+    const innerWoodRing = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.215, 24), boxwoodStudMat);
+    innerWoodRing.rotation.x = -Math.PI / 2;
+    innerWoodRing.position.set(P.final[0], 0.1206, P.final[1]);
+    scene.add(innerWoodRing);
   });
-  const centerCap = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, 0.05, 24), trimMat);
-  centerCap.position.y = 0.125;
-  scene.add(centerCap);
+
+  // 中央八角檀木螺钿骰盘（三层红木束腰底座 + 螺钿木纹盘面，顶面高度 y = 0.250）
+  const altarGroup = new THREE.Group();
+  const altarTier1 = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.64, 0.7, 0.052, 8),
+    darkRosewoodMat,
+  );
+  altarTier1.rotation.y = Math.PI / 8;
+  altarTier1.position.y = 0.136;
+  altarTier1.castShadow = true;
+  altarTier1.receiveShadow = true;
+  altarGroup.add(altarTier1);
+
+  const altarCollar = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.57, 0.58, 0.014, 8),
+    chestnutWoodMat,
+  );
+  altarCollar.rotation.y = Math.PI / 8;
+  altarCollar.position.y = 0.166;
+  altarGroup.add(altarCollar);
+
+  const altarWaist = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.54, 0.56, 0.036, 8),
+    ebonyInlayMat,
+  );
+  altarWaist.rotation.y = Math.PI / 8;
+  altarWaist.position.y = 0.183;
+  altarWaist.castShadow = true;
+  altarGroup.add(altarWaist);
+
+  const altarTopWood = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.59, 0.56, 0.046, 8),
+    chestnutWoodMat,
+  );
+  altarTopWood.rotation.y = Math.PI / 8;
+  altarTopWood.position.y = 0.223;
+  altarTopWood.castShadow = true;
+  altarTopWood.receiveShadow = true;
+  altarGroup.add(altarTopWood);
+
+  const altarPlate = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.49, 0.5, 0.008, 36),
+    new THREE.MeshStandardMaterial({
+      map: createDiceAltarTexture(anisotropy),
+      roughness: 0.56,
+      metalness: 0.06,
+    }),
+  );
+  altarPlate.position.y = 0.246;
+  altarPlate.receiveShadow = true;
+  altarGroup.add(altarPlate);
+
+  // 八角木雕小望柱桩钉（位于骰子旋转包络半径之外）
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4 + Math.PI / 8;
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.026, 0.032, 0.018, 8),
+      darkRosewoodMat,
+    );
+    post.position.set(Math.cos(a) * 0.535, 0.252, Math.sin(a) * 0.535);
+    altarGroup.add(post);
+
+    const stud = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), boxwoodStudMat);
+    stud.scale.y = 0.72;
+    stud.position.set(Math.cos(a) * 0.535, 0.264, Math.sin(a) * 0.535);
+    altarGroup.add(stud);
+  }
+  scene.add(altarGroup);
+
+  const trimMat = new THREE.MeshStandardMaterial({
+    color: 0xb48f3e,
+    roughness: 0.36,
+    metalness: 0.55,
+  });
 
   // 四角角楼（紧贴石台顶面 y=0.08，无悬空）
   for (let j = 0; j < 4; j++) {
@@ -2565,18 +3397,189 @@ export function buildAncientWorld(
     return g;
   };
 
-  const makeCuteBird = (): { g: THREE.Group; mode: BirdFlightMode; scale: number; dur: number } => {
+  const makeSeagull = (): {
+    g: THREE.Group;
+    mode: BirdFlightMode;
+    scale: number;
+    dur: number;
+    species: BirdSpecies;
+  } => {
+    const whiteMat = mat(0xfbf9f3, 0.56);
+    const greyMat = mat(0x666a70, 0.58);
+    const tipMat = mat(0x2e231e, 0.56);
+    const beakYellowMat = mat(0xf1b632, 0.42);
+    const legYellowMat = mat(0xe8a928, 0.45);
+
+    const g = new THREE.Group();
+    const bodyRoot = new THREE.Group();
+    g.add(bodyRoot);
+
+    // 圆润饱满的白色海鸥躯干与挺拔胸颈曲线
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.112, 16, 14), whiteMat);
+    torso.scale.set(0.86, 0.84, 1.32);
+    torso.rotation.x = -0.18;
+    torso.castShadow = true;
+    bodyRoot.add(torso);
+
+    const chestBridge = new THREE.Mesh(new THREE.SphereGeometry(0.086, 14, 12), whiteMat);
+    chestBridge.scale.set(0.84, 0.96, 0.94);
+    chestBridge.position.set(0, 0.048, 0.082);
+    chestBridge.castShadow = true;
+    bodyRoot.add(chestBridge);
+
+    // 灰羽背鞍（衔接双翼）
+    const mantle = new THREE.Mesh(new THREE.SphereGeometry(0.094, 14, 12), greyMat);
+    mantle.scale.set(0.84, 0.48, 1.12);
+    mantle.position.set(0, 0.044, -0.022);
+    mantle.rotation.x = -0.18;
+    bodyRoot.add(mantle);
+
+    // 可独立扭头张望的 Q 版圆白小脑袋 + 小豆眼 + 短圆黄喙
+    const headPivot = new THREE.Group();
+    headPivot.position.set(0, 0.11, 0.11);
+    bodyRoot.add(headPivot);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.078, 16, 14), whiteMat);
+    head.scale.set(0.97, 0.97, 1.02);
+    head.position.set(0, 0.026, 0.008);
+    head.castShadow = true;
+    headPivot.add(head);
+
+    for (const sx of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0115, 8, 8), eyeDark);
+      eye.position.set(0.052 * sx, 0.036, 0.056);
+      headPivot.add(eye);
+    }
+
+    const upperBill = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 10), beakYellowMat);
+    upperBill.scale.set(0.68, 0.56, 1.36);
+    upperBill.position.set(0, 0.018, 0.092);
+    upperBill.rotation.x = 0.14;
+    headPivot.add(upperBill);
+
+    const lowerBill = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), beakYellowMat);
+    lowerBill.scale.set(0.62, 0.36, 1.15);
+    lowerBill.position.set(0, 0.005, 0.086);
+    lowerBill.rotation.x = 0.05;
+    headPivot.add(lowerBill);
+
+    // 站立停歇时收拢的杏仁形灰翼 + 黑棕飞羽尾尖（还原参考图侧影）
+    const foldedWings = new THREE.Group();
+    for (const sx of [-1, 1]) {
+      const fWing = new THREE.Mesh(new THREE.SphereGeometry(0.078, 14, 12), greyMat);
+      fWing.scale.set(0.56, 0.78, 1.65);
+      fWing.position.set(0.082 * sx, 0.028, -0.042);
+      fWing.rotation.set(-0.18, sx * -0.16, sx * 0.18);
+      fWing.castShadow = true;
+      foldedWings.add(fWing);
+
+      const fTip = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.145, 8), tipMat);
+      fTip.scale.set(0.62, 1, 0.88);
+      fTip.position.set(0.034 * sx, -0.004, -0.178);
+      fTip.rotation.set(-Math.PI / 2 - 0.18, 0, sx * 0.1);
+      foldedWings.add(fTip);
+    }
+    const foldedTail = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.018, 0.13), tipMat);
+    foldedTail.position.set(0, -0.008, -0.18);
+    foldedTail.rotation.x = -0.18;
+    foldedWings.add(foldedTail);
+    foldedWings.visible = false;
+    bodyRoot.add(foldedWings);
+
+    // 飞行展开双翼（灰色主翼 + 深棕黑翼梢）
+    const lw = new THREE.Group();
+    lw.position.set(-0.066, 0.035, 0.02);
+    const rw = new THREE.Group();
+    rw.position.set(0.066, 0.035, 0.02);
+    const wingSpan = 0.31;
+    const wingChord = 0.135;
+    for (const [wg, sx] of [
+      [lw, -1],
+      [rw, 1],
+    ] as const) {
+      const inner = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8), greyMat);
+      inner.scale.set(wingSpan, 0.032, wingChord);
+      inner.position.set(sx * wingSpan * 0.45, 0, -0.01);
+      wg.add(inner);
+
+      const tip = new THREE.Mesh(
+        new THREE.ConeGeometry(wingChord * 0.42, wingSpan * 0.56, 5),
+        tipMat,
+      );
+      tip.scale.set(1, 1, 0.25);
+      tip.rotation.z = (sx * -Math.PI) / 2;
+      tip.rotation.y = sx * -0.28;
+      tip.position.set(sx * wingSpan * 0.92, 0, -0.035);
+      wg.add(tip);
+      bodyRoot.add(wg);
+    }
+
+    const flyTail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.016, 0.13), tipMat);
+    flyTail.position.set(0, 0.012, -0.175);
+    flyTail.rotation.x = 0.14;
+    bodyRoot.add(flyTail);
+
+    // 细黄脚丫（停落时从腹下伸出，脚底恰好位于 local y = 0 贴合布布头顶）
+    const legsGrp = new THREE.Group();
+    legsGrp.position.set(0, -0.05, 0.006);
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.0085, 0.0075, 0.095, 7), legYellowMat);
+      leg.position.set(0.034 * sx, -0.045, 0);
+      legsGrp.add(leg);
+
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.009, 0.044), legYellowMat);
+      foot.position.set(0.034 * sx, -0.0905, 0.012);
+      legsGrp.add(foot);
+    }
+    legsGrp.visible = false;
+    bodyRoot.add(legsGrp);
+
+    g.userData.bodyRoot = bodyRoot;
+    g.userData.headPivot = headPivot;
+    g.userData.foldedWings = foldedWings;
+    g.userData.flyTail = flyTail;
+    g.userData.legsGrp = legsGrp;
+    g.userData.lw = lw;
+    g.userData.rw = rw;
+
+    const scale = 0.94;
+    g.scale.setScalar(scale);
+    return {
+      g,
+      mode: Math.random() < 0.6 ? 'soar' : 'circle',
+      scale,
+      dur: rnd(10.5, 14.5),
+      species: 'seagull',
+    };
+  };
+
+  const makeCuteBird = (
+    forcedSpecies?: BirdSpecies,
+  ): {
+    g: THREE.Group;
+    mode: BirdFlightMode;
+    scale: number;
+    dur: number;
+    species: BirdSpecies;
+  } => {
     const speciesRoll = Math.random();
-    const species =
-      speciesRoll < 0.24
-        ? 'egret'
-        : speciesRoll < 0.48
-          ? 'swallow'
-          : speciesRoll < 0.72
-            ? 'kingfisher'
-            : speciesRoll < 0.88
-              ? 'oriole'
-              : 'robin';
+    const species: BirdSpecies =
+      forcedSpecies ??
+      (speciesRoll < 0.2
+        ? 'seagull'
+        : speciesRoll < 0.4
+          ? 'egret'
+          : speciesRoll < 0.6
+            ? 'swallow'
+            : speciesRoll < 0.8
+              ? 'kingfisher'
+              : speciesRoll < 0.92
+                ? 'oriole'
+                : 'robin');
+
+    if (species === 'seagull') {
+      return makeSeagull();
+    }
 
     const palette = {
       egret: {
@@ -2752,7 +3755,7 @@ export function buildAncientWorld(
     g.userData.lw = lw;
     g.userData.rw = rw;
     g.scale.setScalar(palette.scale);
-    return { g, mode: palette.mode, scale: palette.scale, dur: palette.dur };
+    return { g, mode: palette.mode, scale: palette.scale, dur: palette.dur, species };
   };
 
   const fMats = [0xff8ab8, 0x67b8e3, 0xffcf56, 0xb896ff].map(
@@ -2992,7 +3995,10 @@ export function buildAncientWorld(
     });
   }
 
-  const spawnCritter = (kind: 'rabbit' | 'bird' | 'fly' | 'fish') => {
+  const spawnCritter = (
+    kind: 'rabbit' | 'bird' | 'fly' | 'fish',
+    opts?: SpawnBirdOptions,
+  ) => {
     if (kind === 'rabbit') {
       const g = makeCuteBunny();
       let x = 25.0;
@@ -3030,7 +4036,66 @@ export function buildAncientWorld(
         baseScale,
       });
     } else if (kind === 'bird') {
-      const { g, mode, dur } = makeCuteBird();
+      const { g, mode, dur, species } = makeCuteBird(opts?.species);
+      const hasActivePerch = critters.some((c) => c.kind === 'bird' && c.perchTarget);
+      const wantPerch =
+        species === 'seagull' &&
+        !hasActivePerch &&
+        rideToys.length > 0 &&
+        (opts?.perch === true || (opts?.perch !== false && Math.random() < 0.72));
+
+      if (wantPerch) {
+        const bubuToys = rideToys.filter((rt) => rt.species === 'bear');
+        const pool = bubuToys.length > 0 ? bubuToys : rideToys;
+        const targetToy = pool[(Math.random() * pool.length) | 0];
+        targetToy.headPivot.updateWorldMatrix(true, false);
+        const headCrown = new THREE.Vector3(0, 0.514, 0);
+        targetToy.headPivot.localToWorld(headCrown);
+
+        const approachAngle =
+          Math.atan2(headCrown.x, headCrown.z) + rnd(-0.85, 0.85);
+        const R = rnd(21.0, 26.5);
+        const from = new THREE.Vector3(
+          Math.sin(approachAngle) * R,
+          rnd(6.4, 8.6),
+          Math.cos(approachAngle) * R,
+        );
+        const midPt = from.clone().lerp(headCrown, 0.52);
+        const perpX = -Math.cos(approachAngle);
+        const perpZ = Math.sin(approachAngle);
+        const sideSwing = (Math.random() < 0.5 ? 1 : -1) * rnd(2.2, 4.4);
+        const ctrl = new THREE.Vector3(
+          midPt.x + perpX * sideSwing,
+          headCrown.y + rnd(3.2, 4.6),
+          midPt.z + perpZ * sideSwing,
+        );
+        g.position.copy(from);
+        g.lookAt(ctrl);
+        scene.add(g);
+        critters.push({
+          kind: 'bird',
+          g,
+          ttl: 40,
+          from,
+          to: headCrown.clone(),
+          ctrl,
+          prog: 0,
+          dur: 3.4,
+          flap: rnd(0, 6),
+          mode: 'soar',
+          phase: rnd(0, 6.28),
+          circleR: 15,
+          circleSpeed: 5,
+          species,
+          perchTarget: targetToy,
+          perchPhase: 'approach',
+          perchT: 0,
+          perchDur: rnd(3.1, 3.8),
+          perchYaw: (Math.random() < 0.5 ? -1 : 1) * Math.PI * 0.42,
+        });
+        return;
+      }
+
       const a = rnd(0, 6.28);
       const R = rnd(24.5, 30.5);
       const h =
@@ -3071,6 +4136,7 @@ export function buildAncientWorld(
         phase: rnd(0, 6.28),
         circleR: rnd(13.5, 19.0),
         circleSpeed: (Math.random() < 0.5 ? 1 : -1) * rnd(4.5, 6.5),
+        species,
       });
     } else if (kind === 'fly') {
       const g = makeButterfly();
@@ -3159,12 +4225,18 @@ export function buildAncientWorld(
     const hatMat = mat(0xd8c38a, 0.78);
     const hatRimMat = mat(0x8e7242, 0.8);
     const oarMat = mat(0x7c5b37, 0.74);
-    const skinMat = mat(0xf5d9bc, 0.62);
-    const blushMat = mat(0xf39ca3, 0.7);
-    const eyeDark = mat(0x1f1916, 0.25);
-    const hairMat = mat(0x28252a, 0.52);
-    const goldAccent = mat(0xd8b14a, 0.38);
-    const jadeMat = mat(0x6ec2a8, 0.42);
+    const oarPaddleMat = mat(0x634527, 0.76);
+    const skinMat = mat(0xf6dcc2, 0.58);
+    const blushMat = mat(0xf39ca3, 0.68);
+    const eyeDark = mat(0x1f1916, 0.22);
+    const lipMat = mat(0xde7a82, 0.55);
+    const hairMat = mat(0x221f25, 0.48);
+    const goldAccent = mat(0xd8b14a, 0.36);
+    const jadeMat = mat(0x6ec2a8, 0.4);
+    const ivoryTrimMat = mat(0xf5f0e4, 0.62);
+    const pinkRibbonMat = mat(0xf2b9c2, 0.62);
+    const deepTealTrimMat = mat(0x275755, 0.66);
+    const fanPaperMat = mat(0xf8f1dc, 0.68);
     const teaPotMat = mat(0x88c2b2, 0.35);
     const wakeTex = createWakeTexture(anisotropy);
     const hullFoamTex = createHullFoamTexture(anisotropy);
@@ -3195,22 +4267,33 @@ export function buildAncientWorld(
       roughness: 0.35,
     });
 
-    const addCuteFace = (parent: THREE.Group, headY: number, zOff: number) => {
+    const addCuteFace = (parent: THREE.Group, headY: number, zOff: number, refined = false) => {
       for (const sx of [-1, 1]) {
-        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0085, 8, 6), eyeDark);
-        eye.position.set(0.02 * sx, headY + 0.004, zOff);
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(refined ? 0.0068 : 0.0082, 8, 6), eyeDark);
+        eye.position.set((refined ? 0.016 : 0.02) * sx, headY + 0.004, zOff);
         parent.add(eye);
-        const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), blushMat);
-        cheek.scale.set(1.1, 0.65, 0.45);
-        cheek.position.set(0.03 * sx, headY - 0.012, zOff - 0.006);
+        const cheek = new THREE.Mesh(new THREE.SphereGeometry(refined ? 0.0085 : 0.0105, 8, 6), blushMat);
+        cheek.scale.set(1.1, 0.62, 0.42);
+        cheek.position.set((refined ? 0.024 : 0.03) * sx, headY - 0.009, zOff - 0.005);
         parent.add(cheek);
+      }
+      if (refined) {
+        const lip = new THREE.Mesh(new THREE.SphereGeometry(0.0046, 6, 6), lipMat);
+        lip.scale.set(1.3, 0.55, 0.5);
+        lip.position.set(0, headY - 0.017, zOff + 0.001);
+        parent.add(lip);
       }
     };
 
-    const makeBoat = (dir: number, passenger: { cloth: number; variant: 'scholar' | 'maiden' }) => {
+    const makeBoat = (
+      dir: number,
+      initTh: number,
+      rOff: number,
+      passenger: { cloth: number; variant: 'scholar' | 'maiden' },
+    ) => {
       const g = new THREE.Group();
 
-      // 流畅弯翘木船身 + 内舱木板 + 船舷压条（不再向水底投射浮空黑影）
+      // 流畅弯翘木船身 + 内舱木板 + 船舷压条
       const hull = new THREE.Mesh(hullGeo, woodMat2);
       hull.castShadow = false;
       hull.receiveShadow = true;
@@ -3226,13 +4309,13 @@ export function buildAncientWorld(
         rail.position.set(0.21 * sx, 0.095, 0);
         g.add(rail);
       }
-      for (const bz of [-0.54, 0.14]) {
+      for (const bz of [-0.56, 0.14]) {
         const bench = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.028, 0.14), woodDark);
         bench.position.set(0, 0.102, bz);
         g.add(bench);
       }
 
-      // 乌篷拱顶（几何体正确沿船身 Z 轴展开、向上拱起，含竹篾拱骨与红穗）
+      // 乌篷拱顶
       const canopyGrp = new THREE.Group();
       canopyGrp.position.set(0, 0.09, -0.16);
       const canopyOuterGeo = new THREE.CylinderGeometry(0.225, 0.225, 0.48, 16, 1, true, 0, Math.PI);
@@ -3285,7 +4368,7 @@ export function buildAncientWorld(
         g.add(lCap);
       }
 
-      // 船头小茶席（茶盘 + 青瓷茶壶 + 两只小茶杯）
+      // 船头小茶席
       const tray = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.016, 0.13), woodDark);
       tray.position.set(-0.02, 0.104, 0.4);
       g.add(tray);
@@ -3299,142 +4382,301 @@ export function buildAncientWorld(
         g.add(cup);
       }
 
-      // 船尾船夫（Q版比例 + 斗笠 + 腰带 + 双臂划桨动画）
+      // 船尾船夫（朝向右舷桨架坐姿，双臂关节实时握住桨柄）
       const man = new THREE.Group();
-      const baseLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.078, 0.088, 0.075, 10), pantsMat);
-      baseLeg.position.y = 0.04;
+      const baseLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.078, 0.072, 10), pantsMat);
+      baseLeg.position.y = 0.038;
       man.add(baseLeg);
-      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.078, 0.15, 10), bodyMat);
-      torso.position.y = 0.145;
-      torso.castShadow = true;
-      man.add(torso);
-      const sash = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.078, 0.026, 10), sashRedMat);
-      sash.position.y = 0.09;
-      man.add(sash);
-      const mHead = new THREE.Mesh(new THREE.SphereGeometry(0.056, 12, 10), skinMat);
-      mHead.position.y = 0.26;
-      mHead.castShadow = true;
-      man.add(mHead);
-      addCuteFace(man, 0.258, 0.049);
 
-      const hat = new THREE.Mesh(new THREE.ConeGeometry(0.135, 0.068, 16), hatMat);
-      hat.position.y = 0.315;
+      const manUpper = new THREE.Group();
+      manUpper.position.y = 0.075;
+      man.add(manUpper);
+
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.068, 0.148, 10), bodyMat);
+      torso.position.y = 0.072;
+      torso.castShadow = true;
+      manUpper.add(torso);
+      const sash = new THREE.Mesh(new THREE.CylinderGeometry(0.067, 0.069, 0.024, 10), sashRedMat);
+      sash.position.y = 0.018;
+      manUpper.add(sash);
+      const mHead = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), skinMat);
+      mHead.position.y = 0.185;
+      mHead.castShadow = true;
+      manUpper.add(mHead);
+      addCuteFace(manUpper, 0.183, 0.044);
+
+      const hat = new THREE.Mesh(new THREE.ConeGeometry(0.128, 0.064, 16), hatMat);
+      hat.position.y = 0.236;
       hat.castShadow = true;
-      man.add(hat);
-      const hatTop = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), hatRimMat);
-      hatTop.position.y = 0.35;
-      man.add(hatTop);
-      for (const sx of [-1, 1]) {
-        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 0.12, 8), bodyMat);
-        arm.position.set(0.065 * sx, 0.165, 0.045);
-        arm.rotation.set(-0.65, 0, -0.25 * sx);
-        man.add(arm);
-        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), skinMat);
-        hand.position.set(0.08 * sx, 0.125, 0.085);
-        man.add(hand);
-      }
-      man.position.set(-0.02, 0.112, -0.56);
-      man.rotation.y = 0.42;
-      man.scale.setScalar(1.12);
+      manUpper.add(hat);
+      const hatTop = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), hatRimMat);
+      hatTop.position.y = 0.268;
+      manUpper.add(hatTop);
+
+      // 左右摆臂枢轴（局部 +Z 朝前伸展至手心，每帧直接对准桨柄双握点）
+      const makeBoatmanArm = (sx: number) => {
+        const armPivot = new THREE.Group();
+        armPivot.position.set(0.058 * sx, 0.126, 0.012);
+        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.019, 0.135, 8), bodyMat);
+        sleeve.rotation.x = Math.PI / 2;
+        sleeve.position.z = 0.068;
+        armPivot.add(sleeve);
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.017, 8, 6), skinMat);
+        hand.position.z = 0.14;
+        armPivot.add(hand);
+        manUpper.add(armPivot);
+        return armPivot;
+      };
+      const manLeftArm = makeBoatmanArm(1);
+      const manRightArm = makeBoatmanArm(-1);
+
+      man.position.set(-0.04, 0.114, -0.57);
+      man.rotation.y = 1.1;
+      man.scale.setScalar(1.08);
       g.add(man);
 
-      // 船舷木橹枢轴（实时划桨）
-      const oarLock = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.05, 6), woodDark);
-      oarLock.position.set(0.21, 0.11, -0.46);
+      // 船舷木橹枢轴（单根一体化木桨：柄端直达船夫手中 -> 穿桨架 -> 桨叶严丝合缝连接在杆梢）
+      const oarLock = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.018, 0.052, 8), woodDark);
+      oarLock.position.set(0.2, 0.125, -0.49);
       g.add(oarLock);
+      const oarLockRing = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 6, 12), woodDark);
+      oarLockRing.rotation.y = Math.PI / 2;
+      oarLockRing.position.set(0.2, 0.15, -0.49);
+      g.add(oarLockRing);
+
       const oarPivot = new THREE.Group();
-      oarPivot.position.set(0.21, 0.125, -0.46);
-      const oarShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.68, 8), oarMat);
+      oarPivot.position.set(0.2, 0.15, -0.49);
+
+      // oarRod 局部轴向：-Z 为船内握柄端（船夫双手握持），0 为船舷支点，+Z 为伸出船外入水桨叶
+      const oarRod = new THREE.Group();
+      const handleTarget = new THREE.Object3D();
+      handleTarget.position.set(0, 0, -0.185);
+      oarRod.add(handleTarget);
+
+      const handleForeTarget = new THREE.Object3D();
+      handleForeTarget.position.set(0, 0, -0.125);
+      oarRod.add(handleForeTarget);
+
+      const handlePommel = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 6), woodDark);
+      handlePommel.position.set(0, 0, -0.215);
+      oarRod.add(handlePommel);
+
+      const oarShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.013, 0.62, 8), oarMat);
       oarShaft.rotation.x = Math.PI / 2;
-      oarShaft.position.set(0, -0.05, -0.14);
-      oarShaft.rotation.z = -0.35;
-      oarPivot.add(oarShaft);
-      const oarBlade = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.014, 0.22), woodDark);
-      oarBlade.position.set(0.11, -0.12, -0.44);
-      oarBlade.rotation.set(0.32, -0.3, 0.35);
-      oarPivot.add(oarBlade);
+      oarShaft.position.set(0, 0, 0.095); // 覆盖 z = -0.215 .. +0.405
+      oarRod.add(oarShaft);
+
+      // 桨叶严格沿着同一条 Z 轴衔接在杆身末端（z = +0.38 .. +0.57），再无悬浮木片
+      const oarBladeNeck = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.014, 0.055), oarPaddleMat);
+      oarBladeNeck.position.set(0, 0, 0.385);
+      oarRod.add(oarBladeNeck);
+
+      const oarBlade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, 0.19), oarPaddleMat);
+      oarBlade.position.set(0, 0, 0.485);
+      oarBlade.rotation.z = 0.22;
+      oarRod.add(oarBlade);
+
+      // 中立角度：船外桨叶朝右外侧入水，船内桨柄恰落在船夫胸前双手处
+      oarRod.rotation.order = 'YXZ';
+      oarRod.rotation.y = 1.36;
+      oarRod.rotation.x = 0.56;
+      oarPivot.add(oarRod);
       g.add(oarPivot);
 
-      // 船舱前端雅士/少女游船人物（安坐于乌篷前口前坐垫，手持折扇或团扇）
+      // 船舱前端精致苗条游船人物：白衣女子 / 青衣男子
       const p = new THREE.Group();
-      const clothMat = mat(passenger.cloth, 0.68);
-      const cushion = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.115, 0.032, 12), sashRedMat);
-      cushion.position.y = 0.016;
-      p.add(cushion);
-      const lap = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), clothMat);
-      lap.scale.set(1.08, 0.46, 0.95);
-      lap.position.y = 0.052;
-      p.add(lap);
-      const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.082, 0.15, 10), clothMat);
-      robe.position.y = 0.135;
-      robe.castShadow = true;
-      p.add(robe);
-      const pSash = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.07, 0.072, 0.022, 10),
-        passenger.variant === 'maiden' ? goldAccent : jadeMat,
+      const clothMat = mat(passenger.cloth, 0.62);
+      const isMaiden = passenger.variant === 'maiden';
+      const trimMat = isMaiden ? pinkRibbonMat : ivoryTrimMat;
+      const accentMat = isMaiden ? goldAccent : jadeMat;
+
+      const cushion = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.088, 0.098, 0.026, 12),
+        isMaiden ? pinkRibbonMat : deepTealTrimMat,
       );
-      pSash.position.y = 0.095;
-      p.add(pSash);
-      const pHead = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 10), skinMat);
-      pHead.position.y = 0.25;
+      cushion.position.y = 0.013;
+      p.add(cushion);
+
+      // 修身坐裙/下摆（更纤细收腰、加褶皱滚边）
+      const skirtLower = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.08, 0.068, 12), clothMat);
+      skirtLower.scale.set(0.95, 1, 0.88);
+      skirtLower.position.set(0, 0.056, 0.012);
+      p.add(skirtLower);
+
+      const hemTrim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.077, 0.082, 0.012, 12),
+        isMaiden ? ivoryTrimMat : deepTealTrimMat,
+      );
+      hemTrim.scale.set(0.95, 1, 0.88);
+      hemTrim.position.set(0, 0.028, 0.012);
+      p.add(hemTrim);
+
+      // 细窄裙褶条
+      for (let pi = 0; pi < 5; pi++) {
+        const pa = -0.75 + pi * 0.375;
+        const pleat = new THREE.Mesh(
+          new THREE.BoxGeometry(0.005, 0.058, 0.006),
+          isMaiden ? pinkRibbonMat : deepTealTrimMat,
+        );
+        pleat.position.set(Math.sin(pa) * 0.062, 0.055, 0.012 + Math.cos(pa) * 0.054);
+        pleat.rotation.y = pa;
+        pleat.rotation.x = -0.32;
+        p.add(pleat);
+      }
+
+      // 苗条上身（收肩收腰 + 略微扁平化更显修长）
+      const pBody = new THREE.Group();
+      pBody.position.y = 0.086;
+      p.add(pBody);
+
+      const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.049, 0.142, 12), clothMat);
+      robe.scale.set(0.92, 1, 0.76);
+      robe.position.y = 0.072;
+      robe.castShadow = true;
+      pBody.add(robe);
+
+      // 汉服交领（Y字领口滚边）
+      for (const sx of [-1, 1]) {
+        const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.062, 0.008), trimMat);
+        lapel.position.set(0.012 * sx, 0.114, 0.031);
+        lapel.rotation.z = 0.34 * sx;
+        pBody.add(lapel);
+      }
+
+      // 纤细束腰与玉佩/丝绦
+      const pSash = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.043, 0.045, 0.02, 12),
+        isMaiden ? pinkRibbonMat : deepTealTrimMat,
+      );
+      pSash.scale.set(0.94, 1, 0.78);
+      pSash.position.y = 0.028;
+      pBody.add(pSash);
+
+      const sashTail = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.054, 0.005), accentMat);
+      sashTail.position.set(0.018, -0.002, 0.035);
+      sashTail.rotation.z = -0.14;
+      pBody.add(sashTail);
+
+      // 修长双袖
+      for (const sx of [-1, 1]) {
+        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.022, 0.095, 8), clothMat);
+        sleeve.position.set(0.044 * sx, 0.092, 0.022);
+        sleeve.rotation.set(-0.68, 0, -0.18 * sx);
+        pBody.add(sleeve);
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), skinMat);
+        hand.position.set(0.052 * sx, 0.054, 0.054);
+        pBody.add(hand);
+      }
+
+      // 头部独立枢轴，方便相遇对诗时微微颔首顾盼
+      const pHeadGrp = new THREE.Group();
+      pHeadGrp.position.y = 0.178;
+      pBody.add(pHeadGrp);
+
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.015, 0.026, 8), skinMat);
+      neck.position.y = -0.026;
+      pHeadGrp.add(neck);
+
+      const pHead = new THREE.Mesh(new THREE.SphereGeometry(0.043, 12, 10), skinMat);
+      pHead.scale.set(0.92, 1.03, 0.92);
       pHead.castShadow = true;
-      p.add(pHead);
-      addCuteFace(p, 0.246, 0.046);
+      pHeadGrp.add(pHead);
+      addCuteFace(pHeadGrp, -0.003, 0.038, true);
 
       const hairCap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.055, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+        new THREE.SphereGeometry(0.046, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
         hairMat,
       );
-      hairCap.position.set(0, 0.255, -0.004);
-      hairCap.rotation.x = -0.25;
-      p.add(hairCap);
+      hairCap.scale.set(0.93, 1.02, 0.94);
+      hairCap.position.set(0, 0.005, -0.003);
+      hairCap.rotation.x = -0.24;
+      pHeadGrp.add(hairCap);
 
-      if (passenger.variant === 'scholar') {
-        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), hairMat);
-        bun.position.set(0, 0.312, -0.008);
-        p.add(bun);
-        const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.085, 6), jadeMat);
+      const backHair = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.024, 0.018, isMaiden ? 0.115 : 0.075, 8),
+        hairMat,
+      );
+      backHair.scale.set(1.15, 1, 0.45);
+      backHair.position.set(0, isMaiden ? -0.045 : -0.026, -0.034);
+      backHair.rotation.x = 0.14;
+      pHeadGrp.add(backHair);
+
+      if (isMaiden) {
+        // 白衣女子：仙姿云髻 + 金步摇花饰 + 轻盈披帛 + 精致团扇
+        const topKnot = new THREE.Mesh(new THREE.SphereGeometry(0.021, 8, 6), hairMat);
+        topKnot.scale.set(1.05, 0.9, 0.95);
+        topKnot.position.set(0, 0.052, -0.005);
+        pHeadGrp.add(topKnot);
+        for (const sx of [-1, 1]) {
+          const sideLoop = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.0055, 6, 10), hairMat);
+          sideLoop.position.set(0.034 * sx, 0.034, -0.003);
+          sideLoop.rotation.y = 0.35 * sx;
+          pHeadGrp.add(sideLoop);
+          const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 6), pinkRibbonMat);
+          pearl.position.set(0.041 * sx, 0.038, 0.009);
+          pHeadGrp.add(pearl);
+        }
+        const hairpin = new THREE.Mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.088, 6), goldAccent);
+        hairpin.rotation.z = Math.PI / 2 + 0.16;
+        hairpin.position.set(0, 0.054, -0.005);
+        pHeadGrp.add(hairpin);
+
+        // 轻纱披帛环绕双肩垂落
+        const shawlArc = new THREE.Mesh(
+          new THREE.TorusGeometry(0.055, 0.0065, 6, 14, Math.PI * 1.15),
+          pinkRibbonMat,
+        );
+        shawlArc.rotation.set(Math.PI / 2 + 0.25, 0, Math.PI * 0.92);
+        shawlArc.position.set(0, 0.102, 0.006);
+        pBody.add(shawlArc);
+        for (const sx of [-1, 1]) {
+          const drape = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.078, 0.004), pinkRibbonMat);
+          drape.position.set(0.052 * sx, 0.054, 0.028);
+          drape.rotation.z = -0.18 * sx;
+          pBody.add(drape);
+        }
+
+        // 手持团扇
+        const fanRim = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.003, 6, 14), woodDark);
+        fanRim.position.set(-0.056, 0.084, 0.068);
+        fanRim.rotation.set(0.22, 0.42, 0);
+        pBody.add(fanRim);
+        const roundFan = new THREE.Mesh(new THREE.CircleGeometry(0.039, 14), fanPaperMat);
+        roundFan.position.copy(fanRim.position);
+        roundFan.rotation.copy(fanRim.rotation);
+        pBody.add(roundFan);
+        const fanHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.055, 6), woodDark);
+        fanHandle.position.set(-0.052, 0.044, 0.062);
+        pBody.add(fanHandle);
+      } else {
+        // 青衣男子：高束玉冠 + 玉簪 + 文雅折扇
+        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), hairMat);
+        bun.position.set(0, 0.054, -0.006);
+        pHeadGrp.add(bun);
+        const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.021, 0.022, 8), ivoryTrimMat);
+        crown.position.set(0, 0.053, -0.006);
+        pHeadGrp.add(crown);
+        const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.078, 6), jadeMat);
         pin.rotation.z = Math.PI / 2;
-        pin.position.set(0, 0.314, -0.008);
-        p.add(pin);
+        pin.position.set(0, 0.056, -0.006);
+        pHeadGrp.add(pin);
+
         // 手持折扇
         const fan = new THREE.Mesh(
-          new THREE.CircleGeometry(0.052, 8, 0.25, Math.PI * 0.65),
-          hatMat,
+          new THREE.CircleGeometry(0.044, 10, 0.25, Math.PI * 0.65),
+          fanPaperMat,
         );
-        fan.position.set(0.068, 0.145, 0.065);
-        fan.rotation.set(0.3, -0.4, 0.2);
-        p.add(fan);
-      } else {
-        for (const sx of [-1, 1]) {
-          const bun = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), hairMat);
-          bun.position.set(0.046 * sx, 0.292, -0.004);
-          p.add(bun);
-          const flower = new THREE.Mesh(new THREE.SphereGeometry(0.011, 6, 6), blushMat);
-          flower.position.set(0.056 * sx, 0.296, 0.01);
-          p.add(flower);
-        }
-        // 手持团扇
-        const roundFan = new THREE.Mesh(new THREE.CircleGeometry(0.048, 12), hatMat);
-        roundFan.position.set(-0.068, 0.148, 0.068);
-        roundFan.rotation.set(0.25, 0.45, 0);
-        p.add(roundFan);
-        const fanHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.06, 6), woodDark);
-        fanHandle.position.set(-0.062, 0.105, 0.062);
-        p.add(fanHandle);
+        fan.position.set(0.056, 0.072, 0.066);
+        fan.rotation.set(0.28, -0.45, 0.22);
+        pBody.add(fan);
       }
-      for (const sx of [-1, 1]) {
-        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.028, 0.1, 8), clothMat);
-        sleeve.position.set(0.058 * sx, 0.145, 0.036);
-        sleeve.rotation.set(-0.7, 0, -0.22 * sx);
-        p.add(sleeve);
-      }
+
       p.position.set(0, 0.115, 0.16);
-      p.rotation.y = -0.18;
-      p.scale.setScalar(1.12);
+      p.rotation.y = -0.16;
+      p.scale.setScalar(1.08);
       g.add(p);
 
-      // 船体吃水线白沫环 + 船尾 V 形水波纹（贴合水面，彻底告别浮空感）
+      // 船体吃水线白沫环 + 船尾 V 形水波纹
       const hullFoam = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 1.98), hullFoamMat.clone());
       hullFoam.rotation.x = -Math.PI / 2;
       hullFoam.position.set(0, 0.028, 0);
@@ -3449,21 +4691,35 @@ export function buildAncientWorld(
 
       g.scale.setScalar(1.36);
       g.userData.man = man;
+      g.userData.manUpper = manUpper;
+      g.userData.manLeftArm = manLeftArm;
+      g.userData.manRightArm = manRightArm;
       g.userData.oar = oarPivot;
+      g.userData.oarRod = oarRod;
+      g.userData.handleTarget = handleTarget;
+      g.userData.handleForeTarget = handleForeTarget;
       g.userData.passenger = p;
+      g.userData.passengerHead = pHeadGrp;
       g.userData.hullFoam = hullFoam;
       g.userData.wake = wake;
       boats.push({
         g,
-        th: Math.random() * Math.PI * 2,
-        speed: dir * (0.04 + Math.random() * 0.012),
+        th: initTh,
+        rOff,
+        speed: dir * 0.044,
+        speedFactor: 1,
         bob: Math.random() * 6,
+        role: passenger.variant,
+        targetLookYaw: 0,
+        currentLookYaw: 0,
+        rowPhase: Math.random() * 6,
       });
       scene.add(g);
     };
 
-    makeBoat(1, { cloth: 0xf7f3ec, variant: 'scholar' });
-    makeBoat(-1, { cloth: 0x4a9a8a, variant: 'maiden' });
+    // 青衣男子顺时针行船（外侧水道），白衣女子逆时针行船（内侧水道），错道相逢互不对撞
+    makeBoat(1, 0.35, 0.68, { cloth: 0x3b7a78, variant: 'scholar' });
+    makeBoat(-1, 1.72, -0.68, { cloth: 0xfaf7f0, variant: 'maiden' });
   }
 
   return {
@@ -3473,6 +4729,7 @@ export function buildAncientWorld(
     waterUniforms,
     waterY: WATER_Y,
     rideToys,
+    courtFences,
     lotusList,
     willowDrapeList,
     petals,

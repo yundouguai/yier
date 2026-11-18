@@ -30,9 +30,9 @@ import {
   toColorHex,
 } from './constants';
 import {
+  DICE_REST_Y,
   PlaneData,
   PlaneParts,
-  buildCampFrames,
   buildDiceRig,
   buildPickHints,
   buildPlaneMesh,
@@ -47,6 +47,7 @@ const lerpAngle = (a: number, b: number, t: number) =>
   a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
 
 const _scratchDiceScale = new THREE.Vector3();
+const _scratchFenceColor = new THREE.Color();
 const _scratchCamOffset = new THREE.Vector3();
 const _scratchCamSpherical = new THREE.Spherical();
 const _scratchCamPos = new THREE.Vector3();
@@ -54,6 +55,38 @@ const _scratchBirdPos = new THREE.Vector3();
 const _scratchBirdNext = new THREE.Vector3();
 const _scratchBirdPrev = new THREE.Vector3();
 const _scratchBirdOrb = new THREE.Vector3();
+const _scratchHeadCrown = new THREE.Vector3();
+const _scratchHeadQuat = new THREE.Quaternion();
+const _scratchTargetQuat = new THREE.Quaternion();
+const _scratchYawQuat = new THREE.Quaternion();
+const _scratchUpAxis = new THREE.Vector3(0, 1, 0);
+const _scratchHandleRear = new THREE.Vector3();
+const _scratchHandleFore = new THREE.Vector3();
+const _scratchBoatAnchor = new THREE.Vector3();
+const _scratchProj = new THREE.Vector3();
+
+const ROMANTIC_POEMS: { a: string; b: string }[] = [
+  { a: '清风拂柳画船移', b: '春水映花君莫迟' },
+  { a: '一川烟雨微风软', b: '半篙春水落花香' },
+  { a: '风裁细柳千丝绿', b: '月照寒梅半盏香' },
+  { a: '曾约花前同醉月', b: '今逢水上共听风' },
+  { a: '闲看花影浮碧水', b: '静听风声入画栏' },
+  { a: '雪落梅梢香暗动', b: '月移花影意绵长' },
+  { a: '春风不解离人意', b: '偏送落花到画舟' },
+  { a: '一棹清风千里月', b: '满船花影半溪云' },
+  { a: '君似春风来破雪', b: '我如明月照花眠' },
+  { a: '风起涟漪摇月色', b: '舟停柳岸对花吟' },
+  { a: '雪后晴云舒远岫', b: '花间清露湿罗衣' },
+  { a: '月色如银铺浅水', b: '花香似梦绕轻舟' },
+  { a: '借得三更湖上月', b: '换来一曲袖间风' },
+  { a: '踏雪寻梅犹念旧', b: '临风赏月最相思' },
+  { a: '微风轻展衣间雪', b: '细雨斜吹鬓角花' },
+  { a: '星月满船君作伴', b: '风花入梦夜生香' },
+  { a: '柳絮随风沾画楫', b: '桃花带月映清波' },
+  { a: '雪融春水波先暖', b: '风入花林梦亦甜' },
+  { a: '一帘月影清如水', b: '十里花风暖似春' },
+  { a: '愿作清风常伴月', b: '甘为飞雪共护花' },
+];
 
 interface AnimTween {
   t0: number;
@@ -100,7 +133,6 @@ export class FlightChessEngine {
   private world: WorldRefs;
   private diceRig: ReturnType<typeof buildDiceRig>;
   private pickHints: THREE.Group[];
-  private campFrames: THREE.Group[];
   private turnArrow: THREE.Mesh;
   private hlRings: THREE.Mesh[] = [];
 
@@ -142,6 +174,17 @@ export class FlightChessEngine {
   private clock = new THREE.Clock();
   private frameId = 0;
   private disposed = false;
+
+  private poemState: 'cruising' | 'slowing' | 'verse1' | 'verse2' | 'departing' = 'cruising';
+  private poemTimer = 0;
+  private poemCooldown = 2.0;
+  private activePoemIdx = 0;
+  private lastPoemIdx = -1;
+  private poemLayer: HTMLDivElement;
+  private poemBubbles: {
+    scholar: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean };
+    maiden: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean };
+  };
 
   private ray = new THREE.Raycaster();
   private ptr = new THREE.Vector2();
@@ -271,8 +314,79 @@ export class FlightChessEngine {
     this.world = buildAncientWorld(this.scene, this.players, this.anisotropy);
     this.diceRig = buildDiceRig(this.scene, this.anisotropy);
     this.pickHints = buildPickHints(this.scene, this.anisotropy);
-    this.campFrames = buildCampFrames(this.scene);
     this.turnArrow = buildTurnArrow(this.scene);
+
+    // 游船对诗浮层气泡
+    this.poemLayer = document.createElement('div');
+    this.poemLayer.style.position = 'absolute';
+    this.poemLayer.style.inset = '0';
+    this.poemLayer.style.pointerEvents = 'none';
+    this.poemLayer.style.overflow = 'hidden';
+    this.poemLayer.style.zIndex = '6';
+    this.container.appendChild(this.poemLayer);
+
+    const makePoemBubble = (label: string, accent: string) => {
+      const root = document.createElement('div');
+      root.style.position = 'absolute';
+      root.style.left = '0px';
+      root.style.top = '0px';
+      root.style.transform = 'translate3d(-9999px, -9999px, 0)';
+      root.style.opacity = '0';
+      root.style.transition = 'opacity 0.42s ease';
+      root.style.pointerEvents = 'none';
+      root.style.display = 'flex';
+      root.style.flexDirection = 'column';
+      root.style.alignItems = 'center';
+      root.style.willChange = 'transform, opacity';
+
+      const card = document.createElement('div');
+      card.style.background = 'rgba(253, 249, 240, 0.94)';
+      card.style.border = `1.5px solid ${accent}`;
+      card.style.borderRadius = '10px';
+      card.style.padding = '5px 11px';
+      card.style.boxShadow = '0 6px 18px rgba(34, 24, 16, 0.16)';
+      card.style.backdropFilter = 'blur(4px)';
+      card.style.whiteSpace = 'nowrap';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.alignItems = 'center';
+      card.style.gap = '2px';
+
+      const speaker = document.createElement('span');
+      speaker.textContent = label;
+      speaker.style.fontSize = '10px';
+      speaker.style.fontWeight = '700';
+      speaker.style.letterSpacing = '0.08em';
+      speaker.style.color = accent;
+
+      const text = document.createElement('span');
+      text.style.fontSize = '13px';
+      text.style.fontWeight = '600';
+      text.style.letterSpacing = '0.06em';
+      text.style.color = '#2b241d';
+      text.style.fontFamily = '"Noto Serif SC", "Songti SC", "STSong", Georgia, serif';
+
+      const tail = document.createElement('div');
+      tail.style.width = '8px';
+      tail.style.height = '8px';
+      tail.style.background = 'rgba(253, 249, 240, 0.94)';
+      tail.style.borderRight = `1.5px solid ${accent}`;
+      tail.style.borderBottom = `1.5px solid ${accent}`;
+      tail.style.transform = 'rotate(45deg)';
+      tail.style.marginTop = '-5px';
+
+      card.appendChild(speaker);
+      card.appendChild(text);
+      root.appendChild(card);
+      root.appendChild(tail);
+      this.poemLayer.appendChild(root);
+      return { root, text, visible: false };
+    };
+
+    this.poemBubbles = {
+      scholar: makePoemBubble('青衣公子', '#2e6f6d'),
+      maiden: makePoemBubble('白衣姑娘', '#b85c6b'),
+    };
 
     this.players.forEach((P, pid) => {
       for (let i = 0; i < 4; i++) {
@@ -294,6 +408,10 @@ export class FlightChessEngine {
     // Schedule critters
     this.scheduleCritter('rabbit', 4000);
     this.scheduleCritter('bird', 4500);
+    this.after(7800, () => {
+      if (this.disposed) return;
+      this.world.spawnCritter('bird', { species: 'seagull', perch: true });
+    });
     this.scheduleCritter('fly', 2500);
     this.scheduleCritter('fish', 4500);
 
@@ -569,14 +687,35 @@ export class FlightChessEngine {
       : null;
 
     this.diceRig.diceHint.visible = this.phase === 'awaitRoll' && !this.isAI();
-    this.campFrames.forEach((f, j) => {
+    this.world.courtFences.forEach((cf, j) => {
       const pl = this.slotPlayer(j);
       const on = !!pl && this.turn === this.players.indexOf(pl) && this.phase !== 'over';
-      f.visible = on;
+      cf.active = on;
       if (on && pl) {
-        const c = pl.type === 'ai' ? 0xe23b2e : pl.color;
-        (f.userData.mat as THREE.MeshStandardMaterial).color.setHex(c);
-        (f.userData.mat as THREE.MeshStandardMaterial).emissive.setHex(c);
+        const accentMap: Record<string, number> = {
+          yier: 0x16c77a,
+          caomei: 0xf0485b,
+          xiangyu: 0x9368e8,
+          bubu: 0xe88d24,
+          mocha: 0x6ab82e,
+          haiyan: 0x2898e0,
+        };
+        const accent = accentMap[pl.key] ?? pl.color;
+        cf.accentHex = accent;
+        _scratchFenceColor.setHex(accent);
+        cf.woodMat.color.setHex(0xbdb9b1).lerp(_scratchFenceColor, 0.78);
+        cf.woodMat.emissive.setHex(accent);
+        cf.trimMat.color.setHex(accent);
+        cf.trimMat.emissive.setHex(accent);
+        cf.capMat.color.setHex(0xfffdf5).lerp(_scratchFenceColor, 0.55);
+        cf.capMat.emissive.setHex(accent);
+      } else {
+        cf.woodMat.color.setHex(0xbdb9b1);
+        cf.woodMat.emissiveIntensity = 0;
+        cf.trimMat.color.setHex(0xa29f98);
+        cf.trimMat.emissiveIntensity = 0;
+        cf.capMat.color.setHex(0xd4d0c8);
+        cf.capMat.emissiveIntensity = 0;
       }
     });
 
@@ -640,6 +779,13 @@ export class FlightChessEngine {
   public togglePause(): void {
     if (this.phase === 'over' || this.phase === 'idle') return;
     this.paused = !this.paused;
+    this.emitSnapshot();
+  }
+
+  public setPaused(paused: boolean): void {
+    if (this.phase === 'over' || this.phase === 'idle') return;
+    if (this.paused === paused) return;
+    this.paused = paused;
     this.emitSnapshot();
   }
 
@@ -770,7 +916,7 @@ export class FlightChessEngine {
     return this.planesOf(pid)
       .filter((p) => {
         if (p.pos === HOME_END) return false;
-        if (p.pos === -1) return die === 6;
+        if (p.pos === -1) return die === 5 || die === 6;
         return true;
       })
       .map((plane) => ({ plane }));
@@ -796,7 +942,7 @@ export class FlightChessEngine {
       this.diceRig.dice.rotation.x = THREE.MathUtils.lerp(sx, tx + turnsX, ease);
       this.diceRig.dice.rotation.y = THREE.MathUtils.lerp(sy, ty + turnsY, ease);
       this.diceRig.dice.rotation.z = THREE.MathUtils.lerp(sz, tz + turnsZ, ease);
-      this.diceRig.dice.position.y = 0.4 + Math.sin(t * Math.PI) * 1.45;
+      this.diceRig.dice.position.y = DICE_REST_Y + Math.sin(t * Math.PI) * 1.45;
       if (t < 0.9 && t - lastHudTick > 0.1) {
         lastHudTick = t;
         this.hudDieFace = 1 + Math.floor(Math.random() * 6);
@@ -806,7 +952,7 @@ export class FlightChessEngine {
     if (this.disposed) return;
     this.hudDieRolling = false;
     this.diceRig.dice.rotation.set(...ORIENT[die]);
-    this.diceRig.dice.position.y = 0.4;
+    this.diceRig.dice.position.y = DICE_REST_Y;
     this.hudDieFace = die;
     this.hudDiePopKey++;
     this.emitSnapshot();
@@ -1096,11 +1242,11 @@ export class FlightChessEngine {
     const oppPlayer = this.slotPlayer((this.players[flyingPid].slotId + 2) % 4);
     if (!oppPlayer) return;
     const oppPid = this.players.indexOf(oppPlayer);
-    const victims = this.planes.filter((q) => q.pid === oppPid && q.pos === 53);
+    const victims = this.planes.filter((q) => q.pid === oppPid && q.pos === 54);
     if (!victims.length) return;
     sndCap();
     this.setMsg(`💥 飞越航线，击落 ${oppPlayer.name} 航道敌机！`);
-    const c = this.posToCell(oppPlayer, 53);
+    const c = this.posToCell(oppPlayer, 54);
     this.spawnImpact(c[0], c[1]);
     this.triggerShake();
     await Promise.all(
@@ -1273,7 +1419,7 @@ export class FlightChessEngine {
     }
     this.camFollowPlane = null;
     this.camFollowObj = null;
-    this.endTurn(die === 6 || plane.pos === HOME_END);
+    this.endTurn(die === 6);
   }
 
   private endTurn(again: boolean): void {
@@ -1331,74 +1477,163 @@ export class FlightChessEngine {
   }
 
   /* ================= AI Decision ================= */
-  private landingOf(p: PlaneData, die: number) {
-    if (p.pos === -1) return { pos: 0, jump: false, fly: false, bounced: false };
+  private simulateMoveOutcome(p: PlaneData, die: number) {
+    if (p.pos === -1) {
+      return { pos: 0, ringStops: [] as number[], jump: false, fly: false, bounced: false };
+    }
     let np = p.pos + die;
     let bounced = false;
     if (np > HOME_END) {
       np = HOME_END - (np - HOME_END);
       bounced = true;
     }
-    if (np === HOME_END) return { pos: HOME_END, jump: false, fly: false, bounced };
+    if (np === HOME_END) {
+      return { pos: HOME_END, ringStops: [] as number[], jump: false, fly: false, bounced };
+    }
+    const ringStops: number[] = [];
+    if (np >= 1 && np <= 50) ringStops.push(np);
     let jump = false;
     let fly = false;
     if (!bounced && np >= 1 && np <= 49 && np % 4 === 2) {
       if (np === FLIGHT_FROM) {
         fly = true;
         jump = true;
-        np = FLIGHT_FROM + FLIGHT_STEP + 4;
+        np = FLIGHT_FROM + FLIGHT_STEP;
+        ringStops.push(np);
+        np += 4;
+        ringStops.push(np);
       } else {
         jump = true;
         np += 4;
+        ringStops.push(np);
         if (np === FLIGHT_FROM) {
           fly = true;
           np = FLIGHT_FROM + FLIGHT_STEP;
+          ringStops.push(np);
         }
       }
     }
-    return { pos: np, jump, fly, bounced };
+    return { pos: np, ringStops, jump, fly, bounced };
+  }
+
+  private ringThreatScore(ringIdx: number, myPid: number): number {
+    let threat = 0;
+    for (const q of this.planes) {
+      if (q.pid === myPid || q.pos < 1 || q.pos > 50) continue;
+      const qr = this.ringIndexOf(q);
+      const d = (ringIdx - qr + 52) % 52;
+      if (d >= 1 && d <= 6) {
+        threat += 1;
+      } else if (d >= 7 && d <= 10) {
+        // 敌机若先落己方同色格再跳 +4，也存在一定追击风险
+        const midPos = q.pos + (d - 4);
+        if (midPos >= 1 && midPos <= 49 && midPos % 4 === 2) {
+          threat += 0.55;
+        }
+      }
+    }
+    return threat;
+  }
+
+  private oppCrossFlyThreat(myPid: number): { immediate: boolean; near: boolean; oppPid: number } {
+    const opp = this.slotPlayer((this.players[myPid].slotId + 2) % 4);
+    if (!opp) return { immediate: false, near: false, oppPid: -1 };
+    const oppPid = this.players.indexOf(opp);
+    const oppPlanes = this.planesOf(oppPid);
+    const immediate = oppPlanes.some((q) => q.pos >= 8 && q.pos <= 17);
+    const near = oppPlanes.some((q) => q.pos >= 1 && q.pos <= 7);
+    return { immediate, near, oppPid };
   }
 
   private aiPick(cands: { plane: PlaneData }[]) {
     const me = this.turn;
     const die = this.die ?? 1;
+    const myPlanes = this.planesOf(me);
+    const activeCount = myPlanes.filter((q) => q.pos >= 0 && q.pos < HOME_END).length;
+    const crossThreat = this.oppCrossFlyThreat(me);
+
     let best = cands[0];
     let bs = -1e9;
     for (const c of cands) {
       const p = c.plane;
-      let s = p.pos;
-      const L = this.landingOf(p, die);
+      const L = this.simulateMoveOutcome(p, die);
       const np = L.pos;
-      if (np === HOME_END) s += 120;
-      if (p.pos === -1) s += 45;
-      if (L.fly) s += 28;
-      if (L.jump) s += 10;
-      if (L.bounced) s -= 12;
-      if (np >= 1 && np <= 50) {
-        const r = (this.players[me].start + 2 + np) % 52;
-        let cap = 0;
-        let threat = 0;
-        for (const q of this.planes) {
-          if (q.pid === me || q.pos < 1 || q.pos > 50) continue;
-          const qr = this.ringIndexOf(q);
-          if (qr === r) cap++;
-          const d = (r - qr + 52) % 52;
-          if (d >= 1 && d <= 6) threat++;
+      const stackCount =
+        p.pos <= 0 || p.pos >= HOME_END
+          ? 1
+          : myPlanes.filter((q) => q.pos === p.pos).length;
+
+      let s = 0;
+
+      if (np === HOME_END) {
+        // 骰子刚好到达终点，最高优先级
+        s = 320 + stackCount * 35;
+      } else if (p.pos >= 51) {
+        // 已在终点前安全小路上：没危险时尽量不浪费步数去反复回弹，留给其他棋子扩大优势
+        const inDanger = p.pos === 54 && crossThreat.immediate;
+        if (inDanger) {
+          s = 78 - (L.bounced ? 14 : 0) + (np !== 54 ? 22 : 0);
+        } else {
+          s =
+            -160 -
+            (L.bounced ? 60 : 0) -
+            (np === 54 && (crossThreat.immediate || crossThreat.near) ? 28 : 0) +
+            np * 0.5;
         }
-        s += cap * 55 - threat * 18;
-      } else if (np >= 51) {
-        s += 16;
-      }
-      if (L.fly) {
-        const opp = this.slotPlayer((this.players[me].slotId + 2) % 4);
-        if (
-          opp &&
-          this.planesOf(this.players.indexOf(opp)).some((q) => q.pos === 53)
-        ) {
-          s += 65;
+      } else if (p.pos === -1) {
+        // 掷出 5 或 6 点可从基地起飞，优先增加场上可战棋子数
+        s = 78 - activeCount * 10;
+      } else {
+        // 外圈或起点台棋子：综合评估进度、吃子、跨航线击落、进安全道与脱险/避险
+        s = p.pos === 0 ? 18 : 10 + p.pos * 0.45 + Math.max(0, np - p.pos) * 0.55;
+
+        // 统计沿途各停靠环格可撞回家的敌机
+        const capturedSet = new Set<PlaneData>();
+        for (const stopPos of L.ringStops) {
+          const rIdx = (this.players[me].start + 2 + stopPos) % 52;
+          for (const q of this.planes) {
+            if (q.pid === me || q.pos < 1 || q.pos > 50) continue;
+            if (this.ringIndexOf(q) === rIdx && !capturedSet.has(q)) {
+              capturedSet.add(q);
+              s += 85 + q.pos * 0.7;
+            }
+          }
+        }
+
+        // 飞越对面航线击落敌方停在终点前第 4 格（pos 54）的棋子
+        if (L.fly && crossThreat.oppPid >= 0) {
+          const flyVictims = this.planesOf(crossThreat.oppPid).filter((q) => q.pos === 54).length;
+          s += flyVictims * 115;
+        }
+
+        if (L.fly) s += 48;
+        if (L.jump) s += 20;
+
+        if (np >= 51) {
+          // 冲入终点前安全通道
+          s += 78 + (np - 50) * 3;
+          if (np === 54) {
+            if (crossThreat.immediate) s -= 42;
+            else if (crossThreat.near) s -= 14;
+          }
+        } else if (np >= 1 && np <= 50) {
+          const newRingIdx = (this.players[me].start + 2 + np) % 52;
+          if (myPlanes.some((q) => q !== p && q.pos === np)) {
+            s += 12; // 同格叠机协同推进
+          }
+          const curThreat =
+            p.pos >= 1 && p.pos <= 50 ? this.ringThreatScore(this.ringIndexOf(p), me) : 0;
+          const newThreat = this.ringThreatScore(newRingIdx, me);
+          if (curThreat > 0 && newThreat < curThreat) {
+            s += (curThreat - newThreat) * (32 + p.pos * 0.3);
+          }
+          if (newThreat > 0) {
+            s -= newThreat * (24 + p.pos * 0.45 * stackCount);
+          }
         }
       }
-      s += Math.random() * 4;
+
+      s += Math.random() * 1.5;
       if (s > bs) {
         bs = s;
         best = c;
@@ -1704,7 +1939,7 @@ export class FlightChessEngine {
           (1 - rippleCycle) * (this.diceHovered ? 0.52 : 0.36);
 
         const idleFloatY =
-          0.4 + (this.diceHovered ? 0.08 : 0.03) + Math.sin(t * 2.8) * 0.025;
+          DICE_REST_Y + (this.diceHovered ? 0.08 : 0.03) + Math.sin(t * 2.8) * 0.025;
         this.diceRig.dice.position.y = THREE.MathUtils.lerp(
           this.diceRig.dice.position.y,
           idleFloatY,
@@ -1718,7 +1953,7 @@ export class FlightChessEngine {
         if (this.phase !== 'rolling') {
           this.diceRig.dice.position.y = THREE.MathUtils.lerp(
             this.diceRig.dice.position.y,
-            0.4,
+            DICE_REST_Y,
             Math.min(1, dt * 12),
           );
         }
@@ -1727,14 +1962,16 @@ export class FlightChessEngine {
         });
       }
 
-      this.campFrames.forEach((f) => {
-        if (f.visible) {
-          (f.userData.mat as THREE.MeshStandardMaterial).emissiveIntensity =
-            0.45 + 0.35 * Math.sin(t * 3.2);
+      const fencePulse = 0.5 + 0.5 * Math.sin(t * 5.2);
+      this.world.courtFences.forEach((cf) => {
+        if (cf.active) {
+          cf.woodMat.emissiveIntensity = 0.08 + fencePulse * 0.92;
+          cf.trimMat.emissiveIntensity = 0.15 + fencePulse * 1.35;
+          cf.capMat.emissiveIntensity = 0.35 + fencePulse * 2.15;
         }
       });
 
-      const hd = this.diceRig.dice.position.y - 0.4;
+      const hd = this.diceRig.dice.position.y - DICE_REST_Y;
       (this.diceRig.diceShadow.material as THREE.MeshBasicMaterial).opacity = Math.max(
         0.06,
         0.28 - 0.12 * hd,
@@ -2096,6 +2333,136 @@ export class FlightChessEngine {
             }
           }
         } else if (c.kind === 'bird') {
+          if (c.perchTarget) {
+            const pt = c.perchTarget;
+            pt.headPivot.updateWorldMatrix(true, false);
+            _scratchHeadCrown.set(0, 0.514, 0);
+            pt.headPivot.localToWorld(_scratchHeadCrown);
+            pt.headPivot.getWorldQuaternion(_scratchHeadQuat);
+            _scratchYawQuat.setFromAxisAngle(_scratchUpAxis, c.perchYaw ?? Math.PI * 0.42);
+            _scratchTargetQuat.copy(_scratchHeadQuat).multiply(_scratchYawQuat);
+
+            const bodyRoot = c.g.userData.bodyRoot as THREE.Group;
+            const birdHeadPivot = c.g.userData.headPivot as THREE.Group;
+            const foldedWings = c.g.userData.foldedWings as THREE.Group;
+            const flyTail = c.g.userData.flyTail as THREE.Mesh;
+            const legsGrp = c.g.userData.legsGrp as THREE.Group;
+            const lw = c.g.userData.lw as THREE.Group;
+            const rw = c.g.userData.rw as THREE.Group;
+
+            const applySeagullPose = (landBlend: number, flapSpeed: number, flapAmp: number) => {
+              bodyRoot.position.y = landBlend * 0.145;
+              legsGrp.visible = landBlend > 0.08;
+              legsGrp.scale.set(1, Math.max(0.05, landBlend), 1);
+              const isFolded = landBlend > 0.86;
+              foldedWings.visible = isFolded;
+              lw.visible = !isFolded;
+              rw.visible = !isFolded;
+              flyTail.visible = !isFolded;
+              if (!isFolded) {
+                c.flap += dt * flapSpeed;
+                const w = Math.sin(c.flap) * flapAmp * (1 - 0.55 * landBlend);
+                lw.rotation.set(0, -0.58 * landBlend, w);
+                rw.rotation.set(0, 0.58 * landBlend, -w);
+              }
+            };
+
+            const evalQuad = (
+              a: THREE.Vector3,
+              b: THREE.Vector3,
+              d: THREE.Vector3,
+              p: number,
+              out: THREE.Vector3,
+            ) => {
+              const cp = THREE.MathUtils.clamp(p, 0, 1);
+              const inv = 1 - cp;
+              out
+                .copy(a)
+                .multiplyScalar(inv * inv)
+                .addScaledVector(b, 2 * inv * cp)
+                .addScaledVector(d, cp * cp);
+            };
+
+            if (c.perchPhase === 'approach') {
+              c.perchT = (c.perchT ?? 0) + dt / (c.perchDur || 3.4);
+              const p = Math.min(1, c.perchT);
+              evalQuad(c.from, c.ctrl, _scratchHeadCrown, p, _scratchBirdPos);
+              evalQuad(
+                c.from,
+                c.ctrl,
+                _scratchHeadCrown,
+                Math.min(1, p + 0.025),
+                _scratchBirdNext,
+              );
+              c.g.position.copy(_scratchBirdPos);
+              if (p < 0.985) {
+                c.g.lookAt(_scratchBirdNext);
+              }
+              const orientBlend = THREE.MathUtils.smoothstep(p, 0.68, 1.0);
+              if (orientBlend > 0) {
+                c.g.quaternion.slerp(_scratchTargetQuat, orientBlend);
+              }
+              const landBlend = THREE.MathUtils.smoothstep(p, 0.78, 1.0);
+              applySeagullPose(landBlend, p > 0.72 ? 15.5 : 8.2, p > 0.72 ? 0.58 : 0.42);
+              if (p >= 1) {
+                c.perchPhase = 'perch';
+                c.perchT = 0;
+                c.perchDur = rnd(8.5, 13.0);
+              }
+            } else if (c.perchPhase === 'perch') {
+              c.perchT = (c.perchT ?? 0) + dt / (c.perchDur || 10.0);
+              c.g.position.copy(_scratchHeadCrown);
+              c.g.quaternion.copy(_scratchTargetQuat);
+              applySeagullPose(1, 0, 0);
+              const idlePhase = t * 1.55 + c.phase;
+              birdHeadPivot.rotation.set(
+                Math.max(0, Math.sin(t * 2.8 + c.phase)) * 0.08,
+                Math.sin(idlePhase) * 0.28 + Math.sin(idlePhase * 2.6) * 0.09,
+                Math.sin(t * 1.1 + c.phase) * 0.06,
+              );
+              bodyRoot.position.y = 0.145 + Math.sin(t * 3.1 + c.phase) * 0.004;
+              if (c.perchT >= 1) {
+                birdHeadPivot.rotation.set(0, 0, 0);
+                c.from.copy(_scratchHeadCrown);
+                const outAng = Math.atan2(_scratchHeadCrown.x, _scratchHeadCrown.z) + rnd(-0.7, 0.7);
+                c.departCtrl = new THREE.Vector3(
+                  _scratchHeadCrown.x + Math.sin(outAng) * 6.5,
+                  _scratchHeadCrown.y + rnd(3.2, 4.6),
+                  _scratchHeadCrown.z + Math.cos(outAng) * 6.5,
+                );
+                c.departTo = new THREE.Vector3(
+                  Math.sin(outAng) * rnd(24, 29),
+                  rnd(7.5, 10.2),
+                  Math.cos(outAng) * rnd(24, 29),
+                );
+                c.perchPhase = 'depart';
+                c.perchT = 0;
+                c.perchDur = rnd(3.0, 4.0);
+              }
+            } else {
+              c.perchT = (c.perchT ?? 0) + dt / (c.perchDur || 3.4);
+              const p = c.perchT;
+              if (p >= 1) {
+                this.scene.remove(c.g);
+                this.world.critters.splice(i, 1);
+                continue;
+              }
+              const ctrl = c.departCtrl ?? c.ctrl;
+              const to = c.departTo ?? c.to;
+              evalQuad(c.from, ctrl, to, p, _scratchBirdPos);
+              evalQuad(c.from, ctrl, to, Math.min(1, p + 0.025), _scratchBirdNext);
+              c.g.position.copy(_scratchBirdPos);
+              c.g.lookAt(_scratchBirdNext);
+              if (p < 0.22) {
+                const startBlend = 1 - THREE.MathUtils.smoothstep(p, 0, 0.22);
+                c.g.quaternion.slerp(_scratchTargetQuat, startBlend);
+              }
+              const landBlend = 1 - THREE.MathUtils.smoothstep(p, 0, 0.22);
+              applySeagullPose(landBlend, 14.5, 0.62);
+            }
+            continue;
+          }
+
           c.prog += dt / c.dur;
           if (c.prog >= 1) {
             this.scene.remove(c.g);
@@ -2238,33 +2605,139 @@ export class FlightChessEngine {
         }
       }
 
-      for (const b of this.world.boats) {
-        const r = this.world.moatChannelR(b.th, 0, 1.2);
+      // 两船相逢对诗状态机（渐停 -> 对诗 -> 渐启航）
+      const boats = this.world.boats;
+      if (boats.length >= 2) {
+        const bScholar = boats[0];
+        const bMaiden = boats[1];
+        const dTh = Math.atan2(
+          Math.sin(bMaiden.th - bScholar.th),
+          Math.cos(bMaiden.th - bScholar.th),
+        );
+        if (this.poemCooldown > 0) this.poemCooldown = Math.max(0, this.poemCooldown - dt);
+
+        if (this.poemState === 'cruising') {
+          if (this.poemCooldown <= 0 && dTh > 0.08 && dTh < 0.25) {
+            this.poemState = 'slowing';
+            this.poemTimer = 0;
+            let idx = Math.floor(Math.random() * ROMANTIC_POEMS.length);
+            if (ROMANTIC_POEMS.length > 1 && idx === this.lastPoemIdx) {
+              idx = (idx + 1 + Math.floor(Math.random() * (ROMANTIC_POEMS.length - 1))) % ROMANTIC_POEMS.length;
+            }
+            this.activePoemIdx = idx;
+            this.lastPoemIdx = idx;
+            bScholar.targetLookYaw = -0.45;
+            bMaiden.targetLookYaw = -0.45;
+          }
+        } else if (this.poemState === 'slowing') {
+          this.poemTimer += dt;
+          const k = Math.min(1, this.poemTimer / 1.55);
+          const sf = 1 - k * k * (3 - 2 * k);
+          bScholar.speedFactor = sf;
+          bMaiden.speedFactor = sf;
+          if (k >= 1) {
+            bScholar.speedFactor = 0;
+            bMaiden.speedFactor = 0;
+            this.poemState = 'verse1';
+            this.poemTimer = 0;
+            const poem = ROMANTIC_POEMS[this.activePoemIdx];
+            this.poemBubbles.scholar.text.textContent = poem.a;
+            this.poemBubbles.scholar.visible = true;
+            this.poemBubbles.maiden.visible = false;
+          }
+        } else if (this.poemState === 'verse1') {
+          this.poemTimer += dt;
+          if (this.poemTimer >= 2.15) {
+            this.poemState = 'verse2';
+            this.poemTimer = 0;
+            const poem = ROMANTIC_POEMS[this.activePoemIdx];
+            this.poemBubbles.maiden.text.textContent = poem.b;
+            this.poemBubbles.maiden.visible = true;
+          }
+        } else if (this.poemState === 'verse2') {
+          this.poemTimer += dt;
+          if (this.poemTimer >= 3.1) {
+            this.poemBubbles.scholar.visible = false;
+            this.poemBubbles.maiden.visible = false;
+            bScholar.targetLookYaw = 0;
+            bMaiden.targetLookYaw = 0;
+            this.poemState = 'departing';
+            this.poemTimer = 0;
+          }
+        } else if (this.poemState === 'departing') {
+          this.poemTimer += dt;
+          const k = Math.min(1, this.poemTimer / 2.0);
+          const sf = k * k * (3 - 2 * k);
+          bScholar.speedFactor = sf;
+          bMaiden.speedFactor = sf;
+          if (k >= 1) {
+            bScholar.speedFactor = 1;
+            bMaiden.speedFactor = 1;
+            this.poemState = 'cruising';
+            this.poemCooldown = 14;
+          }
+        }
+      }
+
+      for (const b of boats) {
+        const r = this.world.moatChannelR(b.th, b.rOff, 1.2);
         const px = Math.cos(b.th) * r;
         const pz = Math.sin(b.th) * r;
-        b.th += dt * b.speed;
-        const r2 = this.world.moatChannelR(b.th, 0, 1.2);
+        const stepAngle = dt * b.speed * b.speedFactor;
+        b.th += stepAngle;
+        const r2 = this.world.moatChannelR(b.th, b.rOff, 1.2);
         const nx = Math.cos(b.th) * r2;
         const nz = Math.sin(b.th) * r2;
         const boatY = wy - 0.03 + Math.sin(t * 1.4 + b.bob) * 0.014;
         b.g.position.set(nx, boatY, nz);
-        b.g.rotation.y = Math.atan2(nx - px, nz - pz);
-        b.g.rotation.z = Math.sin(t * 1.1 + b.bob) * 0.028;
+        if (Math.abs(stepAngle) > 1e-6) {
+          b.g.rotation.y = Math.atan2(nx - px, nz - pz);
+        }
+        b.g.rotation.z = Math.sin(t * 1.1 + b.bob) * 0.025;
 
-        const rowPhase = t * 2.1 + b.bob;
-        const man = b.g.userData.man as THREE.Object3D;
-        man.rotation.y = 0.42 + Math.sin(rowPhase) * 0.18;
-        man.rotation.x = Math.cos(rowPhase) * 0.1;
+        // 划桨周期与船速同步；停船对诗时木桨温柔停歇
+        b.rowPhase += dt * 2.1 * (0.15 + 0.85 * b.speedFactor);
+        const rowAmp = THREE.MathUtils.lerp(0.06, 1.0, b.speedFactor);
 
         const oar = b.g.userData.oar as THREE.Object3D | undefined;
         if (oar) {
-          oar.rotation.y = Math.sin(rowPhase) * 0.34;
-          oar.rotation.x = Math.cos(rowPhase) * 0.14;
+          oar.rotation.y = Math.sin(b.rowPhase) * 0.32 * rowAmp;
+          oar.rotation.x = Math.cos(b.rowPhase) * 0.14 * rowAmp;
         }
 
+        const manUpper = b.g.userData.manUpper as THREE.Object3D | undefined;
+        if (manUpper) {
+          manUpper.rotation.x = Math.cos(b.rowPhase) * 0.12 * rowAmp;
+          manUpper.rotation.y = Math.sin(b.rowPhase) * 0.14 * rowAmp;
+        }
+
+        // 实时将船夫双手对准木桨握柄双握点
+        const handleTarget = b.g.userData.handleTarget as THREE.Object3D | undefined;
+        const handleForeTarget = b.g.userData.handleForeTarget as THREE.Object3D | undefined;
+        const manLeftArm = b.g.userData.manLeftArm as THREE.Object3D | undefined;
+        const manRightArm = b.g.userData.manRightArm as THREE.Object3D | undefined;
+        if (handleTarget && handleForeTarget && manLeftArm && manRightArm) {
+          b.g.updateMatrixWorld(true);
+          handleTarget.getWorldPosition(_scratchHandleRear);
+          handleForeTarget.getWorldPosition(_scratchHandleFore);
+          manLeftArm.lookAt(_scratchHandleRear);
+          manRightArm.lookAt(_scratchHandleFore);
+        }
+
+        b.currentLookYaw = THREE.MathUtils.lerp(
+          b.currentLookYaw,
+          b.targetLookYaw,
+          1 - Math.exp(-3.5 * dt),
+        );
         const passenger = b.g.userData.passenger as THREE.Object3D | undefined;
         if (passenger) {
-          passenger.rotation.y = -0.18 + Math.sin(t * 0.9 + b.bob) * 0.12;
+          passenger.rotation.y = -0.16 + b.currentLookYaw * 0.55 + Math.sin(t * 0.9 + b.bob) * 0.08;
+        }
+        const passengerHead = b.g.userData.passengerHead as THREE.Object3D | undefined;
+        if (passengerHead) {
+          passengerHead.rotation.y = b.currentLookYaw * 0.65;
+          passengerHead.rotation.x =
+            Math.abs(b.targetLookYaw) > 0.05 ? Math.sin(t * 2.2 + b.bob) * 0.06 + 0.04 : 0;
         }
 
         const wp = 0.5 + 0.5 * Math.sin(t * 3.8 + b.bob);
@@ -2272,13 +2745,19 @@ export class FlightChessEngine {
         const hullFoam = b.g.userData.hullFoam as THREE.Mesh | undefined;
         if (hullFoam) {
           hullFoam.position.y = localWaterOffset;
-          hullFoam.scale.set(0.98 + wp * 0.06, 0.99 + wp * 0.04, 1);
-          (hullFoam.material as THREE.MeshBasicMaterial).opacity = 0.55 + wp * 0.2;
+          hullFoam.scale.set(0.98 + wp * 0.06 * b.speedFactor, 0.99 + wp * 0.04 * b.speedFactor, 1);
+          (hullFoam.material as THREE.MeshBasicMaterial).opacity =
+            (0.28 + 0.27 * b.speedFactor) + wp * 0.2 * b.speedFactor;
         }
         const wake = b.g.userData.wake as THREE.Mesh;
         wake.position.y = localWaterOffset;
-        wake.scale.set(0.92 + wp * 0.16, 0.96 + wp * 0.22, 1);
-        (wake.material as THREE.MeshBasicMaterial).opacity = 0.44 + wp * 0.24;
+        wake.scale.set(
+          0.86 + wp * 0.16 * b.speedFactor,
+          0.9 + wp * 0.22 * b.speedFactor,
+          0.3 + 0.7 * b.speedFactor,
+        );
+        (wake.material as THREE.MeshBasicMaterial).opacity =
+          (0.44 + wp * 0.24) * b.speedFactor;
       }
     }
 
@@ -2319,6 +2798,39 @@ export class FlightChessEngine {
     this.controls.target.x = THREE.MathUtils.clamp(this.controls.target.x, -14, 14);
     this.controls.target.y = THREE.MathUtils.clamp(this.controls.target.y, -0.3, 2.5);
     this.controls.target.z = THREE.MathUtils.clamp(this.controls.target.z, -14, 14);
+
+    this.updatePoemBubbles();
+  }
+
+  private updatePoemBubbles(): void {
+    const boats = this.world.boats;
+    if (boats.length < 2) return;
+    this.camera.updateMatrixWorld();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const projectBubble = (
+      boat: (typeof boats)[number],
+      bubble: { root: HTMLDivElement; visible: boolean },
+    ) => {
+      if (!bubble.visible || this.paused) {
+        bubble.root.style.opacity = '0';
+        return;
+      }
+      _scratchBoatAnchor.set(0, 0.72, 0.22).applyMatrix4(boat.g.matrixWorld);
+      _scratchProj.copy(_scratchBoatAnchor).project(this.camera);
+      if (_scratchProj.z > 1 || _scratchProj.z < -1) {
+        bubble.root.style.opacity = '0';
+        return;
+      }
+      const sx = THREE.MathUtils.clamp((_scratchProj.x * 0.5 + 0.5) * w, 86, w - 86);
+      const sy = THREE.MathUtils.clamp((-_scratchProj.y * 0.5 + 0.5) * h, 64, h - 40);
+      bubble.root.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+      bubble.root.style.opacity = '1';
+    };
+
+    projectBubble(boats[0], this.poemBubbles.scholar);
+    projectBubble(boats[1], this.poemBubbles.maiden);
   }
 
   private updateCameraRig(dt: number): void {
@@ -2429,6 +2941,9 @@ export class FlightChessEngine {
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode === this.container) {
       this.container.removeChild(this.renderer.domElement);
+    }
+    if (this.poemLayer.parentNode === this.container) {
+      this.container.removeChild(this.poemLayer);
     }
   }
 }
