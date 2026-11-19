@@ -36,12 +36,16 @@ import {
 } from './textures';
 
 export interface RideToyCakeEatRig {
-  rightArmPivot: THREE.Group;
+  restArmGroup: THREE.Group;
+  eatArmPivot: THREE.Group;
   cakeGroup: THREE.Group;
   cakeHalf1: THREE.Group;
+  mouthClosed: THREE.Mesh;
+  mouthOpen: THREE.Group;
+  jawPivot: THREE.Group;
+  blushMeshes: THREE.Mesh[];
   normalEyes: THREE.Mesh[];
   happyEyes: THREE.Mesh[];
-  nextEatAt: number;
   eatStart: number;
   eatDur: number;
 }
@@ -409,6 +413,7 @@ function buildToyRider(P: PlayerConfig) {
       ? 0xeab832
       : P.blush;
   const blushM = M(blushCol, 0.72);
+  const blushMeshes: THREE.Mesh[] = [];
   for (const s of [-1, 1]) {
     const tb = 0.63 * s;
     const blush = new THREE.Mesh(new THREE.SphereGeometry(0.048, 20, 14), blushM);
@@ -418,25 +423,73 @@ function buildToyRider(P: PlayerConfig) {
     blush.rotation.y = tb;
     blush.rotation.x = (surfPt(tb, 0.3, 0).z - surfPt(tb, 0.22, 0).z) / 0.08;
     headWrap.add(blush);
+    blushMeshes.push(blush);
   }
+  let mouthClosed: THREE.Mesh | null = null;
+  let mouthOpen: THREE.Group | null = null;
   if (panda) {
     const mz = surfPt(0, 0.308, 0).z;
-    const mRim = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.007, 10, 20), darkM);
-    mRim.scale.set(0.92, 1.18, 0.65);
-    mRim.position.set(0, 0.306, mz + 0.001);
-    headWrap.add(mRim);
-    const tongue = new THREE.Mesh(
-      new THREE.SphereGeometry(0.019, 14, 10),
-      M(0xef7c8e, 0.6),
+    // 常态 ω 小嘴
+    const wPts = [
+      new THREE.Vector3(-0.024, 0.314, surfPt(-0.06, 0.314, 0).z + 0.003),
+      new THREE.Vector3(-0.011, 0.305, surfPt(-0.03, 0.305, 0).z + 0.003),
+      new THREE.Vector3(0, 0.313, surfPt(0, 0.313, 0).z + 0.003),
+      new THREE.Vector3(0.011, 0.305, surfPt(0.03, 0.305, 0).z + 0.003),
+      new THREE.Vector3(0.024, 0.314, surfPt(0.06, 0.314, 0).z + 0.003),
+    ];
+    mouthClosed = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(wPts), 18, 0.005, 8, false),
+      darkM,
     );
-    tongue.scale.set(0.85, 1.1, 0.45);
-    tongue.position.set(0, 0.304, mz + 0.002);
-    headWrap.add(tongue);
-    for (const s of [-1, 1]) {
-      const lip = new THREE.Mesh(new THREE.SphereGeometry(0.009, 10, 8), darkM);
-      lip.position.set(0.021 * s, 0.326, surfPt(0.06 * s, 0.326, 0).z + 0.002);
-      headWrap.add(lip);
-    }
+    headWrap.add(mouthClosed);
+
+    // 3D 张嘴立体口腔结构（深色立体口腔内壁 + 上唇轮廓 + 可活动下颌 + 3D 舌头）
+    mouthOpen = new THREE.Group();
+    mouthOpen.position.set(0, 0.306, mz + 0.002);
+
+    const cavityMat = M(0x22100b, 0.85);
+    const cavity = new THREE.Mesh(new THREE.SphereGeometry(0.032, 18, 14), cavityMat);
+    cavity.scale.set(1.02, 1.18, 0.68);
+    cavity.position.set(0, -0.004, -0.004);
+    mouthOpen.add(cavity);
+
+    const upperLip = new THREE.Mesh(
+      new THREE.TorusGeometry(0.028, 0.007, 10, 24, Math.PI),
+      darkM,
+    );
+    upperLip.scale.set(1.04, 0.88, 0.9);
+    upperLip.position.set(0, 0.006, 0.004);
+    mouthOpen.add(upperLip);
+
+    const jawPivot = new THREE.Group();
+    jawPivot.position.set(0, 0.004, -0.008);
+
+    const lowerRim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.028, 0.0072, 10, 24, Math.PI),
+      darkM,
+    );
+    lowerRim.rotation.z = Math.PI;
+    lowerRim.scale.set(1.02, 1.12, 0.95);
+    lowerRim.position.set(0, -0.006, 0.013);
+    jawPivot.add(lowerRim);
+
+    const lowerChin = new THREE.Mesh(new THREE.SphereGeometry(0.027, 16, 12), furM);
+    lowerChin.scale.set(1.06, 0.62, 0.72);
+    lowerChin.position.set(0, -0.026, 0.014);
+    jawPivot.add(lowerChin);
+
+    const tongue = new THREE.Mesh(
+      new THREE.SphereGeometry(0.021, 16, 12),
+      M(0xf2798b, 0.52),
+    );
+    tongue.scale.set(0.92, 0.65, 1.15);
+    tongue.position.set(0, -0.016, 0.014);
+    jawPivot.add(tongue);
+
+    mouthOpen.add(jawPivot);
+    mouthOpen.userData.jawPivot = jawPivot;
+    mouthOpen.visible = false;
+    headWrap.add(mouthOpen);
   } else {
     const mPts = [
       new THREE.Vector3(-0.026, 0.314, surfPt(-0.06, 0.314, 0).z + 0.003),
@@ -465,7 +518,8 @@ function buildToyRider(P: PlayerConfig) {
   }
   const gripY = panda ? 0.13 : 0.16;
   const gripZ = panda ? 0.17 : 0.18;
-  let rightArmPivot: THREE.Group | null = null;
+  let restArmGroup: THREE.Group | null = null;
+  let eatArmPivot: THREE.Group | null = null;
   let cakeGroup: THREE.Group | null = null;
   let cakeHalf1: THREE.Group | null = null;
 
@@ -473,29 +527,51 @@ function buildToyRider(P: PlayerConfig) {
     const a = new THREE.Vector3(0.135 * s, 0.22, -0.01);
     const b = new THREE.Vector3(0.205 * s, gripY, gripZ);
     if (panda && s === 1) {
-      const armPivot = new THREE.Group();
-      armPivot.position.copy(a);
-      const relB = b.clone().sub(a);
-      const mid = relB.clone().multiplyScalar(0.5);
-      const dir = relB.clone().normalize();
-      const arm = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.044, 0.052, relB.length(), 12),
+      // 常态握把右手
+      const restGrp = new THREE.Group();
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      const dir = b.clone().sub(a).normalize();
+      const rArm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.044, 0.052, a.distanceTo(b), 12),
         furM,
       );
-      arm.position.copy(mid);
-      arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      arm.castShadow = true;
-      armPivot.add(arm);
+      rArm.position.copy(mid);
+      rArm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      rArm.castShadow = true;
+      restGrp.add(rArm);
+      const rPaw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), furM);
+      rPaw.position.copy(b);
+      rPaw.castShadow = true;
+      restGrp.add(rPaw);
+      riderPivot.add(restGrp);
+      restArmGroup = restGrp;
 
-      const paw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), furM);
-      paw.position.copy(relB);
-      paw.castShadow = true;
-      armPivot.add(paw);
+      // 吃蛋糕专用抬起手臂（向外前伸，完全避开脸颊与车把不穿模）
+      const armPivot = new THREE.Group();
+      armPivot.position.copy(a);
+      armPivot.visible = false;
+      const eatTarget = new THREE.Vector3(0.145, 0.04, 0.27);
+      const eatMid = eatTarget.clone().multiplyScalar(0.5);
+      const eatDir = eatTarget.clone().normalize();
+      const eArm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.044, 0.052, eatTarget.length(), 12),
+        furM,
+      );
+      eArm.position.copy(eatMid);
+      eArm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), eatDir);
+      eArm.castShadow = true;
+      armPivot.add(eArm);
 
-      // 图2款草莓小蛋糕（海绵胚 + 奶油夹心 + 波浪白奶油顶 + 红草莓）
+      const ePaw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), furM);
+      ePaw.position.copy(eatTarget);
+      ePaw.castShadow = true;
+      armPivot.add(ePaw);
+
+      // 图2款草莓小蛋糕（放大 1.45 倍确保游戏视角清晰可见，位于手掌正上方不穿模）
       const cake = new THREE.Group();
-      cake.position.set(relB.x + 0.01, relB.y + 0.065, relB.z + 0.015);
-      cake.visible = false;
+      cake.position.set(eatTarget.x, eatTarget.y + 0.088, eatTarget.z + 0.01);
+      cake.scale.setScalar(1.45);
+      cake.visible = true;
 
       const spongeM = M(0xfbe288, 0.65);
       const creamM = M(0xfffdf8, 0.45);
@@ -570,7 +646,7 @@ function buildToyRider(P: PlayerConfig) {
       armPivot.add(cake);
 
       riderPivot.add(armPivot);
-      rightArmPivot = armPivot;
+      eatArmPivot = armPivot;
       cakeGroup = cake;
       cakeHalf1 = half1;
     } else {
@@ -601,9 +677,14 @@ function buildToyRider(P: PlayerConfig) {
   return {
     riderPivot,
     headPivot,
-    rightArmPivot,
+    restArmGroup,
+    eatArmPivot,
     cakeGroup,
     cakeHalf1,
+    mouthClosed,
+    mouthOpen,
+    jawPivot: mouthOpen ? (mouthOpen.userData.jawPivot as THREE.Group) : null,
+    blushMeshes,
     normalEyes,
     happyEyes,
   };
@@ -2742,9 +2823,14 @@ export function buildAncientWorld(
     const {
       riderPivot,
       headPivot,
-      rightArmPivot,
+      restArmGroup,
+      eatArmPivot,
       cakeGroup,
       cakeHalf1,
+      mouthClosed,
+      mouthOpen,
+      jawPivot,
+      blushMeshes,
       normalEyes,
       happyEyes,
     } = buildToyRider(P);
@@ -2762,16 +2848,20 @@ export function buildAncientWorld(
       species: P.species,
       charKey: P.key,
       cakeEat:
-        panda && rightArmPivot && cakeGroup && cakeHalf1
+        panda && restArmGroup && eatArmPivot && cakeGroup && cakeHalf1 && mouthClosed && mouthOpen && jawPivot
           ? {
-              rightArmPivot,
+              restArmGroup,
+              eatArmPivot,
               cakeGroup,
               cakeHalf1,
+              mouthClosed,
+              mouthOpen,
+              jawPivot,
+              blushMeshes,
               normalEyes,
               happyEyes,
-              nextEatAt: 4.5 + slotId * 3.8 + Math.random() * 5.0,
               eatStart: -1,
-              eatDur: 5.4,
+              eatDur: 5.6,
             }
           : undefined,
     });

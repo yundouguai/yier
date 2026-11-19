@@ -46,7 +46,7 @@ import { createNumberBadgeTexture } from './textures';
 import { WorldRefs, buildAncientWorld } from './world';
 
 const TIMEOUT = 30000;
-const STACK_STEP_Y = 0.545;
+const STACK_STEP_Y = 0.625;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const lerpAngle = (a: number, b: number, t: number) =>
   a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -200,6 +200,7 @@ export class FlightChessEngine {
   private downXY: [number, number] | null = null;
   private diceHovered = false;
   private lastHoverRaycast = 0;
+  private nextGlobalCakeEatAt = 24 + Math.random() * 18;
 
   private boundResize: () => void;
   private boundPointerDown: (e: PointerEvent) => void;
@@ -2299,6 +2300,15 @@ export class FlightChessEngine {
         const c = Math.max(0, Math.min(1, v));
         return c * c * (3 - 2 * c);
       };
+      if (t >= this.nextGlobalCakeEatAt) {
+        const cakePool = this.world.rideToys.filter((r) => r.cakeEat && r.cakeEat.eatStart < 0);
+        if (cakePool.length > 0) {
+          const picked = cakePool[(Math.random() * cakePool.length) | 0];
+          picked.cakeEat!.eatStart = t;
+        }
+        this.nextGlobalCakeEatAt = t + 50 + Math.random() * 20;
+      }
+
       for (const rt of this.world.rideToys) {
         const w = t * 1.45 + rt.phase;
         const rock = Math.sin(w);
@@ -2311,74 +2321,116 @@ export class FlightChessEngine {
 
         const ce = rt.cakeEat;
         if (ce) {
-          if (ce.eatStart < 0 && t >= ce.nextEatAt) {
-            ce.eatStart = t;
-          }
           if (ce.eatStart >= 0) {
             const p = (t - ce.eatStart) / ce.eatDur;
             if (p >= 1) {
               ce.eatStart = -1;
-              ce.nextEatAt = t + 11 + Math.random() * 14;
-              ce.rightArmPivot.rotation.set(0, 0, 0);
-              ce.rightArmPivot.position.set(0.135, 0.22, -0.01);
-              ce.cakeGroup.visible = false;
-              ce.cakeGroup.scale.setScalar(1);
+              ce.restArmGroup.visible = true;
+              ce.eatArmPivot.visible = false;
+              ce.eatArmPivot.rotation.set(0, 0, 0);
+              ce.cakeGroup.visible = true;
+              ce.cakeGroup.position.set(0.145, 0.128, 0.28);
+              ce.cakeGroup.scale.setScalar(1.45);
               ce.cakeHalf1.visible = true;
+              ce.cakeHalf1.position.set(0, 0, 0);
+              ce.cakeHalf1.scale.setScalar(1);
+              ce.mouthClosed.visible = true;
+              ce.mouthOpen.visible = false;
+              ce.mouthOpen.scale.set(1, 1, 1);
+              ce.jawPivot.rotation.x = 0;
+              ce.blushMeshes.forEach((bm) => bm.scale.set(1.04, 1.0, 0.24));
               ce.normalEyes.forEach((em) => (em.visible = true));
               ce.happyEyes.forEach((em) => (em.visible = false));
             } else {
-              // 精致 2 口偷吃草莓小蛋糕动画（手臂前伸上抬，避免穿模进头部）
-              let lift = 0; // 0: 握把, 0.55: 举在脸侧展示, 1.0: 送到嘴前
-              if (p < 0.14) {
-                lift = smooth01(p / 0.14) * 0.52;
-              } else if (p < 0.28) {
-                lift = 0.52 + smooth01((p - 0.14) / 0.14) * 0.48;
-              } else if (p < 0.40) {
-                lift = 1.0 - smooth01((p - 0.28) / 0.12) * 0.45;
-              } else if (p < 0.54) {
-                lift = 0.55;
+              ce.restArmGroup.visible = false;
+              ce.eatArmPivot.visible = true;
+
+              // feed: 0 = 脸侧举着展示, 1 = 塞进张开的3D嘴里
+              let feed = 0;
+              if (p < 0.16) {
+                feed = 0;
+              } else if (p < 0.29) {
+                feed = smooth01((p - 0.16) / 0.13); // 第1口往嘴里塞
+              } else if (p < 0.41) {
+                feed = 1 - smooth01((p - 0.29) / 0.12); // 撤回展示剩下半块
+              } else if (p < 0.55) {
+                feed = 0;
               } else if (p < 0.68) {
-                lift = 0.55 + smooth01((p - 0.54) / 0.14) * 0.45;
+                feed = smooth01((p - 0.55) / 0.13); // 第2口连草莓塞进嘴里
               } else if (p < 0.80) {
-                lift = 1.0 - smooth01((p - 0.68) / 0.12) * 0.52;
-              } else if (p < 0.90) {
-                lift = 0.48;
+                feed = 1 - smooth01((p - 0.68) / 0.12);
               } else {
-                lift = 0.48 * (1 - smooth01((p - 0.90) / 0.10));
+                feed = 0;
               }
 
-              // 手臂前伸 + 上抬，使蛋糕稳定停在嘴前外侧不穿帮
-              ce.rightArmPivot.position.set(0.135, 0.22 + lift * 0.02, -0.01 + lift * 0.095);
-              ce.rightArmPivot.rotation.set(-lift * 1.18, -lift * 0.28, lift * 0.36);
+              // 手臂绕肩前伸内收，把蛋糕送到3D张开的嘴口
+              ce.eatArmPivot.rotation.set(-0.42 * feed, 0.46 * feed, 0.22 * feed);
 
-              // 蛋糕出现、第1口吃掉一半、第2口全吃掉
-              const cakeVis = p >= 0.04 && p < 0.68;
-              ce.cakeGroup.visible = cakeVis;
-              ce.cakeHalf1.visible = p < 0.28;
-              const popScale =
-                p < 0.10
-                  ? smooth01((p - 0.04) / 0.06)
-                  : p >= 0.64 && p < 0.68
-                    ? 1 - smooth01((p - 0.64) / 0.04)
-                    : 1;
-              ce.cakeGroup.scale.setScalar(Math.max(0.01, popScale));
+              // 塞进嘴的效果：第1口塞入时 half1 缩进嘴腔并消失，第2口塞入时整块蛋糕缩进嘴腔并消失
+              const popIn = p < 0.08 ? smooth01(p / 0.08) : 1;
+              let stuff2Scale = 1;
+              let stuff2Z = 0;
+              if (p >= 0.62 && p < 0.70) {
+                const tIn = smooth01((p - 0.62) / 0.08);
+                stuff2Scale = 1 - tIn * 0.85;
+                stuff2Z = -tIn * 0.06; // 往嘴里推进
+              }
+              ce.cakeGroup.visible = p < 0.70;
+              ce.cakeGroup.position.set(0.145, 0.128, 0.28 + stuff2Z);
+              ce.cakeGroup.scale.setScalar(1.45 * Math.max(0.05, popIn * stuff2Scale));
 
-              // 吃下去时切换为开心弯弯笑眼 ^ ^
-              const isHappy = p >= 0.27 && p < 0.92;
+              let stuff1Scale = 1;
+              let stuff1Z = 0;
+              if (p >= 0.23 && p < 0.31) {
+                const tIn = smooth01((p - 0.23) / 0.08);
+                stuff1Scale = 1 - tIn * 0.85;
+                stuff1Z = -tIn * 0.055;
+              }
+              ce.cakeHalf1.visible = p < 0.31;
+              ce.cakeHalf1.position.set(0, 0, stuff1Z);
+              ce.cakeHalf1.scale.setScalar(Math.max(0.05, stuff1Scale));
+
+              // 3D 张嘴立体结构 + 下颌开合咀嚼
+              const isOpenBite1 = p >= 0.19 && p <= 0.32;
+              const isOpenBite2 = p >= 0.58 && p <= 0.71;
+              const isChewing = (p > 0.32 && p < 0.54) || (p > 0.71 && p < 0.93);
+
+              if (isOpenBite1 || isOpenBite2) {
+                ce.mouthClosed.visible = false;
+                ce.mouthOpen.visible = true;
+                const openPeak = isOpenBite1
+                  ? Math.sin(smooth01((p - 0.19) / 0.13) * Math.PI)
+                  : Math.sin(smooth01((p - 0.58) / 0.13) * Math.PI);
+                ce.mouthOpen.scale.set(1.0 + openPeak * 0.25, 0.9 + openPeak * 0.45, 1.0 + openPeak * 0.35);
+                ce.jawPivot.rotation.x = 0.22 + openPeak * 0.48; // 3D下颌张开迎接入嘴
+              } else if (isChewing) {
+                const chewWave = 0.5 + 0.5 * Math.sin(t * 20);
+                ce.mouthClosed.visible = false;
+                ce.mouthOpen.visible = true;
+                ce.mouthOpen.scale.set(0.95, 0.45 + chewWave * 0.42, 0.9);
+                ce.jawPivot.rotation.x = 0.08 + chewWave * 0.32; // 下颌真实咀嚼咬合
+              } else {
+                ce.mouthClosed.visible = true;
+                ce.mouthOpen.visible = false;
+                ce.jawPivot.rotation.x = 0;
+              }
+
+              // 塞满嘴咀嚼时腮帮子鼓鼓的
+              const cheekPuff = isChewing ? 1 + (0.5 + 0.5 * Math.sin(t * 20)) * 0.18 : 1;
+              ce.blushMeshes.forEach((bm) =>
+                bm.scale.set(1.04 * cheekPuff, 1.0 * cheekPuff, 0.24 * (1 + (cheekPuff - 1) * 1.4)),
+              );
+
+              // 吃到蛋糕时切换为开心弯弯笑眼 ^ ^
+              const isHappy = p >= 0.29 && p < 0.94;
               ce.normalEyes.forEach((em) => (em.visible = !isHappy));
               ce.happyEyes.forEach((em) => (em.visible = isHappy));
 
-              // 咬下瞬间轻微低头转向蛋糕，咀嚼时开心摇晃
-              const bite1 = Math.sin(smooth01(Math.max(0, Math.min(1, (p - 0.18) / 0.16))) * Math.PI);
-              const bite2 = Math.sin(smooth01(Math.max(0, Math.min(1, (p - 0.58) / 0.16))) * Math.PI);
-              const biteAmt = Math.max(bite1, bite2);
-              const chew =
-                (p >= 0.30 && p < 0.54) || (p >= 0.70 && p < 0.90)
-                  ? Math.sin(t * 16) * 0.065
-                  : 0;
-              headRotX += biteAmt * 0.14 + Math.abs(chew) * 0.7;
-              headRotY -= biteAmt * 0.16;
-              headRotZ += chew * 0.6;
+              headRotX += feed * 0.15 + (isChewing ? Math.abs(Math.sin(t * 20)) * 0.05 : 0);
+              headRotY -= feed * 0.24;
+              if (isChewing) {
+                headRotZ += Math.sin(t * 14) * 0.065;
+              }
             }
           }
         }

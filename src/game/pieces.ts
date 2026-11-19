@@ -600,15 +600,15 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   g.add(animRoot);
 
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.195, 24, 18), M(P.body));
-  body.scale.set(1, 0.7, 0.95);
-  body.position.y = 0.155;
+  body.scale.set(0.96, 0.98, 0.92);
+  body.position.y = 0.21;
   animRoot.add(body);
 
   const armPivots: THREE.Group[] = [];
   const footPivots: THREE.Group[] = [];
   for (const s of [-1, 1]) {
     const ap = new THREE.Group();
-    ap.position.set(0.165 * s, 0.2, 0.02);
+    ap.position.set(0.165 * s, 0.275, 0.02);
     const arm = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), M(P.body));
     arm.scale.set(0.85, 1.2, 0.85);
     arm.position.set(0.02 * s, -0.03, 0);
@@ -627,8 +627,30 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
     footPivots.push(fp);
   }
 
+  if (P.species === 'panda') {
+    const ribbonMat = new THREE.MeshStandardMaterial({ color: 0x221b18, roughness: 0.45 });
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.145, 0.017, 10, 28), ribbonMat);
+    collar.rotation.x = Math.PI / 2 + 0.08;
+    collar.position.set(0, 0.295, 0.01);
+    animRoot.add(collar);
+
+    const bowGrp = new THREE.Group();
+    bowGrp.position.set(0, 0.278, 0.162);
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 10), ribbonMat);
+    knot.scale.set(1, 0.9, 0.75);
+    bowGrp.add(knot);
+    for (const sx of [-1, 1]) {
+      const lobe = new THREE.Mesh(new THREE.SphereGeometry(0.032, 14, 10), ribbonMat);
+      lobe.scale.set(0.85, 1.25, 0.55);
+      lobe.position.set(sx * 0.022, -0.024, 0.002);
+      lobe.rotation.z = sx * 0.42;
+      bowGrp.add(lobe);
+    }
+    animRoot.add(bowGrp);
+  }
+
   const headPivot = new THREE.Group();
-  headPivot.position.set(0, 0.22, 0);
+  headPivot.position.set(0, 0.3, 0);
   const headWrap = new THREE.Group();
   headWrap.position.set(0, -0.22, 0);
   const headMesh = loafHead(P, anisotropy);
