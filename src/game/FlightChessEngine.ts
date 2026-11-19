@@ -43,6 +43,7 @@ import {
 import { WorldRefs, buildAncientWorld } from './world';
 
 const TIMEOUT = 30000;
+const STACK_STEP_Y = 0.545;
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const lerpAngle = (a: number, b: number, t: number) =>
   a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * t;
@@ -860,6 +861,105 @@ export class FlightChessEngine {
     return dx === 0 && dz === 0 ? P.finalYaw : Math.atan2(dx, dz);
   }
 
+  private getStartHuddlePts(total: number): { lx: number; lz: number }[] {
+    if (total <= 1) return [{ lx: 0, lz: 0 }];
+    if (total === 2) {
+      // 距离 0.396（< 2*0.243）：双颊正好压扁贴紧在一起，耳朵与腮红完全在安全区不穿模
+      return [
+        { lx: -0.198, lz: 0 },
+        { lx: 0.198, lz: 0 },
+      ];
+    }
+    if (total === 3) {
+      return [
+        { lx: -0.198, lz: 0.115 },
+        { lx: 0.198, lz: 0.115 },
+        { lx: 0, lz: -0.215 },
+      ];
+    }
+    return [
+      { lx: -0.198, lz: 0.178 },
+      { lx: 0.198, lz: 0.178 },
+      { lx: -0.198, lz: -0.178 },
+      { lx: 0.198, lz: -0.178 },
+    ];
+  }
+
+  private getStartHuddlePose(
+    idx: number,
+    total: number,
+    baseYaw: number,
+  ): {
+    dx: number;
+    dz: number;
+    leanRoll: number;
+    leanPitch: number;
+    yawOff: number;
+    pts: { lx: number; lz: number }[];
+  } {
+    const pts = this.getStartHuddlePts(total);
+    if (total <= 1) {
+      return { dx: 0, dz: 0, leanRoll: 0, leanPitch: 0, yawOff: 0, pts };
+    }
+    const me = pts[Math.min(idx, pts.length - 1)];
+    const leanRoll = me.lx !== 0 ? Math.sign(me.lx) * 0.04 : 0;
+    const leanPitch = me.lz !== 0 ? -Math.sign(me.lz) * 0.04 : 0;
+    const yawOff = me.lx !== 0 ? -Math.sign(me.lx) * 0.05 : 0;
+
+    const cosY = Math.cos(baseYaw);
+    const sinY = Math.sin(baseYaw);
+    const dx = me.lx * cosY + me.lz * sinY;
+    const dz = -me.lx * sinY + me.lz * cosY;
+    return { dx, dz, leanRoll, leanPitch, yawOff, pts };
+  }
+
+  private applyCheekSquishDeform(
+    plane: PlaneData,
+    contactPlanesLocal: { nx: number; nz: number; maxProj: number }[],
+  ): void {
+    const pt = plane.mesh.userData.parts as PlaneParts | undefined;
+    if (!pt || !pt.headMesh) return;
+    const geo = pt.headMesh.geometry;
+    const basePos = geo.userData.basePos as Float32Array | undefined;
+    if (!basePos) return;
+
+    const posAttr = geo.attributes.position as THREE.BufferAttribute;
+    const arr = posAttr.array as Float32Array;
+
+    if (contactPlanesLocal.length === 0) {
+      if (geo.userData.squished) {
+        arr.set(basePos);
+        posAttr.needsUpdate = true;
+        geo.computeVertexNormals();
+        geo.userData.squished = false;
+      }
+      return;
+    }
+
+    for (let i = 0; i < basePos.length; i += 3) {
+      let x = basePos[i];
+      let y = basePos[i + 1];
+      let z = basePos[i + 2];
+
+      for (const cp of contactPlanesLocal) {
+        const proj = x * cp.nx + z * cp.nz;
+        if (proj > cp.maxProj) {
+          const excess = proj - cp.maxProj;
+          // 将接触面顶点压平到碰撞中线平面上，并微微向上外鼓出肉感
+          x -= cp.nx * excess * 0.96;
+          z -= cp.nz * excess * 0.96;
+          y += excess * 0.16;
+        }
+      }
+      arr[i] = x;
+      arr[i + 1] = y;
+      arr[i + 2] = z;
+    }
+    posAttr.needsUpdate = true;
+    geo.computeVertexNormals();
+    geo.userData.squished = true;
+  }
+
   private relayout(): void {
     const groups: Record<string, PlaneData[]> = {};
     this.planes.forEach((p) => {
@@ -869,24 +969,85 @@ export class FlightChessEngine {
       }
     });
     for (const k in groups) {
-      groups[k].forEach((p, i) => {
-        const off = STACK_OFF[Math.min(i, STACK_OFF.length - 1)];
+      const grp = groups[k];
+      const total = grp.length;
+      grp.forEach((p, i) => {
         let x: number;
+        let y = 0.12;
         let z: number;
         let yaw: number;
+        let stackIdx = 0;
+        let stackTotal = 1;
+
         if (p.pos === -1) {
           const b = this.players[p.pid].base[p.idx];
           x = b[0];
           z = b[1];
           yaw = Math.atan2(-x, -z + 2);
-        } else {
+        } else if (p.pos === 0) {
+          // START 区域：真实软体接触面压平，实现图2般紧贴「脸挤脸」且零穿模
           const c = this.posToCell(this.players[p.pid], p.pos);
-          x = c[0] + off[0];
-          z = c[1] + off[1];
+          const baseYaw = this.faceTravelDir(p);
+          const huddle = this.getStartHuddlePose(i, total, baseYaw);
+          x = c[0] + huddle.dx;
+          z = c[1] + huddle.dz;
+          yaw = baseYaw + huddle.yawOff;
+          p.mesh.userData.huddleRoll = huddle.leanRoll;
+          p.mesh.userData.huddlePitch = huddle.leanPitch;
+          p.mesh.userData.huddleTotal = total;
+          p.mesh.userData.huddleIdx = i;
+
+          if (total >= 2) {
+            const me = huddle.pts[Math.min(i, huddle.pts.length - 1)];
+            const cosY = Math.cos(baseYaw);
+            const sinY = Math.sin(baseYaw);
+            const contacts: { nx: number; nz: number; maxProj: number }[] = [];
+            for (let j = 0; j < huddle.pts.length; j++) {
+              if (j === i) continue;
+              const nb = huddle.pts[j];
+              // 世界平面从我指向邻居的向量
+              const dlx = nb.lx - me.lx;
+              const dlz = nb.lz - me.lz;
+              const wdx = dlx * cosY + dlz * sinY;
+              const wdz = -dlx * sinY + dlz * cosY;
+              const dist = Math.hypot(wdx, wdz) || 1;
+              // 转回当前角色自身 yaw 局部坐标
+              const cYaw = Math.cos(yaw);
+              const sYaw = Math.sin(yaw);
+              const lnx = (wdx * cYaw - wdz * sYaw) / dist;
+              const lnz = (wdx * sYaw + wdz * cYaw) / dist;
+              // 接触中线距（换算到 0.92 缩放前的模型局部坐标）
+              const maxProj = (dist * 0.5) / 0.92;
+              contacts.push({ nx: lnx, nz: lnz, maxProj });
+            }
+            this.applyCheekSquishDeform(p, contacts);
+          } else {
+            this.applyCheekSquishDeform(p, []);
+          }
+        } else {
+          // 棋盘上重叠时采用垂直「叠叠乐」堆叠
+          const c = this.posToCell(this.players[p.pid], p.pos);
+          x = c[0];
+          z = c[1];
+          y = 0.12 + i * STACK_STEP_Y;
           yaw = p.pos === HOME_END ? this.players[p.pid].finalYaw : this.faceTravelDir(p);
+          stackIdx = i;
+          stackTotal = total;
         }
-        p.mesh.position.set(x, 0.12, z);
-        p.mesh.rotation.y = yaw;
+        p.mesh.position.set(x, y, z);
+        p.mesh.rotation.set(0, yaw, 0);
+        p.mesh.userData.stackBaseX = x;
+        p.mesh.userData.stackBaseY = y;
+        p.mesh.userData.stackBaseZ = z;
+        p.mesh.userData.stackBaseYaw = yaw;
+        p.mesh.userData.stackIdx = stackIdx;
+        p.mesh.userData.stackTotal = stackTotal;
+        if (p.pos !== 0) {
+          this.applyCheekSquishDeform(p, []);
+          p.mesh.userData.huddleTotal = 1;
+          p.mesh.userData.huddleRoll = 0;
+          p.mesh.userData.huddlePitch = 0;
+        }
       });
     }
   }
@@ -894,20 +1055,28 @@ export class FlightChessEngine {
   /* ================= Highlighting ================= */
   private highlight(list: { plane: PlaneData }[]): void {
     this.clearHL();
+    const seenRingCells = new Set<string>();
     list.forEach((c, i) => {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(0.5, 0.06, 8, 28),
-        new THREE.MeshBasicMaterial({ color: 0x3aa66b }),
-      );
-      ring.rotation.x = -Math.PI / 2;
-      c.plane.mesh.add(ring);
-      ring.position.set(0, -0.02, 0);
-      this.hlRings.push(ring);
+      const cellKey = this.cellKey(c.plane);
+      const isBottomInStack = ((c.plane.mesh.userData.stackIdx as number) || 0) === 0;
+      if (isBottomInStack || !seenRingCells.has(cellKey)) {
+        seenRingCells.add(cellKey);
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.5, 0.06, 8, 28),
+          new THREE.MeshBasicMaterial({ color: 0x3aa66b }),
+        );
+        ring.rotation.x = -Math.PI / 2;
+        c.plane.mesh.add(ring);
+        ring.position.set(0, -0.02, 0);
+        this.hlRings.push(ring);
+      }
       if (this.pickHints[i]) {
+        const hintY = Math.max(1.55, c.plane.mesh.position.y + 1.15);
         this.pickHints[i].visible = true;
+        this.pickHints[i].userData.baseY = hintY;
         this.pickHints[i].position.set(
           c.plane.mesh.position.x,
-          1.55,
+          hintY,
           c.plane.mesh.position.z,
         );
       }
@@ -1036,7 +1205,9 @@ export class FlightChessEngine {
     arc = 0.5,
     dur = 240,
     stepSign = 1,
+    baseY = 0.12,
   ): Promise<void> {
+    this.applyCheekSquishDeform(plane, []);
     plane.animating = true;
     const m = plane.mesh;
     const pt = m.userData.parts as PlaneParts;
@@ -1048,7 +1219,7 @@ export class FlightChessEngine {
     await this.tween(dur, (t) => {
       m.position.x = sx + (x - sx) * t;
       m.position.z = sz + (z - sz) * t;
-      m.position.y = sy + Math.sin(t * Math.PI) * arc;
+      m.position.y = THREE.MathUtils.lerp(sy, baseY, t) + Math.sin(t * Math.PI) * arc;
       m.rotation.y = lerpAngle(syaw, yaw, t);
       const air = Math.sin(t * Math.PI);
       const sq = t < 0.15 ? (1 - t / 0.15) * 0.12 : t > 0.85 ? ((t - 0.85) / 0.15) * 0.12 : 0;
@@ -1062,8 +1233,13 @@ export class FlightChessEngine {
       pt.rightFoot.rotation.x = -stepSign * air * 0.55;
       pt.headPivot.rotation.x = air * 0.12;
     });
-    m.position.set(x, 0.12, z);
-    m.rotation.y = yaw;
+    m.position.set(x, baseY, z);
+    m.rotation.set(0, yaw, 0);
+    m.userData.stackBaseX = x;
+    m.userData.stackBaseY = baseY;
+    m.userData.stackBaseZ = z;
+    m.userData.stackBaseYaw = yaw;
+    m.userData.stackTotal = 1;
     pt.animRoot.scale.set(1, 1, 1);
     pt.animRoot.rotation.set(0, 0, 0);
     pt.leftArm.rotation.set(0, 0, 0);
@@ -1071,6 +1247,7 @@ export class FlightChessEngine {
     pt.leftFoot.rotation.set(0, 0, 0);
     pt.rightFoot.rotation.set(0, 0, 0);
     pt.headPivot.rotation.set(0, 0, 0);
+    pt.headPivot.scale.set(1, 1, 1);
     plane.animating = false;
   }
 
@@ -1116,8 +1293,16 @@ export class FlightChessEngine {
       pt.leftFoot.rotation.x = Math.sin(k * Math.PI * 12) * 0.7;
       pt.rightFoot.rotation.x = -Math.sin(k * Math.PI * 12) * 0.7;
     });
+    const homeYaw = Math.atan2(-x, -z + 2);
     m.position.set(x, 0.12, z);
-    m.rotation.set(0, 0, 0);
+    m.rotation.set(0, homeYaw, 0);
+    m.userData.stackBaseX = x;
+    m.userData.stackBaseY = 0.12;
+    m.userData.stackBaseZ = z;
+    m.userData.stackBaseYaw = homeYaw;
+    m.userData.stackTotal = 1;
+    m.userData.stackIdx = 0;
+    m.userData.dizzyUntil = this.timeMs + 3800;
     pt.leftArm.rotation.set(0, 0, 0);
     pt.rightArm.rotation.set(0, 0, 0);
     pt.leftFoot.rotation.set(0, 0, 0);
@@ -1187,57 +1372,201 @@ export class FlightChessEngine {
     _color: number,
     dur: number,
   ): Promise<void> {
+    if (!stack.length) return;
+    const pid = stack[0].pid;
     const yaw = Math.atan2(cTo[0] - cFrom[0], cTo[1] - cFrom[1]);
-    const flyers = stack.map((p, i) => {
-      const off = STACK_OFF[Math.min(i, STACK_OFF.length - 1)];
-      p.animating = true;
-      const P = this.players[p.pid];
-      const fp = makePilotPlaneModel(P, this.anisotropy);
-      const sx = cFrom[0] + off[0];
-      const sz = cFrom[1] + off[1];
-      const tx = cTo[0] + off[0];
-      const tz = cTo[1] + off[1];
-      fp.position.set(sx, 0.14, sz);
-      fp.rotation.y = yaw;
-      p.mesh.visible = false;
-      this.scene.add(fp);
-      return { p, fp, sx, sz, tx, tz };
-    });
+    const sx = cFrom[0];
+    const sz = cFrom[1];
+    const tx = cTo[0];
+    const tz = cTo[1];
+    const dist = Math.hypot(tx - sx, tz - sz) || 1;
+    const dirX = (tx - sx) / dist;
+    const dirZ = (tz - sz) / dist;
+
+    // 隐藏原格面上的静态飞机（避免同时出现两架飞机）
+    const staticMark = this.world.planeMarks[pid];
+    if (staticMark) {
+      staticMark.visible = false;
+    }
+
+    // 飞机停在起飞格前方 0.92 格处，与格面上的叠叠乐小熊清晰错开
+    const bx = sx + dirX * 0.92;
+    const bz = sz + dirZ * 0.92;
+
+    const leadP = this.players[pid];
+    const fp = makePilotPlaneModel(leadP, this.anisotropy);
+    fp.position.set(bx, 0.42, bz);
+    fp.rotation.y = yaw;
+    const pilotHead = fp.userData.pilotHead as THREE.Group | undefined;
+    if (pilotHead) {
+      pilotHead.scale.setScalar(0.001);
+    }
+    this.scene.add(fp);
 
     const prevFollowObj = this.camFollowObj;
-    if (this.camFollowPlane && stack.includes(this.camFollowPlane) && flyers[0]) {
-      this.camFollowObj = flyers[0].fp;
+    if (this.camFollowPlane && stack.includes(this.camFollowPlane)) {
+      this.camFollowObj = fp;
     }
 
+    // 1) 一只一只依次跳进前方座舱
+    const boardOrder = [...stack].reverse();
+    for (let bIdx = 0; bIdx < boardOrder.length; bIdx++) {
+      if (this.disposed) {
+        this.scene.remove(fp);
+        if (staticMark) staticMark.visible = true;
+        return;
+      }
+      const p = boardOrder[bIdx];
+      p.animating = true;
+      const m = p.mesh;
+      const pt = m.userData.parts as PlaneParts;
+      const startX = m.position.x;
+      const startY = m.position.y;
+      const startZ = m.position.z;
+      const startYaw = m.rotation.y;
+
+      sndHop();
+      await this.tween(310, (k) => {
+        m.position.x = THREE.MathUtils.lerp(startX, bx, k);
+        m.position.z = THREE.MathUtils.lerp(startZ, bz, k);
+        m.position.y = THREE.MathUtils.lerp(startY, 0.56, k) + Math.sin(k * Math.PI) * 0.65;
+        m.rotation.set(0, lerpAngle(startYaw, yaw, k), 0);
+        const shrink = k > 0.7 ? 1 - ((k - 0.7) / 0.3) * 0.5 : 1;
+        m.scale.setScalar(0.92 * shrink);
+        pt.leftArm.rotation.z = 1.05;
+        pt.rightArm.rotation.z = -1.05;
+      });
+      m.visible = false;
+      m.scale.setScalar(0.92);
+      pt.leftArm.rotation.set(0, 0, 0);
+      pt.rightArm.rotation.set(0, 0, 0);
+
+      await this.tween(130, (k) => {
+        if (bIdx === 0 && pilotHead) {
+          const pop = Math.sin(k * Math.PI * 0.5) * (1 + Math.sin(k * Math.PI) * 0.16);
+          pilotHead.scale.setScalar(Math.max(0.001, pop));
+        }
+        fp.position.y = 0.42 - Math.sin(k * Math.PI) * 0.055;
+        if (fp.userData.propeller) {
+          (fp.userData.propeller as THREE.Group).rotation.z += 0.35;
+        }
+      });
+      if (bIdx === 0 && pilotHead) {
+        pilotHead.scale.setScalar(1);
+      }
+      fp.position.y = 0.42;
+      if (bIdx < boardOrder.length - 1) {
+        await this.sleep(60);
+      }
+    }
+
+    // 2) 全员登机后，唯一 1 架飞机 + 1 个大头熊飞向对面落点
     await this.tween(dur, (k) => {
-      for (const f of flyers) {
-        f.fp.position.x = f.sx + (f.tx - f.sx) * k;
-        f.fp.position.z = f.sz + (f.tz - f.sz) * k;
-        f.fp.position.y = 0.14 + Math.sin(k * Math.PI) * 2.15;
-        f.fp.rotation.y = yaw;
-        f.fp.rotation.x = -Math.cos(k * Math.PI) * 0.28;
-        f.fp.rotation.z = Math.sin(k * Math.PI * 4) * 0.08;
-        if (f.fp.userData.propeller) {
-          (f.fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 32;
-        }
-        if (f.fp.userData.pilotHead) {
-          (f.fp.userData.pilotHead as THREE.Group).rotation.z = Math.sin(k * Math.PI * 6) * 0.09;
-        }
+      fp.position.x = THREE.MathUtils.lerp(bx, tx, k);
+      fp.position.z = THREE.MathUtils.lerp(bz, tz, k);
+      fp.position.y = 0.42 + Math.sin(k * Math.PI) * 2.15;
+      fp.rotation.y = yaw;
+      fp.rotation.x = -Math.cos(k * Math.PI) * 0.26;
+      fp.rotation.z = Math.sin(k * Math.PI * 4) * 0.08;
+      if (fp.userData.propeller) {
+        (fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 34;
+      }
+      if (pilotHead) {
+        pilotHead.rotation.z = Math.sin(k * Math.PI * 6) * 0.09;
       }
     });
-
-    for (const f of flyers) {
-      this.scene.remove(f.fp);
-      f.p.mesh.visible = true;
-      f.p.mesh.position.set(f.tx, 0.12, f.tz);
-      f.p.mesh.rotation.y = yaw;
-      f.p.animating = false;
+    if (this.disposed) {
+      this.scene.remove(fp);
+      if (staticMark) staticMark.visible = true;
+      return;
     }
+
+    // 3) 熊落地恢复成叠叠乐，相机切回角色，随后飞机无人驾驶快速盘旋飞回原格
+    for (let i = 0; i < stack.length; i++) {
+      const p = stack[i];
+      const landY = 0.12 + i * STACK_STEP_Y;
+      p.mesh.visible = true;
+      p.mesh.position.set(tx, landY + 0.35, tz);
+      p.mesh.rotation.set(0, yaw, 0);
+      p.mesh.userData.stackBaseX = tx;
+      p.mesh.userData.stackBaseY = landY;
+      p.mesh.userData.stackBaseZ = tz;
+      p.mesh.userData.stackBaseYaw = yaw;
+      p.mesh.userData.stackTotal = stack.length;
+      p.mesh.userData.stackIdx = i;
+    }
+
     if (this.camFollowPlane) {
       this.camFollowObj = this.camFollowPlane.mesh;
     } else {
       this.camFollowObj = prevFollowObj;
     }
+
+    // 收起座舱熊头变为「无人驾驶」状态，启动快速盘旋返航
+    if (pilotHead) {
+      pilotHead.visible = false;
+    }
+    const perpX = -dirZ;
+    const perpZ = dirX;
+    const returnCurve = new THREE.CubicBezierCurve3(
+      new THREE.Vector3(tx, 0.42, tz),
+      new THREE.Vector3(tx + dirX * 2.8 + perpX * 3.4, 2.35, tz + dirZ * 2.8 + perpZ * 3.4),
+      new THREE.Vector3(sx - dirX * 3.2 + perpX * 2.5, 1.85, sz - dirZ * 3.2 + perpZ * 2.5),
+      new THREE.Vector3(sx, 0.305, sz),
+    );
+    const ptPos = new THREE.Vector3();
+    const ptTan = new THREE.Vector3();
+
+    const returnAnim = this.tween(920, (k) => {
+      // 前快后稳的返航节奏
+      const u = 1 - Math.pow(1 - k, 1.45);
+      returnCurve.getPoint(u, ptPos);
+      returnCurve.getTangent(u, ptTan);
+      fp.position.copy(ptPos);
+
+      const moveYaw = Math.atan2(ptTan.x, ptTan.z);
+      fp.rotation.order = 'YXZ';
+      fp.rotation.y = moveYaw;
+      fp.rotation.x = -ptTan.y * 0.45;
+      // 盘旋转弯时顺势侧倾机翼，落地前摆平
+      fp.rotation.z = -Math.sin(u * Math.PI) * 0.48;
+
+      // 从飞行尺寸平滑缩回棋盘静态飞机比例，落地严丝合缝
+      const sc = THREE.MathUtils.lerp(1.0, 0.86 / 1.48, u);
+      fp.scale.setScalar(sc);
+      if (fp.userData.propeller) {
+        (fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 36;
+      }
+    }).then(() => {
+      this.scene.remove(fp);
+      if (staticMark && !this.disposed) {
+        staticMark.visible = true;
+      }
+    });
+
+    await this.tween(260, (k) => {
+      const ease = 1 - Math.pow(1 - k, 2);
+      for (let i = 0; i < stack.length; i++) {
+        const p = stack[i];
+        const landY = 0.12 + i * STACK_STEP_Y;
+        p.mesh.position.y = THREE.MathUtils.lerp(landY + 0.35, landY, ease);
+        const sq = k > 0.7 ? Math.sin(((k - 0.7) / 0.3) * Math.PI) * 0.1 : 0;
+        const pt = p.mesh.userData.parts as PlaneParts;
+        pt.animRoot.scale.set(1 + sq * 0.8, 1 - sq, 1 + sq * 0.8);
+      }
+    });
+
+    for (let i = 0; i < stack.length; i++) {
+      const p = stack[i];
+      const landY = 0.12 + i * STACK_STEP_Y;
+      const pt = p.mesh.userData.parts as PlaneParts;
+      p.mesh.position.set(tx, landY, tz);
+      pt.animRoot.scale.set(1, 1, 1);
+      p.animating = false;
+    }
+
+    // 返航飞机在后台继续快速盘旋回位，不卡住玩家后续跳 4 格动作
+    void returnAnim;
   }
 
   private async captureAt(plane: PlaneData): Promise<number> {
@@ -1298,29 +1627,52 @@ export class FlightChessEngine {
         : this.planesOf(plane.pid).filter(
             (p) => p.pos === plane.pos && p.pos !== HOME_END,
           );
-    const sync = (fn: (p: PlaneData, o: Point2D) => Promise<void>) =>
-      Promise.all(
-        stack.map((p, i) => fn(p, STACK_OFF[Math.min(i, STACK_OFF.length - 1)])),
-      );
+    const sync = (fn: (p: PlaneData, idx: number) => Promise<void>) =>
+      Promise.all(stack.map((p, i) => fn(p, i)));
     const setPos = (v: number) => stack.forEach((p) => (p.pos = v));
-    const hopAll = (c: Point2D, yaw: number, arc: number, dur: number, sign: number) =>
-      sync((p, o) => this.hopTo(p, c[0] + o[0], c[1] + o[1], yaw, arc, dur, sign));
+    const countExistingAt = (pos: number) =>
+      pos <= 0
+        ? 0
+        : this.planes.filter(
+            (q) => !stack.includes(q) && q.pid === plane.pid && q.pos === pos,
+          ).length;
+    const hopAll = (
+      c: Point2D,
+      yaw: number,
+      arc: number,
+      dur: number,
+      sign: number,
+      targetPos?: number,
+    ) => {
+      const baseStackCount = targetPos !== undefined ? countExistingAt(targetPos) : 0;
+      return sync((p, idx) =>
+        this.hopTo(
+          p,
+          c[0],
+          c[1],
+          yaw,
+          arc,
+          dur,
+          sign,
+          0.12 + (baseStackCount + idx) * STACK_STEP_Y,
+        ),
+      );
+    };
 
     if (plane.pos === -1) {
       setPos(0);
       const c = this.posToCell(P, 0);
-      const used = Math.min(
-        this.planesOf(plane.pid).filter((p) => p !== plane && p.pos === 0).length,
-        STACK_OFF.length - 1,
-      );
-      const o = STACK_OFF[used];
+      const alreadyOnStart = this.planesOf(plane.pid).filter((p) => p !== plane && p.pos === 0).length;
+      const nextTotal = Math.min(alreadyOnStart + 1, 4);
+      const baseYaw = this.faceTravelDir(plane);
+      const huddle = this.getStartHuddlePose(alreadyOnStart, nextTotal, baseYaw);
       this.setMsg('✈️ 登上 START 起点台！');
       beep(660, 0.12, 'triangle', 0.14);
       await this.hopTo(
         plane,
-        c[0] + o[0],
-        c[1] + o[1],
-        this.faceTravelDir(plane),
+        c[0] + huddle.dx,
+        c[1] + huddle.dz,
+        baseYaw + huddle.yawOff,
         0.95,
         820,
         1,
@@ -1336,7 +1688,7 @@ export class FlightChessEngine {
         const c = this.posToCell(P, curStep);
         const yaw = curStep === HOME_END ? P.finalYaw : this.faceTravelDir(plane);
         sndHop();
-        await hopAll(c, yaw, 0.5, 460, i % 2 === 0 ? 1 : -1);
+        await hopAll(c, yaw, 0.5, 460, i % 2 === 0 ? 1 : -1, curStep);
         if (this.disposed) return;
         if (i < die - 1) {
           await this.sleep(80);
@@ -1377,6 +1729,7 @@ export class FlightChessEngine {
             1.15,
             820,
             1,
+            plane.pos,
           );
           await this.captureAt(plane);
         } else {
@@ -1389,6 +1742,7 @@ export class FlightChessEngine {
             1.15,
             820,
             1,
+            plane.pos,
           );
           await this.captureAt(plane);
           if (plane.pos === FLIGHT_FROM) {
@@ -1764,6 +2118,95 @@ export class FlightChessEngine {
         const baseScale = p.pos === -1 ? 1.12 : 0.92;
         const pt = p.mesh.userData.parts as PlaneParts;
         if (p.animating) return;
+
+        const stackTotal = (p.mesh.userData.stackTotal as number) || 1;
+        const stackIdx = (p.mesh.userData.stackIdx as number) || 0;
+        const baseX = p.mesh.userData.stackBaseX as number | undefined;
+        const baseY = p.mesh.userData.stackBaseY as number | undefined;
+        const baseZ = p.mesh.userData.stackBaseZ as number | undefined;
+        const baseYaw = p.mesh.userData.stackBaseYaw as number | undefined;
+        const isStackedOnBoard =
+          stackTotal >= 2 &&
+          p.pos >= 1 &&
+          baseX !== undefined &&
+          baseY !== undefined &&
+          baseZ !== undefined &&
+          baseYaw !== undefined;
+
+        if (isStackedOnBoard) {
+          // 整座叠叠乐作为一个统一整体：使用 YXZ 欧拉角在角色自身朝向的前后方向摇摆（几乎无左右侧倒穿帮），
+          // 通过三角级联精确累加每一层的头顶接触点坐标，确保上层脚底严丝合缝踩在下层头顶，绝不悬空分离
+          p.mesh.rotation.order = 'YXZ';
+
+          const towerSeed = p.pid * 1.37 + p.pos * 0.41;
+          const sharedBreath = Math.sin(t * 2.0 + towerSeed);
+
+          let maxPitch = 0.018; // 2个人：比较稳，前后轻微呼吸平衡
+          let freq = 1.75;
+          let armBase = 0.24;
+          let armWaveAmp = 0.04;
+
+          if (stackTotal === 3) {
+            // 3个人：有点晃，整体呈柔和弧线前后轻晃
+            maxPitch = 0.078;
+            freq = 2.45;
+            armBase = 0.55;
+            armWaveAmp = 0.18;
+          } else if (stackTotal >= 4) {
+            // 4个人：叠在一起晃得厉害，明显前后大幅摇摆 + 顶部急促微颤
+            maxPitch = 0.175;
+            freq = 3.25;
+            armBase = 0.96;
+            armWaveAmp = 0.45;
+          }
+
+          const pitchAtLevel = (lvl: number): number => {
+            const phaseLag = lvl * 0.26;
+            const mainWave = Math.sin(t * freq - phaseLag + towerSeed);
+            const jitter = stackTotal >= 4 ? Math.sin(t * 9.2 + lvl * 1.1) * 0.18 : 0;
+            const heightGain = 0.35 + lvl * 0.38;
+            return (mainWave + jitter) * maxPitch * heightGain;
+          };
+
+          // 从底层 (k=0) 逐级累加每一层的头顶落脚点，保证全塔刚体级连贯成一个整体
+          let localY = 0.12;
+          let localZ = 0;
+          for (let k = 0; k < stackIdx; k++) {
+            const pk = pitchAtLevel(k);
+            const stepH = STACK_STEP_Y + sharedBreath * 0.008;
+            localY += stepH * Math.cos(pk);
+            localZ += stepH * Math.sin(pk);
+          }
+
+          const curPitch = pitchAtLevel(stackIdx);
+          const worldX = baseX! + Math.sin(baseYaw!) * localZ;
+          const worldZ = baseZ! + Math.cos(baseYaw!) * localZ;
+
+          p.mesh.position.set(worldX, localY, worldZ);
+          p.mesh.rotation.set(curPitch, baseYaw!, 0);
+          p.mesh.scale.setScalar(baseScale);
+
+          // 整塔同步呼吸微压，保持整体一致性
+          const squat = sharedBreath * 0.015;
+          pt.animRoot.position.y = 0;
+          pt.animRoot.scale.set(1 - squat * 0.5, 1 + squat, 1 - squat * 0.5);
+          pt.animRoot.rotation.set(0, 0, 0);
+
+          // 小手同步张开维持前后平衡，头部随塔身前后微点
+          const armWave = Math.sin(t * (freq * 1.45) + stackIdx * 0.65) * armWaveAmp;
+          const curArm = stackIdx === 0 ? 0.14 + armBase * 0.22 : armBase + armWave;
+          pt.leftArm.rotation.z = curArm;
+          pt.rightArm.rotation.z = -curArm;
+          pt.headPivot.rotation.set(curPitch * 0.22, 0, 0);
+          return;
+        }
+
+        // 非棋盘叠叠乐状态（单个棋子或 START 区域并排站立）
+        if (baseX !== undefined && baseY !== undefined && baseZ !== undefined && baseYaw !== undefined) {
+          p.mesh.position.set(baseX, baseY, baseZ);
+          p.mesh.rotation.set(0, baseYaw, 0);
+        }
+
         if (p.pos === HOME_END) {
           const v = t * 4.2 + p.phase;
           p.mesh.scale.setScalar(baseScale);
@@ -1782,17 +2225,87 @@ export class FlightChessEngine {
           pt.headPivot.rotation.x = Math.sin(ex) * 0.08;
           pt.headPivot.rotation.z = Math.sin(ex * 0.5) * 0.07;
         } else {
-          const idle = t * 2.0 + p.phase;
-          const br = Math.sin(idle);
-          p.mesh.scale.setScalar(baseScale);
-          pt.animRoot.position.y = 0;
-          pt.animRoot.rotation.z = 0;
-          pt.animRoot.scale.set(1 - br * 0.015, 1 + br * 0.025, 1 - br * 0.015);
-          pt.headPivot.rotation.z = Math.sin(t * 0.9 + p.phase) * 0.065;
-          pt.headPivot.rotation.y = p.pos >= 0 ? Math.sin(t * 0.65 + p.phase) * 0.16 : 0;
-          pt.headPivot.rotation.x = br * 0.025;
-          pt.leftArm.rotation.z = 0.05 + br * 0.06;
-          pt.rightArm.rotation.z = -0.05 - br * 0.06;
+          const dizzyUntil = (p.mesh.userData.dizzyUntil as number) || 0;
+          let halo = p.mesh.userData.dizzyHalo as THREE.Group | undefined;
+
+          if (p.pos === -1 && this.timeMs < dizzyUntil) {
+            // 被踩回家眩晕动画：头顶金色小星星绕圈旋转 + 晕头转向摇晃
+            if (!halo) {
+              halo = new THREE.Group();
+              const starMat = new THREE.MeshStandardMaterial({
+                color: 0xffd633,
+                emissive: 0xffa800,
+                emissiveIntensity: 0.75,
+                roughness: 0.28,
+              });
+              const starGeo = new THREE.OctahedronGeometry(0.048, 0);
+              for (let s = 0; s < 3; s++) {
+                const ang = (s / 3) * Math.PI * 2;
+                const st = new THREE.Mesh(starGeo, starMat);
+                st.scale.set(1, 0.45, 1);
+                st.position.set(Math.cos(ang) * 0.24, 0, Math.sin(ang) * 0.24);
+                halo.add(st);
+              }
+              halo.position.set(0, 0.72, 0);
+              p.mesh.add(halo);
+              p.mesh.userData.dizzyHalo = halo;
+            }
+            halo.visible = true;
+            halo.rotation.y = t * 5.2 + p.phase;
+            halo.position.y = 0.72 + Math.sin(t * 6.0) * 0.025;
+            halo.children.forEach((st, idx) => {
+              st.rotation.y = t * 4 + idx;
+            });
+
+            p.mesh.scale.setScalar(baseScale);
+            pt.animRoot.position.y = 0;
+            pt.animRoot.scale.set(1, 1, 1);
+            pt.animRoot.rotation.z = Math.sin(t * 5.2 + p.phase) * 0.11;
+            pt.animRoot.rotation.x = Math.cos(t * 5.2 + p.phase) * 0.08;
+            pt.headPivot.rotation.z = Math.sin(t * 7.5 + p.phase) * 0.24;
+            pt.headPivot.rotation.x = Math.cos(t * 7.5 + p.phase) * 0.16;
+            pt.headPivot.rotation.y = Math.sin(t * 3.8 + p.phase) * 0.22;
+            pt.leftArm.rotation.z = 0.55 + Math.sin(t * 6.5) * 0.25;
+            pt.rightArm.rotation.z = -0.55 - Math.cos(t * 6.5) * 0.25;
+          } else {
+            if (halo) halo.visible = false;
+            const huddleTotal = (p.mesh.userData.huddleTotal as number) || 1;
+            const hRoll = (p.mesh.userData.huddleRoll as number) || 0;
+            const hPitch = (p.mesh.userData.huddlePitch as number) || 0;
+
+            if (p.pos === 0 && huddleTotal >= 2) {
+              // START 区域多熊「真实碰撞贴脸挤压」动画：软糯横向微扁、向内轻贴但保持碰撞边界不穿模
+              const huddleSeed = p.pid * 2.1;
+              const nuzzle = Math.sin(t * 2.2 + huddleSeed);
+              p.mesh.scale.setScalar(baseScale);
+              pt.animRoot.position.y = 0;
+              pt.animRoot.rotation.set(hPitch, 0, hRoll * 0.5);
+              // 横向轻微挤压变软、纵向微鼓，像糯米团子贴在一起
+              const squish = 0.94 - nuzzle * 0.012;
+              pt.animRoot.scale.set(squish, 1.035 + nuzzle * 0.015, 1.025);
+              pt.headPivot.rotation.set(
+                hPitch * 0.4 + nuzzle * 0.02,
+                0,
+                hRoll + Math.sin(t * 1.6 + huddleSeed) * 0.018,
+              );
+              pt.headPivot.scale.set(0.945, 1.03, 1.025);
+              pt.leftArm.rotation.z = 0.14 + nuzzle * 0.04;
+              pt.rightArm.rotation.z = -0.14 - nuzzle * 0.04;
+            } else {
+              const idle = t * 2.0 + p.phase;
+              const br = Math.sin(idle);
+              p.mesh.scale.setScalar(baseScale);
+              pt.animRoot.position.y = 0;
+              pt.animRoot.rotation.set(0, 0, 0);
+              pt.animRoot.scale.set(1 - br * 0.015, 1 + br * 0.025, 1 - br * 0.015);
+              pt.headPivot.scale.set(1, 1, 1);
+              pt.headPivot.rotation.z = Math.sin(t * 0.9 + p.phase) * 0.065;
+              pt.headPivot.rotation.y = p.pos >= 0 ? Math.sin(t * 0.65 + p.phase) * 0.16 : 0;
+              pt.headPivot.rotation.x = br * 0.025;
+              pt.leftArm.rotation.z = 0.05 + br * 0.06;
+              pt.rightArm.rotation.z = -0.05 - br * 0.06;
+            }
+          }
         }
       });
 

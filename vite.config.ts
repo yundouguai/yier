@@ -6,8 +6,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
-    // Relative base so the built site works on GitHub Pages
-    // (https://yundouguai.github.io/yier_bubu/) under a subpath.
+    // Relative asset paths so the build works under the GitHub Pages
+    // subpath https://yundouguai.github.io/yier_bubu/. Do not remove.
     base: './',
     plugins: [
       react(),

@@ -10,6 +10,7 @@ import {
 export interface PlaneParts {
   animRoot: THREE.Group;
   body: THREE.Mesh;
+  headMesh: THREE.Mesh;
   headPivot: THREE.Group;
   leftArm: THREE.Group;
   rightArm: THREE.Group;
@@ -413,6 +414,7 @@ function loafHead(P: PlayerConfig, anisotropy: number): THREE.Mesh {
   }
   geo.computeVertexNormals();
 
+  geo.userData.basePos = new Float32Array((geo.attributes.position as THREE.BufferAttribute).array);
   const head = new THREE.Mesh(
     geo,
     new THREE.MeshStandardMaterial({
@@ -543,7 +545,8 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   headPivot.position.set(0, 0.22, 0);
   const headWrap = new THREE.Group();
   headWrap.position.set(0, -0.22, 0);
-  headWrap.add(loafHead(P, anisotropy));
+  const headMesh = loafHead(P, anisotropy);
+  headWrap.add(headMesh);
 
   if (P.species === 'panda') {
     for (const s of [-1, 1]) {
@@ -576,6 +579,7 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   g.userData.parts = {
     animRoot,
     body,
+    headMesh,
     headPivot,
     leftArm: armPivots[0],
     rightArm: armPivots[1],

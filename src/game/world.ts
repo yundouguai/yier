@@ -188,6 +188,7 @@ export interface WorldRefs {
   waterUniforms: { uTime: { value: number } };
   waterY: number;
   rideToys: RideToyAnim[];
+  planeMarks: THREE.Group[];
   courtFences: CourtFenceHighlight[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
@@ -2405,7 +2406,8 @@ export function buildAncientWorld(
     }
   });
 
-  players.forEach((P) => {
+  const planeMarks: THREE.Group[] = [];
+  players.forEach((P, pIdx) => {
     const a = RING[(P.start + 2 + FLIGHT_FROM) % 52];
     const b = RING[(P.start + 2 + FLIGHT_FROM + FLIGHT_STEP) % 52];
     const s = new THREE.Vector3(a[0], 0.15, a[1]);
@@ -2430,9 +2432,11 @@ export function buildAncientWorld(
     const fyaw = Math.atan2(b[0] - a[0], b[1] - a[1]);
     const planeMark = makePlaneModel(lineOf(P), P.colorLight, anisotropy, true);
     planeMark.scale.setScalar(0.86);
-    planeMark.position.set(a[0], 0.22, a[1]);
+    // 机轮与螺旋桨圆盘底端约在局部 y = -0.198，乘以 0.86 缩放后需抬升至 y = 0.305，确保稳落于格面 (y=0.122) 之上不穿模
+    planeMark.position.set(a[0], 0.305, a[1]);
     planeMark.rotation.y = fyaw;
     scene.add(planeMark);
+    planeMarks[pIdx] = planeMark;
 
     // 飞机航线落点：使用停机坪「P」字圆盘标识替代原先的八面体三角堆
     const pPadTop = new THREE.Mesh(
@@ -2934,20 +2938,46 @@ export function buildAncientWorld(
       startTop.receiveShadow = true;
       scene.add(startTop);
 
+      // 优化起点方向指示：用平贴地面的精致立体导流箭头替代原先突兀的三角锥
+      const dirX = tx - lx;
+      const dirZ = tz - lz;
+      const dirLen = Math.hypot(dirX, dirZ) || 1;
+      const ux = dirX / dirLen;
+      const uz = dirZ / dirLen;
+
+      const takeoffArrowShape = new THREE.Shape();
+      takeoffArrowShape.moveTo(0, 0.14);
+      takeoffArrowShape.lineTo(0.105, 0.01);
+      takeoffArrowShape.lineTo(0.045, 0.01);
+      takeoffArrowShape.lineTo(0.045, -0.11);
+      takeoffArrowShape.lineTo(-0.045, -0.11);
+      takeoffArrowShape.lineTo(-0.045, 0.01);
+      takeoffArrowShape.lineTo(-0.105, 0.01);
+      takeoffArrowShape.closePath();
+
+      const takeoffArrowGeo = new THREE.ExtrudeGeometry(takeoffArrowShape, {
+        depth: 0.014,
+        bevelEnabled: true,
+        bevelThickness: 0.003,
+        bevelSize: 0.003,
+        bevelSegments: 2,
+      });
+      takeoffArrowGeo.rotateX(-Math.PI / 2);
+
       const stepArrow = new THREE.Mesh(
-        new THREE.ConeGeometry(0.135, 0.25, 3),
+        takeoffArrowGeo,
         new THREE.MeshStandardMaterial({
           color: lineOf(P),
-          roughness: 0.4,
-          metalness: 0.25,
+          roughness: 0.36,
+          metalness: 0.14,
         }),
       );
-      stepArrow.quaternion.setFromUnitVectors(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(tx - lx, 0, tz - lz).normalize(),
-      );
-      stepArrow.scale.set(1.1, 0.28, 1);
-      stepArrow.position.set((lx + tx) / 2, 0.125, (lz + tz) / 2);
+      stepArrow.rotation.y = Math.atan2(ux, uz);
+      // 放置在启程台外缘与首格之间的中点偏外侧，避免与启程台圆环穿插
+      const arrowDist = Math.min(dirLen * 0.56, 0.56);
+      stepArrow.position.set(lx + ux * arrowDist, 0.118, lz + uz * arrowDist);
+      stepArrow.castShadow = true;
+      stepArrow.receiveShadow = true;
       scene.add(stepArrow);
     }
   }
@@ -4797,6 +4827,7 @@ export function buildAncientWorld(
     waterUniforms,
     waterY: WATER_Y,
     rideToys,
+    planeMarks,
     courtFences,
     lotusList,
     willowDrapeList,
