@@ -39,7 +39,8 @@ export interface RideToyCakeEatRig {
   restArmGroup: THREE.Group;
   eatArmPivot: THREE.Group;
   cakeGroup: THREE.Group;
-  cakeHalf1: THREE.Group;
+  cakeSlice1: THREE.Group;
+  cakeSlice2: THREE.Group;
   mouthClosed: THREE.Mesh;
   mouthOpen: THREE.Group;
   jawPivot: THREE.Group;
@@ -521,7 +522,8 @@ function buildToyRider(P: PlayerConfig) {
   let restArmGroup: THREE.Group | null = null;
   let eatArmPivot: THREE.Group | null = null;
   let cakeGroup: THREE.Group | null = null;
-  let cakeHalf1: THREE.Group | null = null;
+  let cakeSlice1: THREE.Group | null = null;
+  let cakeSlice2: THREE.Group | null = null;
 
   for (const s of [-1, 1]) {
     const a = new THREE.Vector3(0.135 * s, 0.22, -0.01);
@@ -546,9 +548,10 @@ function buildToyRider(P: PlayerConfig) {
       riderPivot.add(restGrp);
       restArmGroup = restGrp;
 
-      // 吃蛋糕专用抬起手臂（向外前伸，完全避开脸颊与车把不穿模）
+      // 吃蛋糕专用抬起手臂（YXZ旋转顺序，可准确从脸侧送入嘴口中心）
       const armPivot = new THREE.Group();
       armPivot.position.copy(a);
+      armPivot.rotation.order = 'YXZ';
       armPivot.visible = false;
       const eatTarget = new THREE.Vector3(0.145, 0.04, 0.27);
       const eatMid = eatTarget.clone().multiplyScalar(0.5);
@@ -567,88 +570,96 @@ function buildToyRider(P: PlayerConfig) {
       ePaw.castShadow = true;
       armPivot.add(ePaw);
 
-      // 图2款草莓小蛋糕（放大 1.45 倍确保游戏视角清晰可见，位于手掌正上方不穿模）
+      // 图2款草莓小蛋糕（分成 3 瓣 120° 扇形，分 3 口吃掉且每口都有实心切面）
       const cake = new THREE.Group();
       cake.position.set(eatTarget.x, eatTarget.y + 0.088, eatTarget.z + 0.01);
       cake.scale.setScalar(1.45);
       cake.visible = true;
 
-      const spongeM = M(0xfbe288, 0.65);
-      const creamM = M(0xfffdf8, 0.45);
+      const spongeM = new THREE.MeshStandardMaterial({ color: 0xfbe288, roughness: 0.65, side: THREE.DoubleSide });
+      const creamM = new THREE.MeshStandardMaterial({ color: 0xfffdf8, roughness: 0.45, side: THREE.DoubleSide });
       const berryM = M(0xe63544, 0.35);
       const leafM = M(0x4ba648, 0.55);
 
-      const half1 = new THREE.Group();
-      const half2 = new THREE.Group();
+      const slice1 = new THREE.Group();
+      const slice2 = new THREE.Group();
+      const slice3 = new THREE.Group();
+      const segAngle = (Math.PI * 2) / 3;
 
-      // 半块蛋糕构造（左半 + 右半，方便第一口吃掉一半、第二口吃光）
-      const addHalf = (grp: THREE.Group, thetaStart: number) => {
+      const addCutFace = (grp: THREE.Group, angle: number) => {
+        const panel = new THREE.Group();
+        panel.rotation.y = angle;
+        const cSponge = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.064), spongeM);
+        cSponge.rotation.y = Math.PI / 2;
+        cSponge.position.set(0, 0, 0.03);
+        panel.add(cSponge);
+        const cMid = new THREE.Mesh(new THREE.PlaneGeometry(0.062, 0.014), creamM);
+        cMid.rotation.y = Math.PI / 2;
+        cMid.position.set(0, 0, 0.031);
+        panel.add(cMid);
+        const cTop = new THREE.Mesh(new THREE.PlaneGeometry(0.063, 0.018), creamM);
+        cTop.rotation.y = Math.PI / 2;
+        cTop.position.set(0, 0.036, 0.031);
+        panel.add(cTop);
+        grp.add(panel);
+      };
+
+      const addWedge = (grp: THREE.Group, thetaStart: number) => {
         const sponge = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.062, 0.058, 0.064, 16, 1, false, thetaStart, Math.PI),
+          new THREE.CylinderGeometry(0.062, 0.058, 0.064, 12, 1, false, thetaStart, segAngle),
           spongeM,
         );
         grp.add(sponge);
-
         const midCream = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0635, 0.0635, 0.014, 16, 1, false, thetaStart, Math.PI),
+          new THREE.CylinderGeometry(0.0635, 0.0635, 0.014, 12, 1, false, thetaStart, segAngle),
           creamM,
         );
         grp.add(midCream);
-
         const topCream = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.064, 0.065, 0.018, 16, 1, false, thetaStart, Math.PI),
+          new THREE.CylinderGeometry(0.064, 0.065, 0.018, 12, 1, false, thetaStart, segAngle),
           creamM,
         );
         topCream.position.y = 0.036;
         grp.add(topCream);
+        addCutFace(grp, thetaStart);
+        addCutFace(grp, thetaStart + segAngle);
       };
-      addHalf(half1, 0);
-      addHalf(half2, Math.PI);
 
-      // 为第二半蛋糕补充切面封口（海绵胚 + 奶油夹心 + 顶层奶油），第一口咬掉后呈现真实实心缺口而不露空洞
-      const cutSponge = new THREE.Mesh(new THREE.PlaneGeometry(0.118, 0.064), spongeM);
-      cutSponge.rotation.y = Math.PI / 2;
-      cutSponge.position.set(0.0005, 0, 0);
-      half2.add(cutSponge);
+      addWedge(slice1, 0);
+      addWedge(slice2, segAngle);
+      addWedge(slice3, segAngle * 2);
 
-      const cutMidCream = new THREE.Mesh(new THREE.PlaneGeometry(0.122, 0.014), creamM);
-      cutMidCream.rotation.y = Math.PI / 2;
-      cutMidCream.position.set(0.0008, 0, 0);
-      half2.add(cutMidCream);
-
-      const cutTopCream = new THREE.Mesh(new THREE.PlaneGeometry(0.124, 0.018), creamM);
-      cutTopCream.rotation.y = Math.PI / 2;
-      cutTopCream.position.set(0.0008, 0.036, 0);
-      half2.add(cutTopCream);
-
-      // 波浪奶油花边球（分配到两半）
-      for (let k = 0; k < 8; k++) {
-        const ang = (k / 8) * Math.PI * 2 + 0.2;
+      // 波浪奶油花边球（平均分配到 3 瓣）
+      for (let k = 0; k < 9; k++) {
+        const ang = (k / 9) * Math.PI * 2 + 0.15;
         const dollop = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 8), creamM);
         dollop.position.set(Math.sin(ang) * 0.056, 0.032, Math.cos(ang) * 0.056);
-        if (Math.sin(ang) >= 0) half1.add(dollop);
-        else half2.add(dollop);
+        if (k < 3) slice1.add(dollop);
+        else if (k < 6) slice2.add(dollop);
+        else slice3.add(dollop);
       }
 
-      // 顶部红草莓放在第二半上（第2口连草莓一起吃掉）
+      // 顶部红草莓放在最后一口 (slice3) 上
       const berry = new THREE.Mesh(new THREE.SphereGeometry(0.024, 14, 12), berryM);
       berry.scale.set(0.95, 1.15, 0.95);
       berry.position.set(0, 0.064, 0);
-      half2.add(berry);
+      slice3.add(berry);
 
       const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.012, 5), leafM);
       leaf.position.set(0, 0.088, 0);
       leaf.rotation.x = Math.PI;
-      half2.add(leaf);
+      slice3.add(leaf);
 
-      cake.add(half1);
-      cake.add(half2);
+      cake.add(slice1);
+      cake.add(slice2);
+      cake.add(slice3);
       armPivot.add(cake);
 
       riderPivot.add(armPivot);
       eatArmPivot = armPivot;
       cakeGroup = cake;
-      cakeHalf1 = half1;
+      cakeSlice1 = slice1;
+      cakeSlice2 = slice2;
     } else {
       const mid = a.clone().add(b).multiplyScalar(0.5);
       const dir = b.clone().sub(a).normalize();
@@ -680,7 +691,8 @@ function buildToyRider(P: PlayerConfig) {
     restArmGroup,
     eatArmPivot,
     cakeGroup,
-    cakeHalf1,
+    cakeSlice1,
+    cakeSlice2,
     mouthClosed,
     mouthOpen,
     jawPivot: mouthOpen ? (mouthOpen.userData.jawPivot as THREE.Group) : null,
@@ -2826,7 +2838,8 @@ export function buildAncientWorld(
       restArmGroup,
       eatArmPivot,
       cakeGroup,
-      cakeHalf1,
+      cakeSlice1,
+      cakeSlice2,
       mouthClosed,
       mouthOpen,
       jawPivot,
@@ -2848,12 +2861,13 @@ export function buildAncientWorld(
       species: P.species,
       charKey: P.key,
       cakeEat:
-        panda && restArmGroup && eatArmPivot && cakeGroup && cakeHalf1 && mouthClosed && mouthOpen && jawPivot
+        panda && restArmGroup && eatArmPivot && cakeGroup && cakeSlice1 && cakeSlice2 && mouthClosed && mouthOpen && jawPivot
           ? {
               restArmGroup,
               eatArmPivot,
               cakeGroup,
-              cakeHalf1,
+              cakeSlice1,
+              cakeSlice2,
               mouthClosed,
               mouthOpen,
               jawPivot,
@@ -2861,7 +2875,7 @@ export function buildAncientWorld(
               normalEyes,
               happyEyes,
               eatStart: -1,
-              eatDur: 5.6,
+              eatDur: 7.4,
             }
           : undefined,
     });
