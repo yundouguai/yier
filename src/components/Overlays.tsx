@@ -11,24 +11,43 @@ export interface MatchmakingState {
 interface OverlaysProps {
   paused: boolean;
   winner: HudPlayerSnapshot | null;
+  players: HudPlayerSnapshot[];
+  rankings: number[];
   contextLost: boolean;
   matchmaking: MatchmakingState | null;
+  allHumansFinishedPrompt: boolean;
   onCancelMatchmaking: () => void;
   onResume: () => void;
   onPlayAgain: () => void;
   onReturnSetup: () => void;
+  onSpectate: () => void;
 }
 
 export const Overlays: React.FC<OverlaysProps> = ({
   paused,
   winner,
+  players,
+  rankings,
   contextLost,
   matchmaking,
+  allHumansFinishedPrompt,
   onCancelMatchmaking,
   onResume,
   onPlayAgain,
   onReturnSetup,
+  onSpectate,
 }) => {
+  const getRoleLabel = (idx: number) => {
+    const p = players[idx];
+    if (!p) return '';
+    if (p.type === 'human') {
+      const hNum = players.slice(0, idx + 1).filter((x) => x.type === 'human').length;
+      return `玩家${hNum}`;
+    }
+    const oNum = players.slice(0, idx + 1).filter((x) => x.type === 'ai').length;
+    return `对手${oNum}`;
+  };
+
   return (
     <>
       {matchmaking && (
@@ -114,31 +133,104 @@ export const Overlays: React.FC<OverlaysProps> = ({
         </div>
       )}
 
+      {allHumansFinishedPrompt && !winner && !matchmaking && (
+        <div className="fixed inset-0 z-25 flex items-center justify-center bg-slate-950/45 p-4">
+          <div className="anim-card-pop w-full max-w-[380px] rounded-[24px] bg-white px-7 py-7 text-center shadow-2xl">
+            <div className="text-[46px]">🎉</div>
+            <h2 className="mt-2 text-[22px] font-bold text-slate-900">玩家已全部完赛</h2>
+            <p className="mt-1.5 text-sm text-slate-500">
+              当前对局仍在继续，你可以选择立即重开一局或继续观战。
+            </p>
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={onPlayAgain}
+                className="flex-1 rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-5 py-2.5 text-sm font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
+              >
+                立即重开一局
+              </button>
+              <button
+                type="button"
+                onClick={onSpectate}
+                className="flex-1 rounded-[14px] border border-slate-200 bg-slate-50 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                继续观战
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {winner && !matchmaking && (
         <div className="fixed inset-0 z-25 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="anim-card-pop rounded-[24px] bg-white px-10 py-10 text-center shadow-2xl">
+          <div className="anim-card-pop w-full max-w-[420px] rounded-[24px] bg-white px-7 py-8 text-center shadow-2xl">
             <div className="flex items-center justify-center gap-2">
-              <CharacterAvatar charKey={winner.charKey} size={64} />
-              <span className="text-[44px]">🏆</span>
+              <CharacterAvatar charKey={winner.charKey} size={58} />
+              <span className="text-[40px]">🏆</span>
             </div>
-            <h2 className="mt-3 mb-1 text-[26px] font-bold text-slate-900">
-              {winner.name} 获胜！
+            <h2 className="mt-2.5 mb-1 text-[24px] font-bold text-slate-900">
+              {winner.name} 夺冠！
             </h2>
-            <p className="mb-5 text-sm text-slate-500">
-              率先完成 4 架飞机，赢得比赛！
+            <p className="mb-4 text-xs text-slate-500">
+              本局完整排名榜单
             </p>
+
+            <div className="mb-5 space-y-2 text-left">
+              {rankings.map((pid, rankIdx) => {
+                const pl = players[pid];
+                if (!pl) return null;
+                const medal =
+                  rankIdx === 0
+                    ? '🥇'
+                    : rankIdx === 1
+                      ? '🥈'
+                      : rankIdx === 2
+                        ? '🥉'
+                        : '4';
+                return (
+                  <div
+                    key={pid}
+                    className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 ${
+                      rankIdx === 0
+                        ? 'border-amber-200 bg-amber-50/70'
+                        : 'border-slate-100 bg-slate-50/70'
+                    }`}
+                  >
+                    <span className="w-6 text-center text-base font-extrabold text-slate-600">
+                      {medal}
+                    </span>
+                    <CharacterAvatar charKey={pl.charKey} size={30} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <b className="truncate text-sm text-slate-800">{pl.name}</b>
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
+                          style={{ backgroundColor: pl.uiColor }}
+                        >
+                          {getRoleLabel(pid)}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-slate-500 tabular-nums">
+                      {pl.doneCount === 4 ? '已完赛' : `${pl.doneCount}/4`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
             <div className="flex items-center justify-center gap-3">
               <button
                 type="button"
                 onClick={onPlayAgain}
-                className="rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-7 py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
+                className="flex-1 rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-6 py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
               >
                 再来一局
               </button>
               <button
                 type="button"
                 onClick={onReturnSetup}
-                className="rounded-[14px] border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                className="flex-1 rounded-[14px] border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
                 修改阵容
               </button>

@@ -885,55 +885,57 @@ export function createGatePlaqueTexture(
   anisotropy: number,
 ): THREE.CanvasTexture {
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 160;
+  c.width = 768;
+  c.height = 240;
   const g = c.getContext('2d')!;
 
-  // 古城黑青大漆匾底
-  const bg = g.createRadialGradient(256, 80, 24, 256, 80, 280);
-  bg.addColorStop(0, '#253543');
-  bg.addColorStop(0.7, '#1b2833');
-  bg.addColorStop(1, '#121b23');
+  // 古城深墨青漆匾底（高对比度）
+  const bg = g.createRadialGradient(384, 120, 30, 384, 120, 420);
+  bg.addColorStop(0, '#1e2e3b');
+  bg.addColorStop(0.75, '#15212b');
+  bg.addColorStop(1, '#0d151c');
   g.fillStyle = bg;
-  g.fillRect(0, 0, 512, 160);
+  g.fillRect(0, 0, 768, 240);
 
   // 描金回纹内框与四角装饰
-  g.strokeStyle = '#dbb348';
-  g.lineWidth = 4;
-  g.strokeRect(10, 10, 492, 140);
+  g.strokeStyle = '#ecc559';
+  g.lineWidth = 6;
+  g.strokeRect(12, 12, 744, 216);
 
-  g.strokeStyle = 'rgba(232, 194, 88, 0.55)';
-  g.lineWidth = 2;
-  g.strokeRect(18, 18, 476, 124);
+  g.strokeStyle = 'rgba(245, 212, 108, 0.65)';
+  g.lineWidth = 3;
+  g.strokeRect(24, 24, 720, 192);
 
   const corners: [number, number, number, number][] = [
-    [18, 18, 1, 1],
-    [494, 18, -1, 1],
-    [18, 142, 1, -1],
-    [494, 142, -1, -1],
+    [24, 24, 1, 1],
+    [744, 24, -1, 1],
+    [24, 216, 1, -1],
+    [744, 216, -1, -1],
   ];
-  g.fillStyle = '#e4be55';
+  g.fillStyle = '#f2cc62';
   for (const [cx, cy, sx, sy] of corners) {
-    g.fillRect(cx, cy, sx * 12, sy * 4);
-    g.fillRect(cx, cy, sx * 4, sy * 12);
+    g.fillRect(cx, cy, sx * 18, sy * 6);
+    g.fillRect(cx, cy, sx * 6, sy * 18);
   }
 
-  // 金字楷书「熊 熊 坊」
+  // 超清晰大号金字楷书「熊 熊 坊」
   const chars = Array.from(title);
   const display = chars.join(' ');
-  g.font = 'bold 76px "STKaiti","KaiTi","Songti SC","Noto Serif SC",Georgia,serif';
+  g.font = '900 124px "STKaiti","KaiTi","PingFang SC","Microsoft YaHei","Songti SC",serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
 
-  g.fillStyle = 'rgba(8, 12, 16, 0.65)';
-  g.fillText(display, 258, 86);
+  g.strokeStyle = 'rgba(10, 14, 18, 0.88)';
+  g.lineWidth = 10;
+  g.lineJoin = 'round';
+  g.strokeText(display, 384, 126);
 
-  const textGrad = g.createLinearGradient(0, 32, 0, 128);
-  textGrad.addColorStop(0, '#fae28c');
-  textGrad.addColorStop(0.5, '#eab949');
-  textGrad.addColorStop(1, '#c99327');
+  const textGrad = g.createLinearGradient(0, 48, 0, 196);
+  textGrad.addColorStop(0, '#fff4b8');
+  textGrad.addColorStop(0.5, '#f5cb54');
+  textGrad.addColorStop(1, '#d89d28');
   g.fillStyle = textGrad;
-  g.fillText(display, 256, 83);
+  g.fillText(display, 384, 124);
 
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }

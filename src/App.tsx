@@ -64,6 +64,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   splashVisible: false,
   shakeKey: 0,
   winnerPid: null,
+  rankings: [],
   gmDie: null,
   players: [],
 };
@@ -101,6 +102,8 @@ export default function App() {
   const [snap, setSnap] = useState<GameHudSnapshot>(INITIAL_SNAPSHOT);
   const [contextLost, setContextLost] = useState(false);
   const [muted, setMuted] = useState(isAudioMuted);
+  const [allHumansPrompt, setAllHumansPrompt] = useState(false);
+  const [allHumansDismissed, setAllHumansDismissed] = useState(false);
 
   const clearMatchTimers = useCallback(() => {
     matchTimersRef.current.forEach((id) => window.clearTimeout(id));
@@ -137,6 +140,8 @@ export default function App() {
   }, [sessionId]);
 
   const launchMatchWithSeats = useCallback((locals: CharKey[], opps: CharKey[]) => {
+    setAllHumansPrompt(false);
+    setAllHumansDismissed(false);
     const nextSeats: SeatConfig[] = [
       ...locals.map((char) => ({ on: true, char, type: 'human' as const })),
       ...opps.map((char) => ({ on: true, char, type: 'ai' as const })),
@@ -211,6 +216,8 @@ export default function App() {
   }, [activeLocalChars]);
 
   const handlePlayAgain = useCallback(() => {
+    setAllHumansPrompt(false);
+    setAllHumansDismissed(false);
     setShowSetup(false);
     setMatchmaking(null);
     setAutoStart(true);
@@ -255,6 +262,27 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [showSetup, matchmaking, snap.paused, snap.winnerPid, snap.phase]);
+
+  const humanPlayers = snap.players.filter((p) => p.type === 'human');
+  const allHumansFinished =
+    humanPlayers.length > 0 && humanPlayers.every((p) => p.doneCount === 4);
+
+  useEffect(() => {
+    if (
+      !allHumansFinished ||
+      allHumansDismissed ||
+      snap.phase === 'over' ||
+      snap.phase === 'idle' ||
+      showSetup ||
+      matchmaking !== null
+    ) {
+      return;
+    }
+    const tid = window.setTimeout(() => {
+      setAllHumansPrompt(true);
+    }, 6000);
+    return () => window.clearTimeout(tid);
+  }, [allHumansFinished, allHumansDismissed, snap.phase, showSetup, matchmaking]);
 
   const winner =
     snap.winnerPid !== null ? (snap.players[snap.winnerPid] ?? null) : null;
@@ -306,12 +334,19 @@ export default function App() {
       <Overlays
         paused={snap.paused && !showSetup && matchmaking === null}
         winner={winner}
+        players={snap.players}
+        rankings={snap.rankings}
         contextLost={contextLost}
         matchmaking={matchmaking}
+        allHumansFinishedPrompt={allHumansPrompt}
         onCancelMatchmaking={handleCancelMatchmaking}
         onResume={() => engineRef.current?.togglePause()}
         onPlayAgain={handlePlayAgain}
         onReturnSetup={handleReturnSetup}
+        onSpectate={() => {
+          setAllHumansPrompt(false);
+          setAllHumansDismissed(true);
+        }}
       />
     </div>
   );

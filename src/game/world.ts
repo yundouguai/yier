@@ -1576,10 +1576,14 @@ export function buildAncientWorld(
     const eaveTrimMat = mat(0x5a6773, 0.58);
     const stoneDrumMat = mat(0xa3acb2, 0.68);
     const plaqueSideMat = mat(0x1e2a35, 0.44);
+    const plaqueTex = createGatePlaqueTexture('熊熊坊', anisotropy);
     const plaqueFaceMat = new THREE.MeshStandardMaterial({
-      map: createGatePlaqueTexture('熊熊坊', anisotropy),
-      roughness: 0.36,
-      metalness: 0.14,
+      map: plaqueTex,
+      emissive: 0xffffff,
+      emissiveMap: plaqueTex,
+      emissiveIntensity: 0.32,
+      roughness: 0.3,
+      metalness: 0.12,
     });
     const plaqueMaterials = [
       plaqueSideMat,
@@ -1611,7 +1615,7 @@ export function buildAncientWorld(
       for (const sx of [-1, 1]) {
         // 阶梯柱础 + 八角抱鼓石
         const baseStone = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.09, 0.34), merlonMat);
-        baseStone.position.set(0.76 * sx, 0.045, 0);
+        baseStone.position.set(0.82 * sx, 0.045, 0);
         baseStone.receiveShadow = true;
         gate.add(baseStone);
 
@@ -1619,123 +1623,109 @@ export function buildAncientWorld(
           new THREE.CylinderGeometry(0.115, 0.14, 0.08, 8),
           stoneDrumMat,
         );
-        drum.position.set(0.76 * sx, 0.13, 0);
+        drum.position.set(0.82 * sx, 0.13, 0);
         gate.add(drum);
 
-        // 朱红立柱 + 金色柱箍
+        // 朱红主立柱 + 金色柱箍（加高形成开阔牌坊造型）
         const pil = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.082, 0.094, 1.02, 14),
+          new THREE.CylinderGeometry(0.084, 0.096, 1.38, 14),
           pillarMat,
         );
-        pil.position.set(0.76 * sx, 0.68, 0);
+        pil.position.set(0.82 * sx, 0.86, 0);
         pil.castShadow = true;
         gate.add(pil);
 
-        for (const cy of [0.19, 1.13]) {
+        for (const cy of [0.19, 1.50]) {
           const collar = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.102, 0.102, 0.04, 14),
+            new THREE.CylinderGeometry(0.104, 0.104, 0.04, 14),
             trimGold,
           );
-          collar.position.set(0.76 * sx, cy, 0);
+          collar.position.set(0.82 * sx, cy, 0);
           gate.add(collar);
         }
 
-        // 挑檐灯笼（含挂臂、金帽与穗饰）
-        const hook = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.032, 0.032), pillarMat);
-        hook.position.set(0.84 * sx, 0.9, 0.16);
+        // 挑檐灯笼（外侧挂臂，不挡中央牌匾）
+        const hook = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.032, 0.032), pillarMat);
+        hook.position.set(0.95 * sx, 1.06, 0);
         gate.add(hook);
 
         const l = new THREE.Mesh(new THREE.SphereGeometry(0.088, 12, 10), lantMat);
         l.scale.set(1, 0.88, 1);
-        l.position.set(0.9 * sx, 0.79, 0.16);
+        l.position.set(1.03 * sx, 0.94, 0);
         gate.add(l);
 
-        for (const ly of [0.87, 0.71]) {
+        for (const ly of [1.02, 0.86]) {
           const cap = new THREE.Mesh(
             new THREE.CylinderGeometry(0.036, 0.036, 0.022, 10),
             trimGold,
           );
-          cap.position.set(0.9 * sx, ly, 0.16);
+          cap.position.set(1.03 * sx, ly, 0);
           gate.add(cap);
         }
         const tassel = new THREE.Mesh(
           new THREE.CylinderGeometry(0.012, 0.022, 0.055, 6),
           trimGold,
         );
-        tassel.position.set(0.9 * sx, 0.67, 0.16);
+        tassel.position.set(1.03 * sx, 0.82, 0);
         gate.add(tassel);
       }
 
-      // 上下双额枋 + 斗拱 + 中央匾额
-      const lowerBeam = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.11, 0.18), pillarMat);
-      lowerBeam.position.set(0, 0.94, 0);
+      // 牌坊下额枋与顶枋：中间留出充裕空间嵌入大号无遮挡牌匾
+      const lowerBeam = new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.1, 0.16), pillarMat);
+      lowerBeam.position.set(0, 0.98, 0);
       lowerBeam.castShadow = true;
       gate.add(lowerBeam);
 
-      const upperBeam = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.13, 0.22), pillarMat);
-      upperBeam.position.set(0, 1.15, 0);
+      const upperBeam = new THREE.Mesh(new THREE.BoxGeometry(1.98, 0.11, 0.18), pillarMat);
+      upperBeam.position.set(0, 1.54, 0);
       upperBeam.castShadow = true;
       gate.add(upperBeam);
 
-      for (const bx of [-0.52, 0, 0.52]) {
-        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.28), bracketMat);
-        b1.position.set(bx, 1.23, 0);
+      for (const bx of [-0.62, 0, 0.62]) {
+        const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.05, 0.24), bracketMat);
+        b1.position.set(bx, 1.61, 0);
         gate.add(b1);
-        const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.045, 0.34), bracketMat);
-        b2.position.set(bx, 1.27, 0);
-        gate.add(b2);
       }
 
-      const plaqueFrame = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.28, 0.27), trimGold);
-      plaqueFrame.position.set(0, 1.045, 0);
+      // 大号醒目金边牌匾（加宽加高，且上方无深挑檐遮挡）
+      const plaqueFrame = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.44, 0.24), trimGold);
+      plaqueFrame.position.set(0, 1.26, 0);
       gate.add(plaqueFrame);
-      const plaqueCore = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.21, 0.29), plaqueMaterials);
-      plaqueCore.position.set(0, 1.045, 0);
+      const plaqueCore = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.36, 0.27), plaqueMaterials);
+      plaqueCore.position.set(0, 1.26, 0);
       gate.add(plaqueCore);
 
-      // 重檐屋顶（下檐 + 阁楼腰线 + 上檐 + 金脊吻兽）
-      const lowerSoffit = new THREE.Mesh(new THREE.BoxGeometry(2.22, 0.055, 0.86), eaveTrimMat);
-      lowerSoffit.position.set(0, 1.3, 0);
+      // 轻薄牌坊挑檐顶盖（进深收窄至 0.48，俯视视角也绝不遮挡牌匾）
+      const lowerSoffit = new THREE.Mesh(new THREE.BoxGeometry(2.14, 0.045, 0.44), eaveTrimMat);
+      lowerSoffit.position.set(0, 1.66, 0);
       gate.add(lowerSoffit);
 
-      const lowerRoof = makeHippedRoof(2.3, 0.34, 0.94);
-      lowerRoof.position.set(0, 1.49, 0);
+      const lowerRoof = makeHippedRoof(2.22, 0.26, 0.50);
+      lowerRoof.position.set(0, 1.81, 0);
       gate.add(lowerRoof);
 
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
-          const tip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.09), trimGold);
-          tip.position.set(1.13 * sx, 1.34, 0.44 * sz);
+          const tip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.08), trimGold);
+          tip.position.set(1.09 * sx, 1.69, 0.22 * sz);
           tip.rotation.z = 0.28 * sx;
           gate.add(tip);
         }
       }
 
-      const clerestory = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.14, 0.46), pillarMat);
-      clerestory.position.set(0, 1.58, 0);
-      gate.add(clerestory);
-
-      const upperSoffit = new THREE.Mesh(new THREE.BoxGeometry(1.68, 0.045, 0.64), eaveTrimMat);
-      upperSoffit.position.set(0, 1.66, 0);
-      gate.add(upperSoffit);
-
-      const upperRoof = makeHippedRoof(1.74, 0.34, 0.7);
-      upperRoof.position.set(0, 1.84, 0);
-      gate.add(upperRoof);
-
-      const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.065, 0.08), trimGold);
-      ridge.position.set(0, 2.01, 0);
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.065, 0.08), trimGold);
+      ridge.position.set(0, 1.95, 0);
       gate.add(ridge);
 
       for (const sx of [-1, 1]) {
         const chiwen = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.11, 0.09), trimGold);
-        chiwen.position.set(0.53 * sx, 2.06, 0);
+        chiwen.position.set(0.71 * sx, 2.0, 0);
         chiwen.rotation.z = -0.25 * sx;
         gate.add(chiwen);
       }
 
       const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.052, 10, 8), trimGold);
-      pearl.position.set(0, 2.08, 0);
+      pearl.position.set(0, 2.02, 0);
       gate.add(pearl);
 
       const a = (q * Math.PI) / 2;

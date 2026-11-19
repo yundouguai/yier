@@ -161,6 +161,7 @@ export class FlightChessEngine {
   private camFollowObj: THREE.Object3D | null = null;
   private camUserInteracting = false;
   private winnerPid: number | null = null;
+  private finishedOrder: number[] = [];
   private gmNextDie: number | null = null;
   private lastSec = -1;
 
@@ -750,17 +751,22 @@ export class FlightChessEngine {
       splashVisible: this.splashVisible,
       shakeKey: this.shakeKey,
       winnerPid: this.winnerPid,
+      rankings: this.getRankings(),
       gmDie: this.gmNextDie,
-      players: this.players.map((pl, i) => ({
-        charKey: pl.key,
-        name: pl.name,
-        species: pl.species,
-        type: pl.type,
-        colorHex: toColorHex(pl.color),
-        uiColor: pl.uiColor,
-        doneCount: this.planesOf(i).filter((p) => p.pos === HOME_END).length,
-        active: this.turn === i && this.phase !== 'over' && P !== undefined,
-      })),
+      players: this.players.map((pl, i) => {
+        const rankIdx = this.finishedOrder.indexOf(i);
+        return {
+          charKey: pl.key,
+          name: pl.name,
+          species: pl.species,
+          type: pl.type,
+          colorHex: toColorHex(pl.color),
+          uiColor: pl.uiColor,
+          doneCount: this.planesOf(i).filter((p) => p.pos === HOME_END).length,
+          finishRank: rankIdx >= 0 ? rankIdx + 1 : null,
+          active: this.turn === i && this.phase !== 'over' && P !== undefined,
+        };
+      }),
     });
   }
 
@@ -1928,9 +1934,26 @@ export class FlightChessEngine {
     this.relayout();
     this.emitSnapshot();
     if (this.planesOf(plane.pid).every((p) => p.pos === HOME_END)) {
+      if (!this.finishedOrder.includes(plane.pid)) {
+        this.finishedOrder.push(plane.pid);
+      }
+      const rank = this.finishedOrder.length;
+      const finishLimit = Math.min(3, Math.max(1, this.players.length - 1));
+      if (rank >= finishLimit) {
+        this.camFollowPlane = null;
+        this.camFollowObj = null;
+        this.showWin(this.finishedOrder[0]);
+        return;
+      }
+      const medal = rank === 1 ? '🥇' : '🥈';
+      this.setMsg(`${medal} ${P.name} 获得第 ${rank} 名！`);
+      sndWin();
+      this.emitSnapshot();
+      await this.sleep(700);
+      if (this.disposed) return;
       this.camFollowPlane = null;
       this.camFollowObj = null;
-      this.showWin(plane.pid);
+      this.endTurn(false);
       return;
     }
     await this.sleep(500);
@@ -1960,7 +1983,14 @@ export class FlightChessEngine {
       this.beginRollPhase(true);
       return;
     }
-    this.turn = (this.turn + 1) % this.players.length;
+    let steps = 0;
+    do {
+      this.turn = (this.turn + 1) % this.players.length;
+      steps++;
+    } while (
+      steps < this.players.length &&
+      this.finishedOrder.includes(this.turn)
+    );
     this.sixChain = 0;
     this.beginRollPhase(false);
   }
@@ -2171,6 +2201,18 @@ export class FlightChessEngine {
       }
     }
     return best;
+  }
+
+  private getRankings(): number[] {
+    const remaining = this.players
+      .map((_, i) => i)
+      .filter((i) => !this.finishedOrder.includes(i))
+      .sort((a, b) => {
+        const da = this.planesOf(a).filter((p) => p.pos === HOME_END).length;
+        const db = this.planesOf(b).filter((p) => p.pos === HOME_END).length;
+        return db - da;
+      });
+    return [...this.finishedOrder, ...remaining];
   }
 
   private showWin(pid: number): void {

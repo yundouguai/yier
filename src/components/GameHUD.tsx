@@ -242,21 +242,33 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <b className="truncate text-[12px] md:text-[13px] text-slate-800">
                         {pl.name}
                       </b>
-                      <span
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[9px] md:text-[10px] font-bold whitespace-nowrap"
-                        style={{
-                          backgroundColor: pl.active ? pl.uiColor : '#eef1f5',
-                          color: pl.active ? '#ffffff' : '#64748b',
-                        }}
-                      >
-                        {pl.active
-                          ? pl.type === 'ai'
-                            ? '思考中'
-                            : '行动中'
-                          : pl.type === 'ai'
-                            ? `对手${oppNum}`
-                            : `玩家${humanNum}`}
-                      </span>
+                      {pl.finishRank !== null ? (
+                        <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] md:text-[10px] font-extrabold text-amber-800 whitespace-nowrap">
+                          {pl.finishRank === 1
+                            ? '🥇 第1名'
+                            : pl.finishRank === 2
+                              ? '🥈 第2名'
+                              : pl.finishRank === 3
+                                ? '🥉 第3名'
+                                : `第${pl.finishRank}名`}
+                        </span>
+                      ) : (
+                        <span
+                          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] md:text-[10px] font-bold whitespace-nowrap"
+                          style={{
+                            backgroundColor: pl.active ? pl.uiColor : '#eef1f5',
+                            color: pl.active ? '#ffffff' : '#64748b',
+                          }}
+                        >
+                          {pl.active
+                            ? pl.type === 'ai'
+                              ? '思考中'
+                              : '行动中'
+                            : pl.type === 'ai'
+                              ? `对手${oppNum}`
+                              : `玩家${humanNum}`}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1 flex items-center gap-1">
                       {[0, 1, 2, 3].map((k) => (

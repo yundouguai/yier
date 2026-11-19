@@ -81,6 +81,7 @@ export interface HudPlayerSnapshot {
   colorHex: string;
   uiColor: string;
   doneCount: number;
+  finishRank: number | null;
   active: boolean;
 }
 
@@ -106,6 +107,7 @@ export interface GameHudSnapshot {
   splashVisible: boolean;
   shakeKey: number;
   winnerPid: number | null;
+  rankings: number[];
   gmDie: number | null;
   players: HudPlayerSnapshot[];
 }
