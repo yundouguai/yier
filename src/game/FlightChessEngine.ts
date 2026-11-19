@@ -2295,14 +2295,95 @@ export class FlightChessEngine {
         }
       }
 
+      const smooth01 = (v: number) => {
+        const c = Math.max(0, Math.min(1, v));
+        return c * c * (3 - 2 * c);
+      };
       for (const rt of this.world.rideToys) {
         const w = t * 1.45 + rt.phase;
         const rock = Math.sin(w);
         rt.rockerPivot.rotation.x = rock * 0.095;
         rt.rockerPivot.position.y = Math.abs(rock) * 0.012;
         rt.riderPivot.rotation.x = Math.sin(w - 0.55) * 0.085;
-        rt.headPivot.rotation.x = Math.sin(w - 0.95) * 0.07;
-        rt.headPivot.rotation.z = Math.sin(t * 0.7 + rt.phase) * 0.045;
+        let headRotX = Math.sin(w - 0.95) * 0.07;
+        let headRotY = 0;
+        let headRotZ = Math.sin(t * 0.7 + rt.phase) * 0.045;
+
+        const ce = rt.cakeEat;
+        if (ce) {
+          if (ce.eatStart < 0 && t >= ce.nextEatAt) {
+            ce.eatStart = t;
+          }
+          if (ce.eatStart >= 0) {
+            const p = (t - ce.eatStart) / ce.eatDur;
+            if (p >= 1) {
+              ce.eatStart = -1;
+              ce.nextEatAt = t + 11 + Math.random() * 14;
+              ce.rightArmPivot.rotation.set(0, 0, 0);
+              ce.rightArmPivot.position.set(0.135, 0.22, -0.01);
+              ce.cakeGroup.visible = false;
+              ce.cakeGroup.scale.setScalar(1);
+              ce.cakeHalf1.visible = true;
+              ce.normalEyes.forEach((em) => (em.visible = true));
+              ce.happyEyes.forEach((em) => (em.visible = false));
+            } else {
+              // 精致 2 口偷吃草莓小蛋糕动画（手臂前伸上抬，避免穿模进头部）
+              let lift = 0; // 0: 握把, 0.55: 举在脸侧展示, 1.0: 送到嘴前
+              if (p < 0.14) {
+                lift = smooth01(p / 0.14) * 0.52;
+              } else if (p < 0.28) {
+                lift = 0.52 + smooth01((p - 0.14) / 0.14) * 0.48;
+              } else if (p < 0.40) {
+                lift = 1.0 - smooth01((p - 0.28) / 0.12) * 0.45;
+              } else if (p < 0.54) {
+                lift = 0.55;
+              } else if (p < 0.68) {
+                lift = 0.55 + smooth01((p - 0.54) / 0.14) * 0.45;
+              } else if (p < 0.80) {
+                lift = 1.0 - smooth01((p - 0.68) / 0.12) * 0.52;
+              } else if (p < 0.90) {
+                lift = 0.48;
+              } else {
+                lift = 0.48 * (1 - smooth01((p - 0.90) / 0.10));
+              }
+
+              // 手臂前伸 + 上抬，使蛋糕稳定停在嘴前外侧不穿帮
+              ce.rightArmPivot.position.set(0.135, 0.22 + lift * 0.02, -0.01 + lift * 0.095);
+              ce.rightArmPivot.rotation.set(-lift * 1.18, -lift * 0.28, lift * 0.36);
+
+              // 蛋糕出现、第1口吃掉一半、第2口全吃掉
+              const cakeVis = p >= 0.04 && p < 0.68;
+              ce.cakeGroup.visible = cakeVis;
+              ce.cakeHalf1.visible = p < 0.28;
+              const popScale =
+                p < 0.10
+                  ? smooth01((p - 0.04) / 0.06)
+                  : p >= 0.64 && p < 0.68
+                    ? 1 - smooth01((p - 0.64) / 0.04)
+                    : 1;
+              ce.cakeGroup.scale.setScalar(Math.max(0.01, popScale));
+
+              // 吃下去时切换为开心弯弯笑眼 ^ ^
+              const isHappy = p >= 0.27 && p < 0.92;
+              ce.normalEyes.forEach((em) => (em.visible = !isHappy));
+              ce.happyEyes.forEach((em) => (em.visible = isHappy));
+
+              // 咬下瞬间轻微低头转向蛋糕，咀嚼时开心摇晃
+              const bite1 = Math.sin(smooth01(Math.max(0, Math.min(1, (p - 0.18) / 0.16))) * Math.PI);
+              const bite2 = Math.sin(smooth01(Math.max(0, Math.min(1, (p - 0.58) / 0.16))) * Math.PI);
+              const biteAmt = Math.max(bite1, bite2);
+              const chew =
+                (p >= 0.30 && p < 0.54) || (p >= 0.70 && p < 0.90)
+                  ? Math.sin(t * 16) * 0.065
+                  : 0;
+              headRotX += biteAmt * 0.14 + Math.abs(chew) * 0.7;
+              headRotY -= biteAmt * 0.16;
+              headRotZ += chew * 0.6;
+            }
+          }
+        }
+
+        rt.headPivot.rotation.set(headRotX, headRotY, headRotZ);
       }
 
       const movableSet =

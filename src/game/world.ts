@@ -35,6 +35,17 @@ import {
   createWaterNormalTexture,
 } from './textures';
 
+export interface RideToyCakeEatRig {
+  rightArmPivot: THREE.Group;
+  cakeGroup: THREE.Group;
+  cakeHalf1: THREE.Group;
+  normalEyes: THREE.Mesh[];
+  happyEyes: THREE.Mesh[];
+  nextEatAt: number;
+  eatStart: number;
+  eatDur: number;
+}
+
 export interface RideToyAnim {
   root: THREE.Group;
   rockerPivot: THREE.Group;
@@ -43,6 +54,7 @@ export interface RideToyAnim {
   phase: number;
   species: Species;
   charKey: string;
+  cakeEat?: RideToyCakeEatRig;
 }
 
 export interface PetalAnim {
@@ -362,6 +374,8 @@ function buildToyRider(P: PlayerConfig) {
       ear.add(inner);
     }
   }
+  const normalEyes: THREE.Mesh[] = [];
+  const happyEyes: THREE.Mesh[] = [];
   for (const s of [-1, 1]) {
     const th = 0.385 * s;
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.023, 18, 14), darkM);
@@ -370,6 +384,22 @@ function buildToyRider(P: PlayerConfig) {
     eye.position.set(ep.x, 0.322, ep.z);
     eye.rotation.y = th;
     headWrap.add(eye);
+    normalEyes.push(eye);
+
+    if (panda) {
+      const hPts = [
+        new THREE.Vector3(surfPt(th - 0.11, 0.315, -0.002).x, 0.315, surfPt(th - 0.11, 0.315, -0.002).z),
+        new THREE.Vector3(surfPt(th, 0.338, -0.0025).x, 0.338, surfPt(th, 0.338, -0.0025).z),
+        new THREE.Vector3(surfPt(th + 0.11, 0.315, -0.002).x, 0.315, surfPt(th + 0.11, 0.315, -0.002).z),
+      ];
+      const hEye = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(hPts), 16, 0.0055, 8, false),
+        darkM,
+      );
+      hEye.visible = false;
+      headWrap.add(hEye);
+      happyEyes.push(hEye);
+    }
   }
   const blushCol = panda
     ? P.key === 'yier'
@@ -435,23 +465,130 @@ function buildToyRider(P: PlayerConfig) {
   }
   const gripY = panda ? 0.13 : 0.16;
   const gripZ = panda ? 0.17 : 0.18;
+  let rightArmPivot: THREE.Group | null = null;
+  let cakeGroup: THREE.Group | null = null;
+  let cakeHalf1: THREE.Group | null = null;
+
   for (const s of [-1, 1]) {
     const a = new THREE.Vector3(0.135 * s, 0.22, -0.01);
     const b = new THREE.Vector3(0.205 * s, gripY, gripZ);
-    const mid = a.clone().add(b).multiplyScalar(0.5);
-    const dir = b.clone().sub(a).normalize();
-    const arm = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.044, 0.052, a.distanceTo(b), 12),
-      furM,
-    );
-    arm.position.copy(mid);
-    arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    arm.castShadow = true;
-    riderPivot.add(arm);
-    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), furM);
-    paw.position.copy(b);
-    paw.castShadow = true;
-    riderPivot.add(paw);
+    if (panda && s === 1) {
+      const armPivot = new THREE.Group();
+      armPivot.position.copy(a);
+      const relB = b.clone().sub(a);
+      const mid = relB.clone().multiplyScalar(0.5);
+      const dir = relB.clone().normalize();
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.044, 0.052, relB.length(), 12),
+        furM,
+      );
+      arm.position.copy(mid);
+      arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      arm.castShadow = true;
+      armPivot.add(arm);
+
+      const paw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), furM);
+      paw.position.copy(relB);
+      paw.castShadow = true;
+      armPivot.add(paw);
+
+      // 图2款草莓小蛋糕（海绵胚 + 奶油夹心 + 波浪白奶油顶 + 红草莓）
+      const cake = new THREE.Group();
+      cake.position.set(relB.x + 0.01, relB.y + 0.065, relB.z + 0.015);
+      cake.visible = false;
+
+      const spongeM = M(0xfbe288, 0.65);
+      const creamM = M(0xfffdf8, 0.45);
+      const berryM = M(0xe63544, 0.35);
+      const leafM = M(0x4ba648, 0.55);
+
+      const half1 = new THREE.Group();
+      const half2 = new THREE.Group();
+
+      // 半块蛋糕构造（左半 + 右半，方便第一口吃掉一半、第二口吃光）
+      const addHalf = (grp: THREE.Group, thetaStart: number) => {
+        const sponge = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.062, 0.058, 0.064, 16, 1, false, thetaStart, Math.PI),
+          spongeM,
+        );
+        grp.add(sponge);
+
+        const midCream = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0635, 0.0635, 0.014, 16, 1, false, thetaStart, Math.PI),
+          creamM,
+        );
+        grp.add(midCream);
+
+        const topCream = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.064, 0.065, 0.018, 16, 1, false, thetaStart, Math.PI),
+          creamM,
+        );
+        topCream.position.y = 0.036;
+        grp.add(topCream);
+      };
+      addHalf(half1, 0);
+      addHalf(half2, Math.PI);
+
+      // 为第二半蛋糕补充切面封口（海绵胚 + 奶油夹心 + 顶层奶油），第一口咬掉后呈现真实实心缺口而不露空洞
+      const cutSponge = new THREE.Mesh(new THREE.PlaneGeometry(0.118, 0.064), spongeM);
+      cutSponge.rotation.y = Math.PI / 2;
+      cutSponge.position.set(0.0005, 0, 0);
+      half2.add(cutSponge);
+
+      const cutMidCream = new THREE.Mesh(new THREE.PlaneGeometry(0.122, 0.014), creamM);
+      cutMidCream.rotation.y = Math.PI / 2;
+      cutMidCream.position.set(0.0008, 0, 0);
+      half2.add(cutMidCream);
+
+      const cutTopCream = new THREE.Mesh(new THREE.PlaneGeometry(0.124, 0.018), creamM);
+      cutTopCream.rotation.y = Math.PI / 2;
+      cutTopCream.position.set(0.0008, 0.036, 0);
+      half2.add(cutTopCream);
+
+      // 波浪奶油花边球（分配到两半）
+      for (let k = 0; k < 8; k++) {
+        const ang = (k / 8) * Math.PI * 2 + 0.2;
+        const dollop = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 8), creamM);
+        dollop.position.set(Math.sin(ang) * 0.056, 0.032, Math.cos(ang) * 0.056);
+        if (Math.sin(ang) >= 0) half1.add(dollop);
+        else half2.add(dollop);
+      }
+
+      // 顶部红草莓放在第二半上（第2口连草莓一起吃掉）
+      const berry = new THREE.Mesh(new THREE.SphereGeometry(0.024, 14, 12), berryM);
+      berry.scale.set(0.95, 1.15, 0.95);
+      berry.position.set(0, 0.064, 0);
+      half2.add(berry);
+
+      const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.012, 5), leafM);
+      leaf.position.set(0, 0.088, 0);
+      leaf.rotation.x = Math.PI;
+      half2.add(leaf);
+
+      cake.add(half1);
+      cake.add(half2);
+      armPivot.add(cake);
+
+      riderPivot.add(armPivot);
+      rightArmPivot = armPivot;
+      cakeGroup = cake;
+      cakeHalf1 = half1;
+    } else {
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      const dir = b.clone().sub(a).normalize();
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.044, 0.052, a.distanceTo(b), 12),
+        furM,
+      );
+      arm.position.copy(mid);
+      arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      arm.castShadow = true;
+      riderPivot.add(arm);
+      const paw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 14, 12), furM);
+      paw.position.copy(b);
+      paw.castShadow = true;
+      riderPivot.add(paw);
+    }
   }
   for (const s of [-1, 1]) {
     const leg = new THREE.Mesh(new THREE.SphereGeometry(0.068, 16, 12), legM);
@@ -461,7 +598,15 @@ function buildToyRider(P: PlayerConfig) {
     leg.castShadow = true;
     riderPivot.add(leg);
   }
-  return { riderPivot, headPivot };
+  return {
+    riderPivot,
+    headPivot,
+    rightArmPivot,
+    cakeGroup,
+    cakeHalf1,
+    normalEyes,
+    happyEyes,
+  };
 }
 
 export function buildAncientWorld(
@@ -2594,7 +2739,15 @@ export function buildAncientWorld(
       }
     }
 
-    const { riderPivot, headPivot } = buildToyRider(P);
+    const {
+      riderPivot,
+      headPivot,
+      rightArmPivot,
+      cakeGroup,
+      cakeHalf1,
+      normalEyes,
+      happyEyes,
+    } = buildToyRider(P);
     rockerPivot.add(riderPivot);
     root.scale.setScalar(1.06);
     root.traverse((o) => {
@@ -2608,6 +2761,19 @@ export function buildAncientWorld(
       phase: slotId * 1.45,
       species: P.species,
       charKey: P.key,
+      cakeEat:
+        panda && rightArmPivot && cakeGroup && cakeHalf1
+          ? {
+              rightArmPivot,
+              cakeGroup,
+              cakeHalf1,
+              normalEyes,
+              happyEyes,
+              nextEatAt: 4.5 + slotId * 3.8 + Math.random() * 5.0,
+              eatStart: -1,
+              eatDur: 5.4,
+            }
+          : undefined,
     });
     return root;
   };
