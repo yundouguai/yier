@@ -74,6 +74,7 @@ export type GamePhase =
 export type CameraMode = 'follow' | 'top' | 'free';
 
 export interface HudPlayerSnapshot {
+  charKey: CharKey;
   name: string;
   species: Species;
   type: PlayerType;
@@ -100,6 +101,7 @@ export interface GameHudSnapshot {
   messageKey: number;
   splashText: string | null;
   splashAvatar: string;
+  splashCharKey: CharKey;
   splashColor: string;
   splashVisible: boolean;
   shakeKey: number;

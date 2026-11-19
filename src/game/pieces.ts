@@ -7,6 +7,17 @@ import {
   createPropellerDiscTexture,
 } from './textures';
 
+export interface HeadFaceParts {
+  leftEye: THREE.Mesh;
+  rightEye: THREE.Mesh;
+  leftSquint: THREE.Mesh;
+  rightSquint: THREE.Mesh;
+  leftBlush: THREE.Mesh;
+  rightBlush: THREE.Mesh;
+  mouthW: THREE.Mesh;
+  mouthOpen: THREE.Group;
+}
+
 export interface PlaneParts {
   animRoot: THREE.Group;
   body: THREE.Mesh;
@@ -455,6 +466,13 @@ function loafHead(P: PlayerConfig, anisotropy: number): THREE.Mesh {
     };
   };
 
+  let leftEye!: THREE.Mesh;
+  let rightEye!: THREE.Mesh;
+  let leftSquint!: THREE.Mesh;
+  let rightSquint!: THREE.Mesh;
+  let leftBlush!: THREE.Mesh;
+  let rightBlush!: THREE.Mesh;
+
   for (const s of [-1, 1]) {
     const th = 0.393 * s;
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.024, 20, 14), decMat(0x33241c));
@@ -463,6 +481,31 @@ function loafHead(P: PlayerConfig, anisotropy: number): THREE.Mesh {
     eye.position.set(ep.x, 0.326, ep.z);
     eye.rotation.y = th;
     head.add(eye);
+    if (s < 0) leftEye = eye;
+    else rightEye = eye;
+
+    // 弯弧眯眼 (> / < 形状，贴合头部曲面)
+    const outerAng = th + s * 0.11;
+    const innerAng = th - s * 0.055;
+    const midAng = (outerAng + innerAng) * 0.5;
+    const sqPts = [
+      { a: outerAng, y: 0.342 },
+      { a: midAng - s * 0.01, y: 0.333 },
+      { a: innerAng, y: 0.326 },
+      { a: midAng - s * 0.01, y: 0.319 },
+      { a: outerAng, y: 0.310 },
+    ].map(({ a, y }) => {
+      const sp = surfPt(a, y, -0.0025);
+      return new THREE.Vector3(sp.x, y, sp.z);
+    });
+    const squint = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sqPts), 24, 0.0046, 8, false),
+      decMat(0x3a261d),
+    );
+    squint.visible = false;
+    head.add(squint);
+    if (s < 0) leftSquint = squint;
+    else rightSquint = squint;
 
     const tb = 0.675 * s;
     const blush = new THREE.Mesh(new THREE.SphereGeometry(0.0462, 20, 14), decMat(P.blush));
@@ -471,7 +514,11 @@ function loafHead(P: PlayerConfig, anisotropy: number): THREE.Mesh {
     blush.position.set(bp.x, 0.26, bp.z);
     blush.rotation.y = tb;
     blush.rotation.x = (surfPt(tb, 0.3, 0).z - surfPt(tb, 0.22, 0).z) / 0.08;
+    blush.userData.basePos = blush.position.clone();
+    blush.userData.baseScale = blush.scale.clone();
     head.add(blush);
+    if (s < 0) leftBlush = blush;
+    else rightBlush = blush;
   }
 
   const my = 0.316;
@@ -498,12 +545,51 @@ function loafHead(P: PlayerConfig, anisotropy: number): THREE.Mesh {
         .map((p) => new THREE.Vector2(-p.x, p.y)),
     )
     .map((p) => new THREE.Vector3(p.x, p.y, surfPt(0, p.y, 0).z + 0.0022));
-  head.add(
+  const mouthW = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(mpts), 32, 0.0032, 8, false),
+    decMat(0x5a4030),
+  );
+  head.add(mouthW);
+
+  // ω 上唇 + 带粉红小舌头的张嘴表情
+  const mouthOpen = new THREE.Group();
+  const openLipPts = mpts.map((p) => new THREE.Vector3(p.x * 1.04, p.y + 0.004, p.z + 0.0005));
+  mouthOpen.add(
     new THREE.Mesh(
-      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(mpts), 32, 0.0032, 8, false),
-      decMat(0x5a4030),
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(openLipPts), 32, 0.0035, 8, false),
+      decMat(0x4a2e24),
     ),
   );
+  const openRim = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.016, 0.0135, 0.01, 18),
+    decMat(0x4a2e24),
+  );
+  openRim.rotation.x = Math.PI / 2;
+  openRim.scale.set(0.86, 1.0, 1.32);
+  openRim.position.set(0, my - 0.015, surfPt(0, my - 0.015, 0).z + 0.0012);
+  mouthOpen.add(openRim);
+
+  const openTongue = new THREE.Mesh(
+    new THREE.SphereGeometry(0.0135, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xf2827f, roughness: 0.36 }),
+  );
+  openTongue.scale.set(0.76, 1.15, 0.52);
+  openTongue.position.set(0, my - 0.017, surfPt(0, my - 0.017, 0).z + 0.0048);
+  mouthOpen.add(openTongue);
+  mouthOpen.visible = false;
+  head.add(mouthOpen);
+
+  head.userData.faceParts = {
+    leftEye,
+    rightEye,
+    leftSquint,
+    rightSquint,
+    leftBlush,
+    rightBlush,
+    mouthW,
+    mouthOpen,
+  } satisfies HeadFaceParts;
+
   return head;
 }
 

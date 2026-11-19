@@ -1,9 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { beep } from '../game/audio';
 import { CameraMode, GameHudSnapshot, HUD_PIPS } from '../game/constants';
+import { CharacterAvatar } from './CharacterAvatar';
+
+const QUICK_EMOTES = [
+  { icon: '😄', text: '开心!' },
+  { icon: '😜', text: '略略略' },
+  { icon: '🔥', text: '冲鸭!' },
+  { icon: '💦', text: '慌了慌了' },
+  { icon: '👏', text: '666!' },
+  { icon: '💤', text: '快点呀~' },
+];
 
 interface GameHUDProps {
   snap: GameHudSnapshot;
   showSetup: boolean;
+  muted: boolean;
+  onToggleMute: () => void;
   onSetGmDie: (val: number | null) => void;
   onActionPod: () => void;
   onSetCamMode: (mode: CameraMode) => void;
@@ -15,6 +28,8 @@ interface GameHUDProps {
 export const GameHUD: React.FC<GameHUDProps> = ({
   snap,
   showSetup,
+  muted,
+  onToggleMute,
   onSetGmDie,
   onActionPod,
   onSetCamMode,
@@ -25,8 +40,57 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [rulesOpen, setRulesOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
+  const [emoteOpen, setEmoteOpen] = useState(false);
+  const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
+  const emoteTimers = useRef<Record<number, number>>({});
   const secretTapCount = useRef(0);
   const secretTapTimer = useRef<number | null>(null);
+
+  const showEmoteBubble = (playerIdx: number, content: string) => {
+    if (emoteTimers.current[playerIdx]) {
+      window.clearTimeout(emoteTimers.current[playerIdx]);
+    }
+    setActiveEmotes((prev) => ({ ...prev, [playerIdx]: content }));
+    emoteTimers.current[playerIdx] = window.setTimeout(() => {
+      setActiveEmotes((prev) => {
+        const next = { ...prev };
+        delete next[playerIdx];
+        return next;
+      });
+    }, 2800);
+  };
+
+  const handleSendEmote = (icon: string, text: string) => {
+    const curPlayer = snap.players[snap.turn];
+    const senderIdx =
+      curPlayer && curPlayer.type === 'human'
+        ? snap.turn
+        : Math.max(
+            0,
+            snap.players.findIndex((p) => p.type === 'human'),
+          );
+    showEmoteBubble(senderIdx, `${icon} ${text}`);
+    beep(680, 0.06, 'sine', 0.1);
+    setEmoteOpen(false);
+
+    // 对手偶发回应表情气泡
+    const opponents = snap.players
+      .map((p, idx) => ({ p, idx }))
+      .filter((x) => x.p.type === 'ai');
+    if (opponents.length > 0 && Math.random() < 0.55) {
+      const pick = opponents[Math.floor(Math.random() * opponents.length)];
+      const reply = QUICK_EMOTES[Math.floor(Math.random() * QUICK_EMOTES.length)];
+      window.setTimeout(() => {
+        showEmoteBubble(pick.idx, `${reply.icon} ${reply.text}`);
+      }, 650);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      Object.values(emoteTimers.current).forEach((t) => window.clearTimeout(t));
+    };
+  }, []);
 
   const handleSecretTap = () => {
     secretTapCount.current += 1;
@@ -55,13 +119,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const cur = snap.players[snap.turn] ?? snap.players[0];
   if (!cur) return null;
 
-  const isAI = cur.type === 'ai';
-  const humanTurn = !isAI && snap.phase !== 'over' && !showSetup;
-  const av = cur.species === 'panda' ? '🐼' : '🐻';
-  const humanTotal = snap.players.filter((p) => p.type === 'human').length;
+  const isOpponent = cur.type === 'ai';
+  const humanTurn = !isOpponent && snap.phase !== 'over' && !showSetup;
   const curHumanNum = snap.players
     .slice(0, snap.turn + 1)
     .filter((p) => p.type === 'human').length;
+  const curOppNum = snap.players
+    .slice(0, snap.turn + 1)
+    .filter((p) => p.type === 'ai').length;
 
   let actionText = '准备中…';
   if (snap.phase === 'over') actionText = '🏆 对局结束';
@@ -69,7 +134,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     actionText =
       snap.die !== null && !snap.hudDieRolling ? `掷出 ${snap.die} 点` : '掷骰中…';
   } else if (snap.phase === 'moving') actionText = '移动中…';
-  else if (isAI) actionText = 'AI 思考中…';
+  else if (isOpponent) actionText = '对手思考中…';
   else if (snap.phase === 'awaitRoll') actionText = '请掷骰子';
   else if (snap.phase === 'awaitMove') {
     actionText =
@@ -85,11 +150,11 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   let rollLabel = '🏆 对局已结束';
   let rollVariant: 'green' | 'pick' | 'disabled' = 'disabled';
 
-  if (snap.phase === 'awaitRoll' && !isAI) {
+  if (snap.phase === 'awaitRoll' && !isOpponent) {
     rollDisabled = false;
     rollLabel = `🎲 掷骰子${timeSuffix}`;
     rollVariant = 'green';
-  } else if (snap.phase === 'awaitMove' && !isAI) {
+  } else if (snap.phase === 'awaitMove' && !isOpponent) {
     if (snap.movableCount === 1) {
       rollDisabled = false;
       rollLabel = `⚡ 移动棋子${timeSuffix}`;
@@ -103,8 +168,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     rollLabel = '🎲 投掷中…';
   } else if (snap.phase === 'moving') {
     rollLabel = '✈️ 移动中…';
-  } else if (isAI) {
-    rollLabel = '🤖 AI 行动中…';
+  } else if (isOpponent) {
+    rollLabel = '⏳ 对手行动中…';
   }
 
   const activePips = HUD_PIPS[snap.hudDieFace] ?? [];
@@ -124,7 +189,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
       {/* Turn splash banner for human turns */}
       <div
-        className={`pointer-events-none fixed left-1/2 top-[24%] md:top-[22%] z-[20] flex items-center gap-3 whitespace-nowrap rounded-[22px] bg-white/95 px-7 py-3.5 text-lg md:text-[22px] font-extrabold text-slate-800 transition-all duration-200 ${
+        className={`pointer-events-none fixed left-1/2 top-[24%] md:top-[22%] z-[20] flex items-center gap-3 whitespace-nowrap rounded-[22px] bg-white/95 px-6 py-3 text-lg md:text-[22px] font-extrabold text-slate-800 transition-all duration-200 ${
           snap.splashVisible
             ? 'opacity-100 -translate-x-1/2 -translate-y-1/2 scale-100'
             : 'opacity-0 -translate-x-1/2 -translate-y-1/2 scale-90'
@@ -134,76 +199,86 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           boxShadow: `0 18px 46px rgba(0,0,0,0.24), 0 0 0 6px ${snap.splashColor}33`,
         }}
       >
-        <span>{snap.splashAvatar}</span>
+        <CharacterAvatar charKey={snap.splashCharKey} size={34} />
         <span>{snap.splashText}</span>
       </div>
 
       <div className="pointer-events-none fixed inset-0 z-10">
-        {/* Party / Player list (left vertical MMO-style stack) */}
+        {/* Party / Player list (left vertical stack) */}
         <div className="absolute left-2.5 top-2.5 md:left-3.5 md:top-3.5 flex w-[148px] md:w-[196px] flex-col gap-1.5">
           {snap.players.map((pl, i) => {
-            const pav = pl.species === 'panda' ? '🐼' : '🐻';
             const humanNum = snap.players
               .slice(0, i + 1)
               .filter((p) => p.type === 'human').length;
+            const oppNum = snap.players
+              .slice(0, i + 1)
+              .filter((p) => p.type === 'ai').length;
+            const bubble = activeEmotes[i];
             return (
-              <div
-                key={i}
-                className={`pointer-events-auto flex items-center gap-2 rounded-[13px] px-2.5 py-1.5 md:px-3 md:py-2 transition-all duration-200 ${
-                  pl.active
-                    ? 'bg-white opacity-100 translate-x-1'
-                    : 'bg-white/85 opacity-85'
-                }`}
-                style={{
-                  border: `2px solid ${pl.active ? pl.uiColor : 'rgba(255,255,255,0.8)'}`,
-                  boxShadow: pl.active
-                    ? `0 8px 22px rgba(0,0,0,0.16), 0 0 0 3px ${pl.uiColor}2e`
-                    : '0 4px 12px rgba(60,80,110,0.14)',
-                }}
-              >
-                <div className="relative flex h-7 w-7 md:h-8 md:w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-base leading-none">
-                  <span>{pav}</span>
-                  <span
-                    className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-black/20 shadow-sm"
-                    style={{ backgroundColor: pl.colorHex }}
-                  />
+              <div key={i} className="relative">
+                <div
+                  className={`pointer-events-auto flex items-center gap-2 rounded-[13px] px-2.5 py-1.5 md:px-3 md:py-2 transition-all duration-200 ${
+                    pl.active
+                      ? 'bg-white opacity-100 translate-x-1'
+                      : 'bg-white/85 opacity-85'
+                  }`}
+                  style={{
+                    border: `2px solid ${pl.active ? pl.uiColor : 'rgba(255,255,255,0.8)'}`,
+                    boxShadow: pl.active
+                      ? `0 8px 22px rgba(0,0,0,0.16), 0 0 0 3px ${pl.uiColor}2e`
+                      : '0 4px 12px rgba(60,80,110,0.14)',
+                  }}
+                >
+                  <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
+                    <CharacterAvatar charKey={pl.charKey} size={32} />
+                    <span
+                      className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-white shadow-sm"
+                      style={{ backgroundColor: pl.colorHex }}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <b className="truncate text-[12px] md:text-[13px] text-slate-800">
+                        {pl.name}
+                      </b>
+                      <span
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[9px] md:text-[10px] font-bold whitespace-nowrap"
+                        style={{
+                          backgroundColor: pl.active ? pl.uiColor : '#eef1f5',
+                          color: pl.active ? '#ffffff' : '#64748b',
+                        }}
+                      >
+                        {pl.active
+                          ? pl.type === 'ai'
+                            ? '思考中'
+                            : '行动中'
+                          : pl.type === 'ai'
+                            ? `对手${oppNum}`
+                            : `玩家${humanNum}`}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1">
+                      {[0, 1, 2, 3].map((k) => (
+                        <span
+                          key={k}
+                          className={`h-1.5 flex-1 rounded-full transition-colors ${
+                            k < pl.doneCount ? 'bg-[#3aa66b]' : 'bg-slate-200'
+                          }`}
+                        />
+                      ))}
+                      <span className="ml-0.5 text-[10px] font-semibold text-slate-400 tabular-nums">
+                        {pl.doneCount}/4
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <b className="truncate text-[12px] md:text-[13px] text-slate-800">
-                      {pl.name}
-                    </b>
-                    <span
-                      className="shrink-0 rounded px-1.5 py-0.5 text-[9px] md:text-[10px] font-bold whitespace-nowrap"
-                      style={{
-                        backgroundColor: pl.active ? pl.uiColor : '#eef1f5',
-                        color: pl.active ? '#ffffff' : '#64748b',
-                      }}
-                    >
-                      {pl.active
-                        ? pl.type === 'ai'
-                          ? '思考中'
-                          : '行动中'
-                        : pl.type === 'ai'
-                          ? 'AI'
-                          : `玩家${humanNum}`}
-                    </span>
+                {bubble && (
+                  <div className="anim-msg-pop pointer-events-none absolute left-full top-1/2 z-20 ml-2.5 -translate-y-1/2 whitespace-nowrap rounded-xl border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-bold text-slate-800 shadow-lg">
+                    {bubble}
                   </div>
-                  <div className="mt-1 flex items-center gap-1">
-                    {[0, 1, 2, 3].map((k) => (
-                      <span
-                        key={k}
-                        className={`h-1.5 flex-1 rounded-full transition-colors ${
-                          k < pl.doneCount ? 'bg-[#3aa66b]' : 'bg-slate-200'
-                        }`}
-                      />
-                    ))}
-                    <span className="ml-0.5 text-[10px] font-semibold text-slate-400 tabular-nums">
-                      {pl.doneCount}/4
-                    </span>
-                  </div>
-                </div>
+                )}
               </div>
             );
           })}
@@ -251,9 +326,26 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               </button>
             </div>
           )}
+
+          {emoteOpen && (
+            <div className="anim-card-pop mb-0.5 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-md">
+              {QUICK_EMOTES.map((em) => (
+                <button
+                  key={em.text}
+                  type="button"
+                  onClick={() => handleSendEmote(em.icon, em.text)}
+                  className="flex items-center gap-1 rounded-xl bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 transition-colors hover:bg-emerald-50 hover:text-emerald-700 cursor-pointer"
+                >
+                  <span>{em.icon}</span>
+                  <span>{em.text}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex max-w-full items-center justify-center gap-1.5 md:gap-2">
             <div
-              className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-3 md:px-4 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
+              className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-2.5 md:px-3.5 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
               style={{
                 border: `2px solid ${cur.uiColor}`,
                 boxShadow: humanTurn
@@ -261,13 +353,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   : '0 6px 20px rgba(0,0,0,0.14)',
               }}
             >
-              <span className="shrink-0 text-base leading-none">{av}</span>
+              <CharacterAvatar charKey={cur.charKey} size={24} />
               <span>{cur.name}</span>
               <span
                 className="rounded-md px-1.5 py-0.5 text-[10px] md:text-[11px] font-extrabold text-white whitespace-nowrap"
                 style={{ backgroundColor: cur.uiColor }}
               >
-                {isAI ? 'AI' : humanTotal > 1 ? `玩家${curHumanNum}` : '你的回合'}
+                {isOpponent ? `对手${curOppNum}` : `玩家${curHumanNum}`}
               </span>
             </div>
 
@@ -278,7 +370,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 boxShadow: '0 6px 20px rgba(0,0,0,0.14)',
               }}
             >
-              <span className="shrink-0 text-base leading-none">{av}</span>
               <span className="truncate text-[12px] md:text-[14px] font-bold text-slate-700">
                 {topPrompt}
               </span>
@@ -286,7 +377,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
 
           <div
-            className="flex items-center gap-3 rounded-[20px] bg-white/95 px-3.5 py-2.5 transition-shadow"
+            className="flex items-center gap-2.5 md:gap-3 rounded-[20px] bg-white/95 px-3.5 py-2.5 transition-shadow"
             style={{
               border: `2.5px solid ${humanTurn ? cur.uiColor : 'rgba(255,255,255,0.95)'}`,
               boxShadow:
@@ -340,7 +431,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               type="button"
               disabled={rollDisabled}
               onClick={onActionPod}
-              className={`min-w-[140px] md:min-w-[168px] whitespace-nowrap rounded-[14px] px-4 md:px-6 py-2.5 md:py-3 text-sm md:text-[15px] font-extrabold text-white tabular-nums transition-transform active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:grayscale cursor-pointer ${
+              className={`min-w-[132px] md:min-w-[160px] whitespace-nowrap rounded-[14px] px-4 md:px-6 py-2.5 md:py-3 text-sm md:text-[15px] font-extrabold text-white tabular-nums transition-transform active:translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:grayscale cursor-pointer ${
                 rollVariant === 'pick'
                   ? 'bg-gradient-to-b from-amber-500 to-amber-600 shadow-[0_4px_0_#b45309]'
                   : rollVariant === 'green'
@@ -350,14 +441,27 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             >
               {rollLabel}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setEmoteOpen((v) => !v)}
+              title="发送快捷表情"
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border text-lg transition-colors cursor-pointer ${
+                emoteOpen
+                  ? 'border-emerald-400 bg-emerald-50 text-emerald-700'
+                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              💬
+            </button>
           </div>
         </div>
 
-        {/* Independent Top-Right Camera View Switcher (always visible, never collapsed) */}
+        {/* Top-Right Camera View Switcher + Global Mute Switch */}
         <div
           className="pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-xl bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
           role="group"
-          aria-label="视角模式"
+          aria-label="视角与音效"
         >
           {(
             [
@@ -389,9 +493,23 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           >
             回正
           </button>
+          <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={onToggleMute}
+            title={muted ? '开启全局音效' : '关闭全局音效'}
+            aria-label={muted ? '开启音效' : '静音'}
+            className={`rounded-lg px-2 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              muted
+                ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            {muted ? '🔇 静音' : '🔊 音效'}
+          </button>
         </div>
 
-        {/* Left Vertical Control Bar (without camera switcher) */}
+        {/* Left Vertical Control Bar */}
         <div className="pointer-events-auto absolute bottom-[132px] md:bottom-3.5 left-2.5 md:left-3.5 flex w-[90px] md:w-[102px] flex-col items-stretch gap-1.5">
           {!dockCollapsed && (
             <div className="flex flex-col items-stretch gap-1.5">
@@ -432,7 +550,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </button>
         </div>
 
-        {/* Clean, Well-Structured Rules Modal */}
+        {/* Rules Modal */}
         {rulesOpen && (
           <div
             className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-950/45 p-4"

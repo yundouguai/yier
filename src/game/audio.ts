@@ -1,6 +1,24 @@
 let actx: AudioContext | null = null;
+let muted = false;
+
+export function isAudioMuted(): boolean {
+  return muted;
+}
+
+export function setAudioMuted(next: boolean): void {
+  muted = next;
+  if (!muted) {
+    ensureAudio();
+  }
+}
+
+export function toggleAudioMuted(): boolean {
+  setAudioMuted(!muted);
+  return muted;
+}
 
 export function ensureAudio(): void {
+  if (muted) return;
   if (!actx) {
     try {
       const AudioCtx =
@@ -24,7 +42,7 @@ export function beep(
   type: OscillatorType = 'sine',
   vol = 0.15,
 ): void {
-  if (!actx) return;
+  if (muted || !actx) return;
   try {
     const o = actx.createOscillator();
     const g = actx.createGain();

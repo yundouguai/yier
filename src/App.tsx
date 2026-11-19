@@ -5,11 +5,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameHUD } from './components/GameHUD';
-import { Overlays } from './components/Overlays';
+import { MatchmakingState, Overlays } from './components/Overlays';
 import { SetupModal } from './components/SetupModal';
 import { FlightChessEngine } from './game/FlightChessEngine';
+import { isAudioMuted, toggleAudioMuted } from './game/audio';
 import {
   CHARS,
+  CHAR_KEYS,
   CharKey,
   DEFAULT_SEATS,
   GameHudSnapshot,
@@ -57,6 +59,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   messageKey: 0,
   splashText: null,
   splashAvatar: '🐼',
+  splashCharKey: 'yier',
   splashColor: '#3aa66b',
   splashVisible: false,
   shakeKey: 0,
@@ -65,23 +68,51 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   players: [],
 };
 
+function pickRandomOpponents(localChars: CharKey[]): CharKey[] {
+  const pool = CHAR_KEYS.filter((k) => !localChars.includes(k));
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, Math.max(0, 4 - localChars.length));
+}
+
 export default function App() {
   const initialParsed = useRef(parseUrlSeats());
+  const initialLocalChars: CharKey[] = initialParsed.current.hasParam
+    ? initialParsed.current.seats.filter((s) => s.on && s.type === 'human').map((s) => s.char)
+    : ['yier'];
+
   const mountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<FlightChessEngine | null>(null);
+  const matchTimersRef = useRef<number[]>([]);
 
   const [activeSeats, setActiveSeats] = useState<SeatConfig[]>(initialParsed.current.seats);
-  const [draftSeats, setDraftSeats] = useState<SeatConfig[]>(
-    initialParsed.current.seats.map((s) => ({ ...s })),
+  const [activeLocalChars, setActiveLocalChars] = useState<CharKey[]>(
+    initialLocalChars.length > 0 ? initialLocalChars : ['yier'],
+  );
+  const [draftLocalChars, setDraftLocalChars] = useState<CharKey[]>(
+    initialLocalChars.length > 0 ? initialLocalChars : ['yier'],
   );
   const [showSetup, setShowSetup] = useState(!initialParsed.current.hasParam);
+  const [matchmaking, setMatchmaking] = useState<MatchmakingState | null>(null);
   const [sessionId, setSessionId] = useState(0);
   const [autoStart, setAutoStart] = useState(initialParsed.current.hasParam);
   const [snap, setSnap] = useState<GameHudSnapshot>(INITIAL_SNAPSHOT);
   const [contextLost, setContextLost] = useState(false);
+  const [muted, setMuted] = useState(isAudioMuted);
 
-  const canResume = snap.phase !== 'idle' && snap.winnerPid === null;
-  const hasSeatChanges = JSON.stringify(draftSeats) !== JSON.stringify(activeSeats);
+  const clearMatchTimers = useCallback(() => {
+    matchTimersRef.current.forEach((id) => window.clearTimeout(id));
+    matchTimersRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    return () => clearMatchTimers();
+  }, [clearMatchTimers]);
+
+  const canResume = snap.phase !== 'idle' && snap.winnerPid === null && !matchmaking;
+  const hasSeatChanges = JSON.stringify(draftLocalChars) !== JSON.stringify(activeLocalChars);
 
   // Mount & manage WebGL engine lifecycle cleanly
   useEffect(() => {
@@ -105,18 +136,65 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  const handleStartGame = useCallback(() => {
-    const active = draftSeats.filter((s) => s.on);
-    if (active.length < 2) return;
-    setActiveSeats(draftSeats.map((s) => ({ ...s })));
+  const launchMatchWithSeats = useCallback((locals: CharKey[], opps: CharKey[]) => {
+    const nextSeats: SeatConfig[] = [
+      ...locals.map((char) => ({ on: true, char, type: 'human' as const })),
+      ...opps.map((char) => ({ on: true, char, type: 'ai' as const })),
+    ];
+    setActiveLocalChars([...locals]);
+    setActiveSeats(nextSeats);
     setShowSetup(false);
+    setMatchmaking(null);
     setAutoStart(true);
+    setSnap((prev) => ({ ...prev, paused: false }));
     setSessionId((id) => id + 1);
-  }, [draftSeats]);
+  }, []);
+
+  const handleStartGame = useCallback(() => {
+    if (draftLocalChars.length < 1 || draftLocalChars.length > 4) return;
+    clearMatchTimers();
+    engineRef.current?.setPaused(false);
+    setSnap((prev) => ({ ...prev, paused: false }));
+
+    if (draftLocalChars.length === 4) {
+      launchMatchWithSeats(draftLocalChars, []);
+      return;
+    }
+
+    const matchedChars = pickRandomOpponents(draftLocalChars);
+    const needCount = matchedChars.length;
+    const totalWaitMs = 2200 + Math.floor(Math.random() * 2600); // 2.2s ~ 4.8s
+
+    setShowSetup(false);
+    setMatchmaking({
+      localChars: [...draftLocalChars],
+      matchedChars,
+      joinedCount: 0,
+    });
+
+    for (let k = 1; k <= needCount; k++) {
+      const stepDelay = Math.floor((totalWaitMs * k) / (needCount + 0.5));
+      const tid = window.setTimeout(() => {
+        setMatchmaking((prev) => (prev ? { ...prev, joinedCount: k } : null));
+      }, stepDelay);
+      matchTimersRef.current.push(tid);
+    }
+
+    const doneTid = window.setTimeout(() => {
+      launchMatchWithSeats(draftLocalChars, matchedChars);
+    }, totalWaitMs);
+    matchTimersRef.current.push(doneTid);
+  }, [clearMatchTimers, draftLocalChars, launchMatchWithSeats]);
+
+  const handleCancelMatchmaking = useCallback(() => {
+    clearMatchTimers();
+    setMatchmaking(null);
+    setShowSetup(true);
+  }, [clearMatchTimers]);
 
   const handleReturnSetup = useCallback(() => {
     if (snap.phase !== 'idle' && snap.winnerPid === null) {
-      setDraftSeats(activeSeats.map((s) => ({ ...s })));
+      setDraftLocalChars([...activeLocalChars]);
       engineRef.current?.setPaused(true);
       setShowSetup(true);
     } else {
@@ -124,18 +202,24 @@ export default function App() {
       setAutoStart(false);
       setSessionId((id) => id + 1);
     }
-  }, [activeSeats, snap.phase, snap.winnerPid]);
+  }, [activeLocalChars, snap.phase, snap.winnerPid]);
 
   const handleResumeFromSetup = useCallback(() => {
-    setDraftSeats(activeSeats.map((s) => ({ ...s })));
+    setDraftLocalChars([...activeLocalChars]);
     setShowSetup(false);
     engineRef.current?.setPaused(false);
-  }, [activeSeats]);
+  }, [activeLocalChars]);
 
   const handlePlayAgain = useCallback(() => {
     setShowSetup(false);
+    setMatchmaking(null);
     setAutoStart(true);
+    setSnap((prev) => ({ ...prev, paused: false }));
     setSessionId((id) => id + 1);
+  }, []);
+
+  const handleToggleMute = useCallback(() => {
+    setMuted(toggleAudioMuted());
   }, []);
 
   // Keyboard shortcuts
@@ -150,7 +234,7 @@ export default function App() {
         engineRef.current?.resetView();
         return;
       }
-      if (showSetup) return;
+      if (showSetup || matchmaking !== null) return;
       if (e.key === 'p' || e.key === 'P') {
         engineRef.current?.togglePause();
         return;
@@ -170,7 +254,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showSetup, snap.paused, snap.winnerPid, snap.phase]);
+  }, [showSetup, matchmaking, snap.paused, snap.winnerPid, snap.phase]);
 
   const winner =
     snap.winnerPid !== null ? (snap.players[snap.winnerPid] ?? null) : null;
@@ -184,6 +268,8 @@ export default function App() {
     el.classList.add('anim-shake');
   }, [snap.shakeKey]);
 
+  const hideHud = showSetup || matchmaking !== null;
+
   return (
     <div
       ref={wrapperRef}
@@ -192,10 +278,12 @@ export default function App() {
       {/* Dedicated WebGL canvas mount outside React HUD re-renders */}
       <div ref={mountRef} className="fixed inset-0" />
 
-      {!showSetup && (
+      {!hideHud && (
         <GameHUD
           snap={snap}
           showSetup={showSetup}
+          muted={muted}
+          onToggleMute={handleToggleMute}
           onSetGmDie={(val) => engineRef.current?.setGmDie(val)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onSetCamMode={(mode) => engineRef.current?.setCamMode(mode)}
@@ -207,18 +295,20 @@ export default function App() {
 
       <SetupModal
         open={showSetup}
-        seats={draftSeats}
+        localChars={draftLocalChars}
         canResume={canResume}
         hasChanges={hasSeatChanges}
-        onChangeSeats={setDraftSeats}
+        onChangeLocalChars={setDraftLocalChars}
         onResume={handleResumeFromSetup}
         onStart={handleStartGame}
       />
 
       <Overlays
-        paused={snap.paused && !showSetup}
+        paused={snap.paused && !showSetup && matchmaking === null}
         winner={winner}
         contextLost={contextLost}
+        matchmaking={matchmaking}
+        onCancelMatchmaking={handleCancelMatchmaking}
         onResume={() => engineRef.current?.togglePause()}
         onPlayAgain={handlePlayAgain}
         onReturnSetup={handleReturnSetup}

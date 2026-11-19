@@ -833,23 +833,51 @@ export function createDiceFaceTexture(n: number, anisotropy: number): THREE.Canv
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }
 
-export function createNumberBadgeTexture(num: number, anisotropy: number): THREE.CanvasTexture {
+export function createNumberBadgeTexture(
+  label: number | string,
+  anisotropy: number,
+): THREE.CanvasTexture {
+  const text = String(label);
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#1f9d55';
-  g.beginPath();
-  g.arc(64, 64, 54, 0, Math.PI * 2);
-  g.fill();
-  g.strokeStyle = '#ffffff';
-  g.lineWidth = 8;
-  g.stroke();
-  g.fillStyle = '#ffffff';
-  g.font = 'bold 72px system-ui,sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(String(num), 64, 68);
-  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+  c.height = 128;
+  if (text.length <= 1) {
+    c.width = 128;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#1f9d55';
+    g.beginPath();
+    g.arc(64, 64, 54, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 8;
+    g.stroke();
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 72px system-ui,sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, 64, 68);
+  } else {
+    c.width = text.length >= 6 ? 320 : text.length >= 4 ? 264 : 216;
+    const g = c.getContext('2d')!;
+    const pad = 10;
+    const w = c.width - pad * 2;
+    const h = 108;
+    const r = h / 2;
+    g.fillStyle = '#1f9d55';
+    g.beginPath();
+    g.roundRect(pad, 10, w, h, r);
+    g.fill();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 8;
+    g.stroke();
+    g.fillStyle = '#ffffff';
+    g.font = text.length >= 6 ? 'bold 54px system-ui,sans-serif' : 'bold 62px system-ui,sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, c.width / 2, 66);
+  }
+  const tex = prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+  tex.userData.aspect = c.width / c.height;
+  return tex;
 }
 
 export function createGatePlaqueTexture(

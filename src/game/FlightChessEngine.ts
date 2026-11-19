@@ -12,6 +12,7 @@ import {
 } from './audio';
 import {
   CHARS,
+  CharKey,
   CameraMode,
   FLIGHT_FROM,
   FLIGHT_STEP,
@@ -31,6 +32,7 @@ import {
 } from './constants';
 import {
   DICE_REST_Y,
+  HeadFaceParts,
   PlaneData,
   PlaneParts,
   buildDiceRig,
@@ -40,6 +42,7 @@ import {
   makePilotPlaneModel,
   makePlaneModel,
 } from './pieces';
+import { createNumberBadgeTexture } from './textures';
 import { WorldRefs, buildAncientWorld } from './world';
 
 const TIMEOUT = 30000;
@@ -135,6 +138,7 @@ export class FlightChessEngine {
   private world: WorldRefs;
   private diceRig: ReturnType<typeof buildDiceRig>;
   private pickHints: THREE.Group[];
+  private badgeTexCache = new Map<string, THREE.CanvasTexture>();
   private turnArrow: THREE.Mesh;
   private hlRings: THREE.Mesh[] = [];
 
@@ -166,6 +170,7 @@ export class FlightChessEngine {
   private msgTimer: number | null = null;
   private splashText: string | null = null;
   private splashAvatar = '🐼';
+  private splashCharKey: CharKey = 'yier';
   private splashColor = '#3aa66b';
   private splashVisible = false;
   private splashTimer: number | null = null;
@@ -657,6 +662,7 @@ export class FlightChessEngine {
   private showTurnSplash(P: PlayerConfig, isBonus = false): void {
     if (P.type !== 'human') return;
     this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
+    this.splashCharKey = P.key;
     this.splashText = isBonus ? `再掷一次！${P.name}` : `轮到你啦！${P.name}`;
     this.splashColor = P.uiColor;
     this.splashVisible = true;
@@ -739,12 +745,14 @@ export class FlightChessEngine {
       messageKey: this.messageKey,
       splashText: this.splashText,
       splashAvatar: this.splashAvatar,
+      splashCharKey: this.splashCharKey,
       splashColor: this.splashColor,
       splashVisible: this.splashVisible,
       shakeKey: this.shakeKey,
       winnerPid: this.winnerPid,
       gmDie: this.gmNextDie,
       players: this.players.map((pl, i) => ({
+        charKey: pl.key,
         name: pl.name,
         species: pl.species,
         type: pl.type,
@@ -774,9 +782,12 @@ export class FlightChessEngine {
 
   public pickMovableIndex(idx: number): void {
     if (this.paused || this.disposed) return;
-    if (this.phase === 'awaitMove' && !this.isAI() && this.movable[idx] && this.die !== null) {
-      ensureAudio();
-      this.performMove(this.movable[idx].plane, this.die);
+    if (this.phase === 'awaitMove' && !this.isAI() && this.die !== null) {
+      const target = this.movable.find((m) => m.plane.idx === idx) ?? this.movable[idx];
+      if (target) {
+        ensureAudio();
+        this.performMove(target.plane, this.die);
+      }
     }
   }
 
@@ -916,6 +927,7 @@ export class FlightChessEngine {
   private applyCheekSquishDeform(
     plane: PlaneData,
     contactPlanesLocal: { nx: number; nz: number; maxProj: number }[],
+    mouthVariant: 'w' | 'open' = 'w',
   ): void {
     const pt = plane.mesh.userData.parts as PlaneParts | undefined;
     if (!pt || !pt.headMesh) return;
@@ -923,6 +935,7 @@ export class FlightChessEngine {
     const basePos = geo.userData.basePos as Float32Array | undefined;
     if (!basePos) return;
 
+    const faceParts = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
     const posAttr = geo.attributes.position as THREE.BufferAttribute;
     const arr = posAttr.array as Float32Array;
 
@@ -932,6 +945,22 @@ export class FlightChessEngine {
         posAttr.needsUpdate = true;
         geo.computeVertexNormals();
         geo.userData.squished = false;
+      }
+      if (faceParts) {
+        faceParts.leftEye.visible = true;
+        faceParts.rightEye.visible = true;
+        faceParts.leftSquint.visible = false;
+        faceParts.rightSquint.visible = false;
+        const lbPos = faceParts.leftBlush.userData.basePos as THREE.Vector3 | undefined;
+        const lbScale = faceParts.leftBlush.userData.baseScale as THREE.Vector3 | undefined;
+        if (lbPos) faceParts.leftBlush.position.copy(lbPos);
+        if (lbScale) faceParts.leftBlush.scale.copy(lbScale);
+        const rbPos = faceParts.rightBlush.userData.basePos as THREE.Vector3 | undefined;
+        const rbScale = faceParts.rightBlush.userData.baseScale as THREE.Vector3 | undefined;
+        if (rbPos) faceParts.rightBlush.position.copy(rbPos);
+        if (rbScale) faceParts.rightBlush.scale.copy(rbScale);
+        faceParts.mouthW.visible = true;
+        faceParts.mouthOpen.visible = false;
       }
       return;
     }
@@ -945,10 +974,17 @@ export class FlightChessEngine {
         const proj = x * cp.nx + z * cp.nz;
         if (proj > cp.maxProj) {
           const excess = proj - cp.maxProj;
-          // 将接触面顶点压平到碰撞中线平面上，并微微向上外鼓出肉感
-          x -= cp.nx * excess * 0.96;
-          z -= cp.nz * excess * 0.96;
-          y += excess * 0.16;
+          // 接触面顶点 100% 压平到碰撞中线平面，实现零缝隙贴紧
+          x -= cp.nx * excess;
+          z -= cp.nz * excess;
+          // 挤压侧脸颊向前/两侧软糯鼓出
+          if (y >= 0.20 && y <= 0.45) {
+            if (z > 0) z += excess * 0.48;
+            y += excess * 0.14;
+          }
+        } else if (proj > cp.maxProj * 0.68 && y >= 0.20 && y <= 0.42) {
+          const near = (proj - cp.maxProj * 0.68) / (cp.maxProj * 0.32);
+          if (z > 0) z += near * 0.013;
         }
       }
       arr[i] = x;
@@ -958,6 +994,42 @@ export class FlightChessEngine {
     posAttr.needsUpdate = true;
     geo.computeVertexNormals();
     geo.userData.squished = true;
+
+    if (faceParts) {
+      const squishLeft = contactPlanesLocal.some((cp) => cp.nx < -0.35);
+      const squishRight = contactPlanesLocal.some((cp) => cp.nx > 0.35);
+      faceParts.leftEye.visible = !squishLeft;
+      faceParts.leftSquint.visible = squishLeft;
+      faceParts.rightEye.visible = !squishRight;
+      faceParts.rightSquint.visible = squishRight;
+
+      const lbPos = faceParts.leftBlush.userData.basePos as THREE.Vector3 | undefined;
+      const lbScale = faceParts.leftBlush.userData.baseScale as THREE.Vector3 | undefined;
+      if (lbPos && lbScale) {
+        if (squishLeft) {
+          faceParts.leftBlush.position.set(lbPos.x + 0.014, lbPos.y + 0.008, lbPos.z + 0.024);
+          faceParts.leftBlush.scale.set(1.24, 1.18, 0.48);
+        } else {
+          faceParts.leftBlush.position.copy(lbPos);
+          faceParts.leftBlush.scale.copy(lbScale);
+        }
+      }
+
+      const rbPos = faceParts.rightBlush.userData.basePos as THREE.Vector3 | undefined;
+      const rbScale = faceParts.rightBlush.userData.baseScale as THREE.Vector3 | undefined;
+      if (rbPos && rbScale) {
+        if (squishRight) {
+          faceParts.rightBlush.position.set(rbPos.x - 0.014, rbPos.y + 0.008, rbPos.z + 0.024);
+          faceParts.rightBlush.scale.set(1.24, 1.18, 0.48);
+        } else {
+          faceParts.rightBlush.position.copy(rbPos);
+          faceParts.rightBlush.scale.copy(rbScale);
+        }
+      }
+
+      faceParts.mouthW.visible = mouthVariant === 'w';
+      faceParts.mouthOpen.visible = mouthVariant === 'open';
+    }
   }
 
   private relayout(): void {
@@ -1020,7 +1092,7 @@ export class FlightChessEngine {
               const maxProj = (dist * 0.5) / 0.92;
               contacts.push({ nx: lnx, nz: lnz, maxProj });
             }
-            this.applyCheekSquishDeform(p, contacts);
+            this.applyCheekSquishDeform(p, contacts, i % 2 === 0 ? 'w' : 'open');
           } else {
             this.applyCheekSquishDeform(p, []);
           }
@@ -1053,10 +1125,21 @@ export class FlightChessEngine {
   }
 
   /* ================= Highlighting ================= */
+  private getBadgeTexture(label: string): THREE.CanvasTexture {
+    let tex = this.badgeTexCache.get(label);
+    if (!tex) {
+      tex = createNumberBadgeTexture(label, this.anisotropy);
+      this.badgeTexCache.set(label, tex);
+    }
+    return tex;
+  }
+
   private highlight(list: { plane: PlaneData }[]): void {
     this.clearHL();
     const seenRingCells = new Set<string>();
-    list.forEach((c, i) => {
+    const hintGroups = new Map<string, PlaneData[]>();
+
+    list.forEach((c) => {
       const cellKey = this.cellKey(c.plane);
       const isBottomInStack = ((c.plane.mesh.userData.stackIdx as number) || 0) === 0;
       if (isBottomInStack || !seenRingCells.has(cellKey)) {
@@ -1070,20 +1153,42 @@ export class FlightChessEngine {
         ring.position.set(0, -0.02, 0);
         this.hlRings.push(ring);
       }
-      if (this.pickHints[i]) {
-        const hintY = Math.max(1.55, c.plane.mesh.position.y + 1.15);
-        this.pickHints[i].visible = true;
-        this.pickHints[i].userData.baseY = hintY;
-        this.pickHints[i].position.set(
-          c.plane.mesh.position.x,
-          hintY,
-          c.plane.mesh.position.z,
-        );
+      const groupKey = c.plane.pos <= 0 ? `single_${c.plane.idx}` : cellKey;
+      const arr = hintGroups.get(groupKey) ?? [];
+      arr.push(c.plane);
+      hintGroups.set(groupKey, arr);
+    });
+
+    let hintIdx = 0;
+    hintGroups.forEach((planes) => {
+      const hint = this.pickHints[hintIdx++];
+      if (!hint) return;
+      const sorted = [...planes].sort((a, b) => a.idx - b.idx);
+      const label = sorted.map((p) => p.idx + 1).join('·');
+      const topPlane = planes.reduce((best, cur) =>
+        cur.mesh.position.y > best.mesh.position.y ? cur : best,
+      );
+      const hintY = Math.max(1.55, topPlane.mesh.position.y + 1.15);
+      const badge = hint.children[1] as THREE.Sprite | undefined;
+      if (badge) {
+        const tex = this.getBadgeTexture(label);
+        const mat = badge.material as THREE.SpriteMaterial;
+        if (mat.map !== tex) {
+          mat.map = tex;
+          mat.needsUpdate = true;
+        }
+        const aspect = (tex.userData.aspect as number) || 1;
+        badge.scale.set(0.52 * aspect, 0.52, 1);
       }
+      hint.visible = true;
+      hint.userData.baseY = hintY;
+      hint.position.set(topPlane.mesh.position.x, hintY, topPlane.mesh.position.z);
     });
   }
 
   private clearHL(): void {
+    this.badgeTexCache.forEach((tex) => tex.dispose());
+    this.badgeTexCache.clear();
     this.hlRings.forEach((r) => {
       if (r.parent) r.parent.remove(r);
       r.geometry.dispose();
@@ -1206,6 +1311,7 @@ export class FlightChessEngine {
     dur = 240,
     stepSign = 1,
     baseY = 0.12,
+    flipMode: 'none' | 'frontFlip' | 'spinLeft' | 'spinRight' = 'none',
   ): Promise<void> {
     this.applyCheekSquishDeform(plane, []);
     plane.animating = true;
@@ -1220,13 +1326,19 @@ export class FlightChessEngine {
       m.position.x = sx + (x - sx) * t;
       m.position.z = sz + (z - sz) * t;
       m.position.y = THREE.MathUtils.lerp(sy, baseY, t) + Math.sin(t * Math.PI) * arc;
-      m.rotation.y = lerpAngle(syaw, yaw, t);
+      const spinOffset =
+        flipMode === 'spinLeft'
+          ? t * Math.PI * 2
+          : flipMode === 'spinRight'
+            ? -t * Math.PI * 2
+            : 0;
+      m.rotation.y = lerpAngle(syaw, yaw, t) + spinOffset;
       const air = Math.sin(t * Math.PI);
       const sq = t < 0.15 ? (1 - t / 0.15) * 0.12 : t > 0.85 ? ((t - 0.85) / 0.15) * 0.12 : 0;
       const syScale = 1 + air * 0.09 - sq;
       const sxScale = 1 / Math.sqrt(syScale);
       pt.animRoot.scale.set(sxScale, syScale, sxScale);
-      pt.animRoot.rotation.x = air * 0.16;
+      pt.animRoot.rotation.x = flipMode === 'frontFlip' ? t * Math.PI * 2 : air * 0.16;
       pt.leftArm.rotation.z = 0.35 + air * 0.9;
       pt.rightArm.rotation.z = -0.35 - air * 0.9;
       pt.leftFoot.rotation.x = stepSign * air * 0.55;
@@ -1643,6 +1755,7 @@ export class FlightChessEngine {
       dur: number,
       sign: number,
       targetPos?: number,
+      flipMode: 'none' | 'frontFlip' | 'spinLeft' | 'spinRight' = 'none',
     ) => {
       const baseStackCount = targetPos !== undefined ? countExistingAt(targetPos) : 0;
       return sync((p, idx) =>
@@ -1655,6 +1768,7 @@ export class FlightChessEngine {
           dur,
           sign,
           0.12 + (baseStackCount + idx) * STACK_STEP_Y,
+          flipMode,
         ),
       );
     };
@@ -1662,29 +1776,65 @@ export class FlightChessEngine {
     if (plane.pos === -1) {
       setPos(0);
       const c = this.posToCell(P, 0);
-      const alreadyOnStart = this.planesOf(plane.pid).filter((p) => p !== plane && p.pos === 0).length;
+      const existingOnStart = this.planesOf(plane.pid).filter((p) => p !== plane && p.pos === 0);
+      const alreadyOnStart = existingOnStart.length;
       const nextTotal = Math.min(alreadyOnStart + 1, 4);
       const baseYaw = this.faceTravelDir(plane);
       const huddle = this.getStartHuddlePose(alreadyOnStart, nextTotal, baseYaw);
       this.setMsg('✈️ 登上 START 起点台！');
       beep(660, 0.12, 'triangle', 0.14);
-      await this.hopTo(
-        plane,
-        c[0] + huddle.dx,
-        c[1] + huddle.dz,
-        baseYaw + huddle.yawOff,
-        0.95,
-        820,
-        1,
-      );
+
+      const shiftTasks = existingOnStart.map((ep, k) => {
+        const targetHuddle = this.getStartHuddlePose(k, nextTotal, baseYaw);
+        const tx = c[0] + targetHuddle.dx;
+        const tz = c[1] + targetHuddle.dz;
+        const tyaw = baseYaw + targetHuddle.yawOff;
+        const sx = ep.mesh.position.x;
+        const sz = ep.mesh.position.z;
+        const syaw = ep.mesh.rotation.y;
+        ep.animating = true;
+        return this.tween(540, (t) => {
+          const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          const nx = sx + (tx - sx) * ease;
+          const nz = sz + (tz - sz) * ease;
+          const nyaw = lerpAngle(syaw, tyaw, ease);
+          ep.mesh.position.set(nx, 0.12, nz);
+          ep.mesh.rotation.set(0, nyaw, 0);
+          ep.mesh.userData.stackBaseX = nx;
+          ep.mesh.userData.stackBaseZ = nz;
+          ep.mesh.userData.stackBaseYaw = nyaw;
+        }).then(() => {
+          ep.animating = false;
+        });
+      });
+
+      await Promise.all([
+        this.hopTo(
+          plane,
+          c[0] + huddle.dx,
+          c[1] + huddle.dz,
+          baseYaw + huddle.yawOff,
+          0.95,
+          820,
+          1,
+        ),
+        ...shiftTasks,
+      ]);
+      // 落地零延迟贴脸
+      this.relayout();
       await this.sleep(320);
     } else {
+      const leftStart = plane.pos === 0;
       let curStep = plane.pos;
       let dir = 1;
       for (let i = 0; i < die; i++) {
         if (curStep === HOME_END) dir = -1;
         curStep += dir;
         setPos(curStep);
+        if (leftStart && i === 0) {
+          // 离开 START 台时，剩余同伴立刻恢复圆脸或重新布局
+          this.relayout();
+        }
         const c = this.posToCell(P, curStep);
         const yaw = curStep === HOME_END ? P.finalYaw : this.faceTravelDir(plane);
         sndHop();
@@ -1730,6 +1880,7 @@ export class FlightChessEngine {
             820,
             1,
             plane.pos,
+            stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
           );
           await this.captureAt(plane);
         } else {
@@ -1743,6 +1894,7 @@ export class FlightChessEngine {
             820,
             1,
             plane.pos,
+            stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
           );
           await this.captureAt(plane);
           if (plane.pos === FLIGHT_FROM) {
@@ -2217,7 +2369,8 @@ export class FlightChessEngine {
           pt.headPivot.rotation.z = Math.sin(v) * 0.12;
           pt.headPivot.rotation.y = Math.sin(v * 0.5) * 0.18;
         } else if (movableSet && movableSet.has(p)) {
-          const ex = t * 5.5 + p.phase;
+          const syncPhase = p.pos === 0 || stackTotal >= 2 ? p.pid * 1.37 : p.phase;
+          const ex = t * 5.5 + syncPhase;
           p.mesh.scale.setScalar(baseScale * (1 + 0.06 * Math.sin(ex)));
           pt.animRoot.position.y = Math.abs(Math.sin(ex)) * 0.07;
           pt.leftArm.rotation.z = 0.85 + Math.sin(ex * 1.5) * 0.35;
@@ -2280,15 +2433,14 @@ export class FlightChessEngine {
               p.mesh.scale.setScalar(baseScale);
               pt.animRoot.position.y = 0;
               pt.animRoot.rotation.set(hPitch, 0, hRoll * 0.5);
-              // 横向轻微挤压变软、纵向微鼓，像糯米团子贴在一起
-              const squish = 0.94 - nuzzle * 0.012;
-              pt.animRoot.scale.set(squish, 1.035 + nuzzle * 0.015, 1.025);
+              // 取消横向缩水，保持接触面零缝隙贴紧，仅做纵向微弹性呼吸
+              pt.animRoot.scale.set(1, 1.02 + nuzzle * 0.012, 1.025);
               pt.headPivot.rotation.set(
                 hPitch * 0.4 + nuzzle * 0.02,
                 0,
                 hRoll + Math.sin(t * 1.6 + huddleSeed) * 0.018,
               );
-              pt.headPivot.scale.set(0.945, 1.03, 1.025);
+              pt.headPivot.scale.set(1, 1, 1);
               pt.leftArm.rotation.z = 0.14 + nuzzle * 0.04;
               pt.rightArm.rotation.z = -0.14 - nuzzle * 0.04;
             } else {
