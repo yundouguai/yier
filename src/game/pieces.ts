@@ -916,7 +916,7 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
 
 export function buildPickHints(scene: THREE.Scene, anisotropy: number): THREE.Group[] {
   const hints: THREE.Group[] = [];
-  for (let num = 1; num <= 4; num++) {
+  for (let num = 1; num <= 12; num++) {
     const grp = new THREE.Group();
     const cone = new THREE.Mesh(
       new THREE.ConeGeometry(0.18, 0.42, 4),

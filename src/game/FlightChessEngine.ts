@@ -937,7 +937,7 @@ export class FlightChessEngine {
     P: PlayerConfig,
     item: ItemType,
     detail?: string,
-    durationMs = 2300,
+    durationMs = 3600,
   ): void {
     const def = ITEM_DEFS[item];
     this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
@@ -955,6 +955,7 @@ export class FlightChessEngine {
       this.splashTimer = window.setTimeout(() => {
         if (this.disposed) return;
         this.splashVisible = false;
+        this.splashItem = null;
         this.emitSnapshot();
       }, durationMs);
     });
@@ -1712,6 +1713,99 @@ export class FlightChessEngine {
     return prio.find((it) => offer.includes(it)) ?? offer[0];
   }
 
+  /** 给被恶作剧奶油派命中的小熊头顶糊上 3D 蓬松奶油与小樱桃，持续 durationMs 后自然消散 */
+  private attachCreamSplat(plane: PlaneData, durationMs = 3000): void {
+    const pt = plane.mesh.userData.parts as PlaneParts | undefined;
+    if (!pt) return;
+    const prev = pt.headPivot.userData.creamSplat as THREE.Group | undefined;
+    if (prev) {
+      pt.headPivot.remove(prev);
+      this.disposeGeometryOnly(prev);
+    }
+
+    const splat = new THREE.Group();
+    const creamMat = new THREE.MeshStandardMaterial({
+      color: 0xfffcf5,
+      emissive: 0xfff0d4,
+      emissiveIntensity: 0.16,
+      roughness: 0.32,
+      metalness: 0.0,
+    });
+    const cherryMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      emissive: 0xb91c1c,
+      emissiveIntensity: 0.18,
+      roughness: 0.18,
+    });
+
+    // 头顶主奶油盖帽
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.185, 18, 12), creamMat);
+    cap.scale.set(1.18, 0.56, 1.05);
+    cap.position.set(0, 0.255, 0.015);
+    splat.add(cap);
+
+    // 一圈垂挂在额头和头侧的 7 颗滴落奶油球
+    const blobSpecs: [number, number, number, number, number][] = [
+      [-0.14, 0.21, 0.12, 0.068, 1.35],
+      [-0.04, 0.19, 0.175, 0.062, 1.45],
+      [0.08, 0.20, 0.155, 0.072, 1.3],
+      [0.16, 0.22, 0.08, 0.065, 1.25],
+      [-0.17, 0.23, -0.02, 0.06, 1.2],
+      [0.12, 0.24, -0.10, 0.064, 1.15],
+      [-0.04, 0.25, -0.13, 0.068, 1.1],
+    ];
+    for (const [bx, by, bz, r, sy] of blobSpecs) {
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), creamMat);
+      blob.scale.set(1.0, sy, 0.92);
+      blob.position.set(bx, by, bz);
+      splat.add(blob);
+    }
+
+    // 额前两颗滑落的奶油小液滴
+    const drip1 = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), creamMat);
+    drip1.scale.set(0.85, 1.5, 0.85);
+    drip1.position.set(-0.07, 0.125, 0.185);
+    splat.add(drip1);
+
+    const drip2 = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), creamMat);
+    drip2.scale.set(0.85, 1.45, 0.85);
+    drip2.position.set(0.095, 0.135, 0.175);
+    splat.add(drip2);
+
+    // 歪在奶油堆上的俏皮小红樱桃
+    const cherry = new THREE.Mesh(new THREE.SphereGeometry(0.048, 12, 10), cherryMat);
+    cherry.position.set(0.065, 0.355, 0.045);
+    splat.add(cherry);
+
+    splat.scale.setScalar(0.01);
+    pt.headPivot.add(splat);
+    pt.headPivot.userData.creamSplat = splat;
+
+    // 糊脸 Q 弹出现
+    void this.tween(180, (k) => {
+      const sc = 0.01 + Math.sin(k * Math.PI * 0.65) * 1.12;
+      splat.scale.setScalar(Math.min(1.08, sc));
+    }).then(() => {
+      if (!this.disposed) splat.scale.setScalar(1);
+    });
+
+    // 持续 3 秒后平滑缩小消失
+    this.after(durationMs, () => {
+      if (this.disposed) return;
+      if (pt.headPivot.userData.creamSplat !== splat) return;
+      void this.tween(320, (k) => {
+        const sc = Math.max(0.01, 1 - k * k);
+        splat.scale.setScalar(sc);
+      }).then(() => {
+        if (pt.headPivot.userData.creamSplat === splat) {
+          pt.headPivot.userData.creamSplat = undefined;
+        }
+        pt.headPivot.remove(splat);
+        this.disposeObject3D(splat);
+      });
+    });
+  }
+
   private async fireMissile(attackerPid: number, rawTarget: PlaneData): Promise<void> {
     const target = this.resolveBottomOfStack(rawTarget);
     const P = this.players[attackerPid];
@@ -1739,7 +1833,7 @@ export class FlightChessEngine {
     this.scene.add(rocket);
 
     this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了恶作剧奶油派！`, P.uiColor);
-    this.showItemSplash(P, 'missile', `锁定 ${T.name}！`, 2400);
+    this.showItemSplash(P, 'missile', `锁定 ${T.name}！`, 3600);
     await this.sleep(1000);
     if (this.disposed) {
       this.scene.remove(rocket);
@@ -1821,11 +1915,11 @@ export class FlightChessEngine {
       const stepsBack = Math.min(6, Math.max(0, fromPos - 1));
       if (stepsBack > 0) {
         const finalPos = Math.max(1, fromPos - 6);
-        this.setMsg(`💥 命中！${T.name} 的棋子被炸飞后退 ${stepsBack} 格！`, P.uiColor);
+        this.setMsg(`🥧 命中！${T.name} 的小熊被奶油派糊了一头，后退 ${stepsBack} 格！`, P.uiColor);
         targetStack.forEach((p) => {
           p.pos = finalPos;
           p.animating = true;
-          p.mesh.userData.smokeUntil = this.timeMs + 4200;
+          this.attachCreamSplat(p, 3000);
         });
         const c = this.posToCell(T, finalPos);
         const yaw = this.faceTravelDir(target);
@@ -1875,9 +1969,9 @@ export class FlightChessEngine {
         await this.captureAt(target);
       } else {
         targetStack.forEach((p) => {
-          p.mesh.userData.smokeUntil = this.timeMs + 4200;
+          this.attachCreamSplat(p, 3000);
         });
-        this.setMsg(`💥 导弹命中 ${T.name}（已在第 1 格，头上冒烟啦）`, P.uiColor);
+        this.setMsg(`🥧 奶油派命中 ${T.name}（已在第 1 格，糊了一头奶油啦~）`, P.uiColor);
       }
       this.onRetaliationSuccess(attackerPid, target.pid, 'missile');
     }
@@ -1966,8 +2060,9 @@ export class FlightChessEngine {
     return { rawProb, valueRisk, pursuerPids: Array.from(pursuerSet) };
   }
 
-  private async aiTryUseItems(): Promise<void> {
-    if (this.disposed || this.phase !== 'aiWait' || !this.isAI()) return;
+  private async aiTryUseItems(): Promise<boolean> {
+    if (this.disposed || this.phase !== 'aiWait' || !this.isAI()) return false;
+    let usedAnyItem = false;
     const me = this.turn;
     const inv = this.playerItems[me];
     const P = this.players[me];
@@ -2033,9 +2128,9 @@ export class FlightChessEngine {
         if (shouldFire && !this.turnUsedAtkDef) {
           inv.missile -= 1;
           this.turnUsedAtkDef = true;
+          usedAnyItem = true;
           await this.fireMissile(me, best.t.plane);
-          if (this.disposed) return;
-          await this.sleep(360);
+          if (this.disposed) return true;
         }
       }
     }
@@ -2064,8 +2159,8 @@ export class FlightChessEngine {
           this.setMsg('🫧 香布布~香布布~浑身香香的布布~', P.uiColor);
           this.showItemSplash(P, 'shield');
           this.emitAiEmote(me, 'useShield', 1800);
+          usedAnyItem = true;
           this.emitSnapshot();
-          await this.sleep(1650);
           return true;
         }
         return false;
@@ -2101,8 +2196,8 @@ export class FlightChessEngine {
         this.setMsg(`🎲 ${P.name} 使用了「幸运草莓蛋糕」！`, P.uiColor);
         this.showItemSplash(P, 'sixDie');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
+        usedAnyItem = true;
         this.emitSnapshot();
-        await this.sleep(1650);
       };
 
       const useRefuel = async () => {
@@ -2112,8 +2207,8 @@ export class FlightChessEngine {
         this.setMsg(`⛽ ${P.name} 使用了「再来一口小饼干」！`, P.uiColor);
         this.showItemSplash(P, 'refuel');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
+        usedAnyItem = true;
         this.emitSnapshot();
-        await this.sleep(1650);
       };
 
       const useTwinDice = async () => {
@@ -2123,8 +2218,8 @@ export class FlightChessEngine {
         this.setMsg(`⚙️ ${P.name} 启动了「双倍珍珠奶茶」！`, P.uiColor);
         this.showItemSplash(P, 'twinDice');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
+        usedAnyItem = true;
         this.emitSnapshot();
-        await this.sleep(1650);
       };
 
       // 刚在本回合（例如连投前）或才拿到还没隔一轮时，谨慎持有，除非遇到极高风险/绝杀
@@ -2144,7 +2239,7 @@ export class FlightChessEngine {
         (turnsHeld('shield') >= 1 || shieldUrgent) &&
         (await tryShield(shieldFloor))
       ) {
-        return;
+        return usedAnyItem;
       }
 
       // 2) 评估加速/进攻卡使用时机（不能刚拿就无脑丢）
@@ -2193,7 +2288,7 @@ export class FlightChessEngine {
             (sixHeld >= 2 && hasInBase && onBoardCount <= 2))
         ) {
           await useSixDie();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.refuel > 0 &&
@@ -2201,7 +2296,7 @@ export class FlightChessEngine {
             (refuelHeld >= 2 && activeBoard.length > 0))
         ) {
           await useRefuel();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.twinDice > 0 &&
@@ -2211,16 +2306,16 @@ export class FlightChessEngine {
             (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 4 && p.pos <= 44)))
         ) {
           await useTwinDice();
-          return;
+          return usedAnyItem;
         }
-        if ((turnsHeld('shield') >= 1 || shieldUrgent) && (await tryShield(shieldFloor))) return;
+        if ((turnsHeld('shield') >= 1 || shieldUrgent) && (await tryShield(shieldFloor))) return usedAnyItem;
       } else if (personality === 'chill') {
         if (
           inv.sixDie > 0 &&
           (s6.exactGoal || (sixHeld >= 2 && hasInBase && onBoardCount === 0))
         ) {
           await useSixDie();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.refuel > 0 &&
@@ -2228,7 +2323,7 @@ export class FlightChessEngine {
             (refuelHeld >= 2 && activeBoard.some((p) => p.pos >= 18) && Math.random() < 0.7))
         ) {
           await useRefuel();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.twinDice > 0 &&
@@ -2236,7 +2331,7 @@ export class FlightChessEngine {
             (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 16 && p.pos <= 38) && Math.random() < 0.65))
         ) {
           await useTwinDice();
-          return;
+          return usedAnyItem;
         }
       } else if (personality === 'vengeful') {
         const hasHotThreat = this.getTopThreatPid(me) >= 0;
@@ -2247,7 +2342,7 @@ export class FlightChessEngine {
             (sixHeld >= 2 && hasInBase && hasHotThreat))
         ) {
           await useSixDie();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.twinDice > 0 &&
@@ -2255,7 +2350,7 @@ export class FlightChessEngine {
             (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 8 && p.pos <= 42)))
         ) {
           await useTwinDice();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.refuel > 0 &&
@@ -2263,7 +2358,7 @@ export class FlightChessEngine {
             (refuelHeld >= 2 && activeBoard.some((p) => p.pos >= 8)))
         ) {
           await useRefuel();
-          return;
+          return usedAnyItem;
         }
       } else {
         // 精算稳健型：先评估收益与风险，绝不盲目交卡
@@ -2274,7 +2369,7 @@ export class FlightChessEngine {
             (sixHeld >= 2 && hasInBase && onBoardCount <= 1))
         ) {
           await useSixDie();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.refuel > 0 &&
@@ -2282,7 +2377,7 @@ export class FlightChessEngine {
             (refuelHeld >= 2 && activeBoard.some((p) => p.pos >= 14 && p.pos <= 46)))
         ) {
           await useRefuel();
-          return;
+          return usedAnyItem;
         }
         if (
           inv.twinDice > 0 &&
@@ -2290,10 +2385,11 @@ export class FlightChessEngine {
             (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 16 && p.pos <= 40)))
         ) {
           await useTwinDice();
-          return;
+          return usedAnyItem;
         }
       }
     }
+    return usedAnyItem;
   }
 
   /* ================= Public User Actions ================= */
@@ -2824,13 +2920,46 @@ export class FlightChessEngine {
           } else {
             this.applyCheekSquishDeform(p, []);
           }
+        } else if (p.pos === HOME_END) {
+          // 终点欢呼小方阵：在己方终点区域内整齐错开站位（不叠叠乐），全员开心挥手欢呼
+          const c = this.posToCell(this.players[p.pid], HOME_END);
+          const baseYaw = this.players[p.pid].finalYaw;
+          const formations: Record<number, [number, number][]> = {
+            1: [[0, 0]],
+            2: [
+              [-0.31, 0.04],
+              [0.31, 0.04],
+            ],
+            3: [
+              [-0.33, 0.12],
+              [0.33, 0.12],
+              [0, -0.24],
+            ],
+            4: [
+              [-0.32, 0.15],
+              [0.32, 0.15],
+              [-0.27, -0.23],
+              [0.27, -0.23],
+            ],
+          };
+          const pts = formations[Math.min(4, Math.max(1, total))] ?? formations[4];
+          const [lx, lz] = pts[Math.min(i, pts.length - 1)];
+          const cosY = Math.cos(baseYaw);
+          const sinY = Math.sin(baseYaw);
+          x = c[0] + lx * cosY + lz * sinY;
+          z = c[1] - lx * sinY + lz * cosY;
+          y = 0.12;
+          yaw = baseYaw + (lx < -0.05 ? 0.14 : lx > 0.05 ? -0.14 : 0);
+          stackIdx = 0;
+          stackTotal = 1;
+          this.applyCheekSquishDeform(p, []);
         } else {
           // 同阵营棋盘重叠时采用垂直「叠叠乐」堆叠（idx 最小在最底）
           const c = this.posToCell(this.players[p.pid], p.pos);
           x = c[0];
           z = c[1];
           y = 0.12 + i * STACK_STEP_Y;
-          yaw = p.pos === HOME_END ? this.players[p.pid].finalYaw : this.faceTravelDir(p);
+          yaw = this.faceTravelDir(p);
           stackIdx = i;
           stackTotal = total;
         }
@@ -3078,9 +3207,11 @@ export class FlightChessEngine {
     this.targetChoices = [];
     this.message = null;
     if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
-    this.splashVisible = false;
-    cancelAnimationFrame(this.splashRaf);
-    if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
+    if (this.splashItem === null) {
+      this.splashVisible = false;
+      cancelAnimationFrame(this.splashRaf);
+      if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
+    }
     this.clearHL();
 
     const usedSixDie = this.armedSixDie;
@@ -3903,7 +4034,7 @@ export class FlightChessEngine {
       flipMode: 'none' | 'frontFlip' | 'spinLeft' | 'spinRight' = 'none',
       onImpact?: () => void,
     ) => {
-      const baseStackCount = targetPos !== undefined ? countExistingAt(targetPos) : 0;
+      const baseStackCount = targetPos !== undefined && targetPos !== HOME_END ? countExistingAt(targetPos) : 0;
       return sync((p, idx) =>
         this.hopTo(
           p,
@@ -4327,10 +4458,19 @@ export class FlightChessEngine {
         requireTurnSeq: curTurnSeq,
         allowFollowUp: false,
       });
-      this.after(950, () => {
-        void this.aiTryUseItems().then(() => {
+      // 上一轮结束后，AI 至少等待 2 秒再开始操作
+      this.after(2000, () => {
+        if (this.disposed || this.phase !== 'aiWait') return;
+        void this.aiTryUseItems().then((usedItem) => {
           if (this.disposed || this.phase !== 'aiWait') return;
-          this.after(950, () => this.doRoll());
+          if (usedItem) {
+            // 使用完任意道具后，至少等待 2 秒再投骰子
+            this.after(2000, () => {
+              if (!this.disposed && this.phase === 'aiWait') this.doRoll();
+            });
+          } else {
+            this.doRoll();
+          }
         });
       });
     } else {
