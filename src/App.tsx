@@ -401,7 +401,7 @@ export default function App() {
   return (
     <div
       ref={wrapperRef}
-      className="relative h-screen w-screen overflow-hidden bg-[#dbe8df]"
+      className="relative h-dvh w-dvw overflow-hidden bg-[#dbe8df]"
     >
       {/* Dedicated WebGL canvas mount outside React HUD re-renders */}
       <div ref={mountRef} className="fixed inset-0" />

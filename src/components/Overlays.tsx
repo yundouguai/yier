@@ -156,17 +156,31 @@ export const Overlays: React.FC<OverlaysProps> = ({
       )}
 
       {paused && !matchmaking && (
-        <div className="fixed inset-0 z-25 flex items-center justify-center bg-slate-950/55 p-4">
-          <div className="anim-card-pop rounded-[24px] bg-white px-12 py-10 text-center shadow-2xl">
-            <div className="text-[52px]">⏸️</div>
-            <h2 className="mt-2.5 mb-5 text-2xl font-bold text-slate-900">已暂停</h2>
-            <button
-              type="button"
-              onClick={onResume}
-              className="rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-8 py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
-            >
-              继续游戏
-            </button>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="已暂停"
+          className="fixed inset-0 z-25 flex items-center justify-center bg-slate-950/55 p-4"
+        >
+          <div className="anim-card-pop w-[90vw] max-w-[340px] rounded-[24px] bg-white px-8 py-8 text-center shadow-2xl">
+            <div className="text-[48px]">⏸️</div>
+            <h2 className="mt-2 mb-4 text-2xl font-bold text-slate-900">已暂停</h2>
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={onResume}
+                className="w-full rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-8 py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
+              >
+                继续游戏
+              </button>
+              <button
+                type="button"
+                onClick={onReturnSetup}
+                className="w-full rounded-[14px] border border-slate-200 bg-slate-50 px-6 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-100 cursor-pointer"
+              >
+                返回设置 / 重新开局
+              </button>
+            </div>
           </div>
         </div>
       )}

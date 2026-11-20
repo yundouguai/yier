@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { CHARS, CHAR_KEYS, CharKey, toColorHex } from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
 
@@ -24,6 +24,15 @@ export const SetupModal: React.FC<SetupModalProps> = ({
   if (!open) return null;
 
   const localCount = localChars.length;
+
+  useEffect(() => {
+    if (!canResume) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onResume();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canResume, onResume]);
   const needMatch = 4 - localCount;
 
   const cycleChar = (idx: number, dir: number) => {
@@ -48,8 +57,19 @@ export const SetupModal: React.FC<SetupModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]">
-      <div className="anim-card-pop w-full max-w-[430px] max-h-[92vh] overflow-y-auto rounded-[22px] bg-white px-6 py-6 shadow-2xl">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="一二布布 · 3D 古城飞行棋设置"
+      onClick={() => {
+        if (canResume) onResume();
+      }}
+      className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="anim-card-pop w-full max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-[22px] bg-white px-6 py-6 shadow-2xl"
+      >
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[22px] font-bold text-slate-900">一二布布 · 3D 古城飞行棋</h2>
@@ -90,7 +110,7 @@ export const SetupModal: React.FC<SetupModalProps> = ({
                   type="button"
                   onClick={() => cycleChar(idx, -1)}
                   aria-label="上一个角色"
-                  className="ml-1 h-7 w-7 shrink-0 rounded-[9px] border border-slate-200 bg-white text-[11px] text-slate-600 transition-colors hover:border-[#3aa66b] hover:text-[#3aa66b] cursor-pointer"
+                  className="ml-1 h-9 w-9 shrink-0 rounded-[9px] border border-slate-200 bg-white text-[11px] text-slate-600 transition-colors hover:border-[#3aa66b] hover:text-[#3aa66b] cursor-pointer"
                 >
                   ◀
                 </button>
@@ -110,7 +130,7 @@ export const SetupModal: React.FC<SetupModalProps> = ({
                   type="button"
                   onClick={() => cycleChar(idx, 1)}
                   aria-label="下一个角色"
-                  className="h-7 w-7 shrink-0 rounded-[9px] border border-slate-200 bg-white text-[11px] text-slate-600 transition-colors hover:border-[#3aa66b] hover:text-[#3aa66b] cursor-pointer"
+                  className="h-9 w-9 shrink-0 rounded-[9px] border border-slate-200 bg-white text-[11px] text-slate-600 transition-colors hover:border-[#3aa66b] hover:text-[#3aa66b] cursor-pointer"
                 >
                   ▶
                 </button>
@@ -120,7 +140,7 @@ export const SetupModal: React.FC<SetupModalProps> = ({
                     type="button"
                     onClick={() => removeLocalPlayer(idx)}
                     aria-label={`移除玩家${idx + 1}`}
-                    className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border border-slate-200 bg-white text-xs text-slate-400 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-500 cursor-pointer"
+                    className="ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] border border-slate-200 bg-white text-xs text-slate-400 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-500 cursor-pointer"
                   >
                     ✕
                   </button>

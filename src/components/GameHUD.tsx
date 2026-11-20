@@ -59,7 +59,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
-  const [questExpanded, setQuestExpanded] = useState(true);
+  const [questExpanded, setQuestExpanded] = useState(() =>
+    typeof window === 'undefined' ? true : window.innerWidth >= 900 && window.innerHeight >= 560,
+  );
   const [topBarCollapsed, setTopBarCollapsed] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
   const [inspectedPid, setInspectedPid] = useState<number | null>(null);
@@ -249,10 +251,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       {snap.giftQuestEvent && !showSetup && (
         <div
           key={snap.giftQuestEvent.key}
-          className="pointer-events-none fixed left-1/2 top-[35%] md:top-[33%] z-[22] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
+          className="hud-gift-toast pointer-events-none fixed left-1/2 top-[33%] md:top-[31%] z-[22] max-w-[calc(100vw-24px)] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
         >
           <div
-            className="anim-gift-float mb-1.5 flex items-center gap-2 whitespace-nowrap rounded-full bg-white/60 px-4 py-1.5 text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
+            className="anim-gift-float mb-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 max-w-[calc(100vw-28px)] rounded-full bg-white/65 px-4 py-1.5 text-sm sm:text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
             style={{
               border: `1.5px solid ${snap.giftQuestEvent.playerColor}99`,
               textShadow: '0 1px 2px rgba(255,255,255,0.85)',
@@ -288,7 +290,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
       {/* Turn splash banner for human turns */}
       <div
-        className={`pointer-events-none fixed left-1/2 top-[24%] md:top-[22%] z-[20] flex items-center gap-3 whitespace-nowrap rounded-[22px] bg-white/95 px-6 py-3 text-lg md:text-[22px] font-extrabold text-slate-800 transition-all duration-200 ${
+        className={`pointer-events-none fixed left-1/2 top-[24%] md:top-[22%] z-[20] flex items-center gap-2.5 max-w-[calc(100vw-24px)] rounded-[22px] bg-white/95 px-6 py-3 text-lg md:text-[22px] font-extrabold text-slate-800 transition-all duration-200 ${
           snap.splashVisible
             ? 'opacity-100 -translate-x-1/2 -translate-y-1/2 scale-100'
             : 'opacity-0 -translate-x-1/2 -translate-y-1/2 scale-90'
@@ -437,7 +439,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
 
           {/* 队友栏右侧：点击标题栏即可收起/展开悬赏任务与道具 */}
-          <div className="pointer-events-auto -ml-3 md:-ml-4">
+          <div className="pointer-events-auto">
             <div className="w-[168px] md:w-[196px] rounded-xl border border-white/80 bg-white/90 p-2 shadow-lg backdrop-blur-sm">
               <button
                 type="button"
@@ -691,6 +693,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
 
             <div
+              aria-live="polite"
               className="flex h-9 md:h-10 min-w-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-3 md:px-4 text-[12px] md:text-[14px] font-bold text-slate-800 transition-colors"
               style={{
                 border: `2px solid ${cur.uiColor}`,
@@ -700,6 +703,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               <span className="truncate text-[12px] md:text-[14px] font-bold text-slate-700">
                 {topPrompt}
               </span>
+              {snap.pendingItemTarget !== null && (
+                <button
+                  type="button"
+                  onClick={onCancelItemTarget}
+                  className="pointer-events-auto ml-1 shrink-0 rounded-full bg-rose-500 px-2.5 py-0.5 text-[11px] font-extrabold text-white shadow-xs transition-colors hover:bg-rose-600 cursor-pointer"
+                >
+                  ✕ 取消选择
+                </button>
+              )}
             </div>
           </div>
 
@@ -717,10 +729,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={onActionPod}
+                disabled={rollDisabled}
+                onClick={() => {
+                  setEmoteOpen(false);
+                  onActionPod();
+                }}
                 title="点击掷骰子"
                 key={`die-${snap.hudDiePopKey}`}
-                className={`grid h-12 w-12 md:h-[52px] md:w-[52px] shrink-0 grid-cols-3 grid-rows-3 gap-1 rounded-[13px] border-2 border-[#d5c7b0] bg-gradient-to-b from-[#fffdf9] to-[#f3ebdc] p-1.5 shadow-[inset_0_-3px_0_#dfd2bc,0_3px_8px_rgba(0,0,0,0.12)] transition-transform hover:scale-105 cursor-pointer ${
+                className={`grid h-12 w-12 md:h-[52px] md:w-[52px] shrink-0 grid-cols-3 grid-rows-3 gap-1 rounded-[13px] border-2 border-[#d5c7b0] bg-gradient-to-b from-[#fffdf9] to-[#f3ebdc] p-1.5 shadow-[inset_0_-3px_0_#dfd2bc,0_3px_8px_rgba(0,0,0,0.12)] transition-transform hover:scale-105 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100 ${
                   snap.hudDieRolling
                     ? 'anim-die-spin'
                     : snap.hudDiePopKey > 0
@@ -1094,7 +1110,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
         {/* 15 秒道具商店三选一弹窗（卡通半透明精简版） */}
         {snap.phase === 'shopChoice' && snap.shopOffer && !showSetup && (
-          <div className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[2px]">
+          <div role="dialog" aria-modal="true" aria-label="古城道具商店" className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[2px]">
             <div
               className="anim-card-pop w-full max-w-[560px] rounded-[32px] border-[3px] border-white/80 bg-[#fff9f2]/72 p-4 md:p-5 backdrop-blur-md"
               style={{
@@ -1108,12 +1124,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     🏪 选 1 个道具
                   </h3>
                 </div>
-                <div className="shrink-0 rounded-full bg-amber-400/90 px-3.5 py-1 text-sm font-extrabold text-white tabular-nums shadow-sm">
+                <div aria-live="polite" className="shrink-0 rounded-full bg-amber-400/90 px-3.5 py-1 text-sm font-extrabold text-white tabular-nums shadow-sm">
                   ⏱️ {snap.shopSecondsLeft ?? 15}s
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5 md:gap-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 md:gap-3.5">
                 {snap.shopOffer.map((itemKey) => {
                   const def = ITEM_DEFS[itemKey];
                   return (

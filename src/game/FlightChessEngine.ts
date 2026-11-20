@@ -559,9 +559,12 @@ export class FlightChessEngine {
       let hit = false;
       this.diceHovered = false;
       if (this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget !== null) {
-        hit = this.targetChoices.some(
-          (c) => this.ray.intersectObject(c.plane.mesh, true).length > 0,
-        );
+        this.diceHovered = this.ray.intersectObject(this.diceRig.diceHitMesh).length > 0;
+        hit =
+          this.diceHovered ||
+          this.targetChoices.some(
+            (c) => this.ray.intersectObject(c.plane.mesh, true).length > 0,
+          );
       } else if (this.phase === 'awaitRoll' && !this.isAI()) {
         this.diceHovered = this.ray.intersectObject(this.diceRig.diceHitMesh).length > 0;
         hit = this.diceHovered;
@@ -582,6 +585,11 @@ export class FlightChessEngine {
       this.ray.setFromCamera(this.ptr, this.camera);
 
       if (this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget !== null) {
+        if (this.ray.intersectObject(this.diceRig.diceHitMesh).length > 0) {
+          this.cancelItemTarget();
+          void this.triggerActionPod();
+          return;
+        }
         const hits = this.ray.intersectObjects(
           this.planes.map((p) => p.mesh),
           true,
@@ -800,7 +808,6 @@ export class FlightChessEngine {
     this.messageKey++;
     this.emitSnapshot();
     if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
-    if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
     if (duration > 0) {
       this.msgTimer = window.setTimeout(() => {
         if (this.disposed) return;
@@ -1630,6 +1637,7 @@ export class FlightChessEngine {
     await this.sleep(1000);
     if (this.disposed) {
       this.scene.remove(rocket);
+      this.disposeObject3D(rocket);
       this.itemBusy = false;
       return;
     }
@@ -3324,6 +3332,7 @@ export class FlightChessEngine {
     });
     if (this.disposed) {
       this.scene.remove(fp);
+      this.disposeObject3D(fp);
       return;
     }
     fp.position.set(bx, 0.42, bz);
@@ -3335,6 +3344,7 @@ export class FlightChessEngine {
     for (let bIdx = 0; bIdx < boardOrder.length; bIdx++) {
       if (this.disposed) {
         this.scene.remove(fp);
+      this.disposeObject3D(fp);
         return;
       }
       const p = boardOrder[bIdx];
@@ -3422,6 +3432,7 @@ export class FlightChessEngine {
     });
     if (this.disposed) {
       this.scene.remove(fp);
+      this.disposeObject3D(fp);
       return;
     }
 
@@ -3465,6 +3476,7 @@ export class FlightChessEngine {
       }
     }).then(() => {
       this.scene.remove(fp);
+      this.disposeObject3D(fp);
     });
 
     await this.tween(260, (k) => {
@@ -3769,6 +3781,7 @@ export class FlightChessEngine {
       let dir = 1;
       for (let i = 0; i < die; i++) {
         if (curStep === HOME_END) dir = -1;
+        else if (dir === -1 && curStep <= 51) dir = 1;
         curStep += dir;
         setPos(curStep);
         if ((leftStart || leftMixedRing) && i === 0) {
@@ -3802,7 +3815,11 @@ export class FlightChessEngine {
         }
       }
       if (dir === -1) {
-        this.setMsg(`↩️ 点数超出，回弹至航道第 ${curStep - 50} 格`);
+        this.setMsg(
+          curStep > 50
+            ? `↩️ 点数超出，回弹至航道第 ${curStep - 50} 格`
+            : `↩️ 点数超出，回弹至第 ${curStep} 格`,
+        );
       }
 
       const continueAfterDirectShop = async () => {
@@ -5179,6 +5196,7 @@ export class FlightChessEngine {
           c.kind !== 'rabbit' || c.state === 'rest' || c.state === 'hop';
         if (c.ttl <= 0 && canDespawn) {
           this.scene.remove(c.g);
+          this.disposeObject3D(c.g);
           this.world.critters.splice(i, 1);
           continue;
         }
@@ -5638,6 +5656,7 @@ export class FlightChessEngine {
               const p = c.perchT;
               if (p >= 1) {
                 this.scene.remove(c.g);
+          this.disposeObject3D(c.g);
                 this.world.critters.splice(i, 1);
                 continue;
               }
@@ -5660,6 +5679,7 @@ export class FlightChessEngine {
           c.prog += dt / c.dur;
           if (c.prog >= 1) {
             this.scene.remove(c.g);
+          this.disposeObject3D(c.g);
             this.world.critters.splice(i, 1);
             continue;
           }
@@ -5771,6 +5791,7 @@ export class FlightChessEngine {
           c.prog += dt / 1.15;
           if (c.prog >= 1) {
             this.scene.remove(c.g);
+          this.disposeObject3D(c.g);
             this.world.critters.splice(i, 1);
             continue;
           }
@@ -6099,6 +6120,26 @@ export class FlightChessEngine {
     }
   }
 
+  private disposeObject3D(root: THREE.Object3D): void {
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      if (mesh.material) {
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          const std = m as THREE.MeshStandardMaterial;
+          if (std.map) std.map.dispose();
+          if (std.normalMap) std.normalMap.dispose();
+          if (std.roughnessMap) std.roughnessMap.dispose();
+          if (std.metalnessMap) std.metalnessMap.dispose();
+          if (std.emissiveMap) std.emissiveMap.dispose();
+          if (std.alphaMap) std.alphaMap.dispose();
+          m.dispose();
+        }
+      }
+    });
+  }
+
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -6107,6 +6148,7 @@ export class FlightChessEngine {
     cancelAnimationFrame(this.splashRaf);
     if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
     if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
+    if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
 
     window.removeEventListener('resize', this.boundResize);
     this.controls.removeEventListener('start', this.boundControlsStart);
@@ -6124,18 +6166,7 @@ export class FlightChessEngine {
     this.controls.dispose();
     this.envRT.dispose();
 
-    this.scene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (mesh.geometry) mesh.geometry.dispose();
-      if (mesh.material) {
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const m of mats) {
-          const std = m as THREE.MeshStandardMaterial;
-          if (std.map) std.map.dispose();
-          m.dispose();
-        }
-      }
-    });
+    this.disposeObject3D(this.scene);
 
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode === this.container) {

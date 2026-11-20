@@ -157,3 +157,26 @@
 .anim-gift-sticker {
   animation: giftStickerLife 5.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+
+@media (max-height: 540px) {
+  .hud-left-corner {
+    transform: scale(0.76);
+    transform-origin: top left;
+  }
+  .hud-right-corner {
+    transform: scale(0.84);
+    transform-origin: top right;
+  }
+  .hud-bottom-controls {
+    transform: scale(0.82);
+    transform-origin: bottom left;
+  }
+  .hud-bottom-dock {
+    transform: scale(0.78);
+    transform-origin: bottom center;
+  }
+  .hud-gift-toast {
+    top: 24% !important;
+    transform: translate(-50%, -50%) scale(0.76);
+  }
+}
