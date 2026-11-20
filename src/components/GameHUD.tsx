@@ -914,13 +914,28 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           )}
         </div>
 
-        {/* Top-Right Pill Bar: 视角下拉 | 游戏规则 | 声音 | 设置齿轮 */}
+        {/* Top-Right Pill Bar: 天色时段 | 视角下拉 | 游戏规则 | 声音 | 设置齿轮 */}
         <div
           className="hud-right-corner pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-full bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
           style={{ paddingTop: 'env(safe-area-inset-top)', paddingRight: 'env(safe-area-inset-right)' }}
           role="group"
-          aria-label="视角、规则、声音与设置"
+          aria-label="天色、视角、规则、声音与设置"
         >
+          <span
+            title="当前对局天色（随最高完赛棋子数推进）"
+            className="flex h-8 items-center gap-1 rounded-full px-2 text-[11px] md:text-xs font-bold text-slate-600 whitespace-nowrap select-none"
+          >
+            <span>
+              {snap.timeOfDay === 'morning'
+                ? '🌅 清晨'
+                : snap.timeOfDay === 'noon'
+                  ? '☀️ 中午'
+                  : snap.timeOfDay === 'afternoon'
+                    ? '🌤️ 下午'
+                    : '🌇 傍晚'}
+            </span>
+          </span>
+          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
           {/* 视角下拉按钮 */}
           <div className="relative">
             <button

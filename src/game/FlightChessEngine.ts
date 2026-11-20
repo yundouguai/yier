@@ -40,6 +40,8 @@ import {
   SEAT_ORDER,
   SLOTS,
   SeatConfig,
+  TimeOfDay,
+  TimeOfDayPreset,
   lineOf,
   toColorHex,
 } from './constants';
@@ -146,6 +148,18 @@ export class FlightChessEngine {
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
   private envRT: THREE.WebGLRenderTarget;
+  private hemiLight!: THREE.HemisphereLight;
+  private sunLight!: THREE.DirectionalLight;
+  private fillLight!: THREE.DirectionalLight;
+  private timeOfDay: TimeOfDay = 'morning';
+  private maxDoneStage = 0;
+  private todFrom: TimeOfDayPreset;
+  private todTo: TimeOfDayPreset;
+  private todBlend = 1;
+  private _todColA = new THREE.Color();
+  private _todColB = new THREE.Color();
+  private _todPosA = new THREE.Vector3();
+  private _todPosB = new THREE.Vector3();
   private isSoftwareGl: boolean;
   private quality: GraphicsQuality = 'high';
   private frameCounter = 0;
@@ -282,6 +296,8 @@ export class FlightChessEngine {
     this.container = container;
     this.mapId = mapId;
     this.mapConfig = MAPS[mapId] ?? MAPS.ancient_city;
+    this.todFrom = this.mapConfig.timePresets.morning;
+    this.todTo = this.mapConfig.timePresets.morning;
     this.onSnapshot = onSnapshot;
     this.onContextLostCb = onContextLost;
 
@@ -371,8 +387,9 @@ export class FlightChessEngine {
     this.anisotropy = this.quality === 'high' ? maxAniso : this.quality === 'medium' ? Math.min(8, maxAniso) : Math.min(4, maxAniso);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
-    this.scene.fog = new THREE.Fog(this.mapConfig.fogHex, this.mapConfig.fogNear, this.mapConfig.fogFar);
+    const initTod = this.mapConfig.timePresets.morning;
+    this.scene.background = new THREE.Color(initTod.skyBgHex);
+    this.scene.fog = new THREE.Fog(initTod.fogHex, initTod.fogNear, initTod.fogFar);
 
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     const roomEnv = new RoomEnvironment();
@@ -417,35 +434,37 @@ export class FlightChessEngine {
       this.controls.minDistance = 2;
     }
 
-    // Lighting rig (driven by MapConfig)
-    this.scene.add(
-      new THREE.HemisphereLight(
-        this.mapConfig.hemiSkyHex,
-        this.mapConfig.hemiGroundHex,
-        this.mapConfig.hemiIntensity,
-      ),
+    // Lighting rig (driven by Time-of-Day presets: morning -> noon -> afternoon -> evening)
+    this.hemiLight = new THREE.HemisphereLight(
+      initTod.hemiSkyHex,
+      initTod.hemiGroundHex,
+      initTod.hemiIntensity,
     );
-    const sun = new THREE.DirectionalLight(
-      this.mapConfig.sunColorHex,
-      this.mapConfig.sunIntensity,
+    this.scene.add(this.hemiLight);
+    this.sunLight = new THREE.DirectionalLight(
+      initTod.sunColorHex,
+      initTod.sunIntensity,
     );
-    sun.position.set(...this.mapConfig.sunPosition);
-    sun.castShadow = !this.isSoftwareGl;
+    this.sunLight.position.set(...initTod.sunPosition);
+    this.sunLight.castShadow = !this.isSoftwareGl;
     const shadowDim = this.quality === 'high' ? 2048 : this.quality === 'medium' ? 1536 : 1024;
-    sun.shadow.mapSize.set(shadowDim, shadowDim);
-    sun.shadow.camera.left = -13;
-    sun.shadow.camera.right = 13;
-    sun.shadow.camera.top = 13;
-    sun.shadow.camera.bottom = -13;
-    sun.shadow.bias = -0.0004;
-    this.scene.add(sun);
+    this.sunLight.shadow.mapSize.set(shadowDim, shadowDim);
+    this.sunLight.shadow.camera.left = -13;
+    this.sunLight.shadow.camera.right = 13;
+    this.sunLight.shadow.camera.top = 13;
+    this.sunLight.shadow.camera.bottom = -13;
+    this.sunLight.shadow.bias = -0.0004;
+    this.scene.add(this.sunLight);
 
-    const fill = new THREE.DirectionalLight(this.mapConfig.fillColorHex, this.mapConfig.fillIntensity);
-    fill.position.set(-9, 8, -6);
-    this.scene.add(fill);
+    this.fillLight = new THREE.DirectionalLight(initTod.fillColorHex, initTod.fillIntensity);
+    this.fillLight.position.set(-9, 8, -6);
+    this.scene.add(this.fillLight);
 
     // World & Pieces
     this.world = buildWorldByMapId(this.mapId, this.scene, this.players, this.anisotropy);
+    this.world.lanternMats?.forEach((m) => {
+      m.emissiveIntensity = initTod.lanternEmissive;
+    });
     this.shopRingSet = new Set(this.world.shopRingIndices);
     this.playerItems = this.players.map(() => ({
       sixDie: 0,
@@ -998,6 +1017,7 @@ export class FlightChessEngine {
 
     this.onSnapshot({
       mapId: this.mapId,
+      timeOfDay: this.timeOfDay,
       phase: this.phase,
       turn: this.turn,
       die: this.die,
@@ -1413,6 +1433,10 @@ export class FlightChessEngine {
       | 'reply'
       | 'preRoll'
       | 'preMove'
+      | 'preStomp'
+      | 'preFly'
+      | 'preTakeoff'
+      | 'preGoal'
       | 'watchHuman'
       | 'bystander',
     cooldownMs = 2600,
@@ -1450,21 +1474,21 @@ export class FlightChessEngine {
       },
       chill: {
         talkRate: 0.42,
-        followUpRate: 0.24,
+        followUpRate: 0.14,
         delayRange: [1700, 4600],
         replyRate: 0.62,
-        ambientRate: 0.20,
+        ambientRate: 0.14,
       },
       rusher: {
         talkRate: 0.80,
-        followUpRate: 0.40,
+        followUpRate: 0.20,
         delayRange: [600, 2400],
         replyRate: 0.50,
-        ambientRate: 0.42,
+        ambientRate: 0.16,
       },
       tactician: {
         talkRate: 0.54,
-        followUpRate: 0.22,
+        followUpRate: 0.14,
         delayRange: [1100, 3600],
         replyRate: 0.46,
         ambientRate: 0.24,
@@ -1475,7 +1499,7 @@ export class FlightChessEngine {
     const baseRate =
       kind === 'reply'
         ? cfg.replyRate
-        : kind === 'preRoll' || kind === 'preMove' || kind === 'watchHuman' || kind === 'bystander'
+        : kind === 'preRoll' || kind === 'preMove' || kind === 'watchHuman' || kind === 'bystander' || kind === 'preTakeoff'
           ? cfg.ambientRate
           : cfg.talkRate;
     const prob = Math.min(0.96, baseRate * (opts?.probMult ?? 1));
@@ -1489,8 +1513,8 @@ export class FlightChessEngine {
           '📝 这笔账先记下，待会儿算！',
         ],
         gotMissiled: [
-          `🚀 好啊 ${targetName ?? ''}，导弹我也记下了！`,
-          '😠 炸我一次，后面别让我逮到！',
+          `🥧 好啊 ${targetName ?? ''}，这记奶油派我记下了！`,
+          '😠 糊我一脸奶油？别让我逮到！',
         ],
         stompedEnemy: ['😏 别挡我的道！', '💥 让你尝尝被踩的滋味'],
         stompRevenge: [
@@ -1498,17 +1522,21 @@ export class FlightChessEngine {
           '😈 君子报仇，十步不晚！',
         ],
         fireMissile: [
-          `🚀 ${targetName ?? ''}，吃我一记导弹！`,
+          `🥧 ${targetName ?? ''}，接我一记恶作剧奶油派！`,
           '💢 新仇旧恨一起算！',
         ],
         useSpeedItem: ['🔥 全速追上去算账！', '😠 别想跑太远！'],
-        useShield: ['🛡️ 先套个盾，免得被偷袭'],
+        useShield: ['🫧 先套个泡泡罩，免得被偷袭'],
         shopPick: ['🏪 这张卡正好用得上~', '😏 准备好了，谁惹我试试'],
         goal: ['🏁 先下一城，账照样算！', '🔥 顺利进站！'],
         reply: ['👀 别笑，我小本本可记着呢', '💢 好好飞，别惹我！', '😤 看我待会儿怎么追'],
         preRoll: ['😠 这把骰子给点力，我要追人', '👀 让我看看谁跑最前面...', '🔥 来个大点数！'],
-        preMove: ['😏 嘿嘿，前面那位小心点', '💥 刚好够着，准备踩人咯'],
-        watchHuman: ['👀 你可别踩到我前面啊', '💢 走快点，我盯着你呢', '📝 我记性好着呢，别乱炸我'],
+        preMove: ['😠 往前挪几步，盯着你们呢', '👀 先占个好位置'],
+        preStomp: ['😏 嘿嘿，前面那位小心点', '💥 刚好够着，准备踩人咯'],
+        preFly: ['🔥 顺风起飞，马上追上你们！'],
+        preTakeoff: ['😠 终于出门了，刚才的账慢慢算！'],
+        preGoal: ['🔥 这只先稳稳进终点！'],
+        watchHuman: ['👀 你可别踩到我前面啊', '💢 走快点，我盯着你呢', '📝 我记性好着呢，别乱丢奶油派'],
         bystander: ['😈 哈哈，有人要记仇咯', '👀 幸好没波及到我', '🔥 场面越来越热闹了'],
       },
       chill: {
@@ -1517,17 +1545,21 @@ export class FlightChessEngine {
           '🌸 缘分呐，让你先走',
           '😌 佛系不生气，重在参与~',
         ],
-        gotMissiled: ['🍵 哎呀后退几步正好看看风景~', '🌿 随缘啦，不急着到终点'],
+        gotMissiled: ['🥧 哎呀奶油挺甜的，顺便退几步看风景~', '🌿 随缘啦，不急着到终点'],
         stompedEnemy: ['🙏 哎呀不好意思撞到了~', '😅 纯属巧合，手下留情'],
         stompRevenge: ['🙏 缘分又撞一起啦~', '😅 抱歉抱歉~'],
-        fireMissile: ['🙏 跑太快啦，稍微拦一下下~', '🍵 抱歉借过，小小减速一下'],
+        fireMissile: ['🥧 跑太快啦，请吃块奶油派歇歇~', '🍵 抱歉借过，小小减速一下'],
         useSpeedItem: ['🌿 顺风散步去咯~', '✨ 随缘加速，慢慢晃悠'],
-        useShield: ['🛡️ 戴个平安符，安稳过日子', '🍵 安全第一，慢慢来~'],
-        shopPick: ['🍰 顺路逛个蛋糕店真惬意~', '🌸 随便挑张顺眼的'],
-        goal: ['🏁 慢慢晃也到家啦~', '🍵 一架到站，真悠闲~'],
+        useShield: ['🫧 洗个泡泡澡，安稳过日子~', '🍵 安全第一，慢慢来~'],
+        shopPick: ['🍰 顺路逛个小卖部真惬意~', '🌸 随便挑张顺眼的'],
+        goal: ['🏁 慢慢晃也到家啦~', '🍵 一只到站，真悠闲~'],
         reply: ['🍵 哈哈开心就好~', '🌸 慢慢飞，不着急~', '✨ 快乐飞行棋第一名~'],
         preRoll: ['🍵 随便掷个几都行~', '🌸 佛系摇骰，重在开心', '😌 来个不紧不慢的点数吧'],
         preMove: ['🌿 慢慢走，安全最要紧', '🍵 晃悠晃悠往前挪几步~'],
+        preStomp: ['😅 哎呀刚好落在这格，对不住啦~'],
+        preFly: ['🌸 哇，顺便搭个便车飞一程~'],
+        preTakeoff: ['🍵 出门晒晒太阳散步去~'],
+        preGoal: ['🌸 慢慢悠悠到终点啦~'],
         watchHuman: ['🍵 慢慢想不着急，先喝口茶~', '🌸 局势挺平和的嘛', '😌 开心玩，赢不赢随缘~'],
         bystander: ['🍵 哈哈好热闹呀~', '🌸 大家飞得都挺欢乐嘛', '😌 和气生财，和气生财~'],
       },
@@ -1536,34 +1568,42 @@ export class FlightChessEngine {
           '😤 别想拖慢我的速度！',
           '⚡ 可恶！马上冲回来！',
         ],
-        gotMissiled: ['💢 居然拖我节奏！加倍追回去！', '⚡ 拦不住我的！'],
+        gotMissiled: ['🥧 居然拿奶油派拖我节奏！加倍追回去！', '⚡ 拦不住我的！'],
         stompedEnemy: ['💥 挡路者通通回基地！', '⚡ 借过借过，我要冲第一！'],
         stompRevenge: ['💥 顺手清场！继续冲刺！', '⚡ 挡我速通？下去吧！'],
-        fireMissile: ['🚀 领跑的给我慢下来！', '⚡ 第一名必须是我的！'],
+        fireMissile: ['🥧 领跑的给我慢下来！', '⚡ 第一名必须是我的！'],
         useSpeedItem: ['⚡ 全速冲刺！速战速决！', '🔥 加速拉满，直奔终点！'],
-        useShield: ['🛡️ 护住主力继续猛冲！'],
+        useShield: ['🫧 套个泡泡继续猛冲！'],
         shopPick: ['🏪 好卡到手，继续抢跑！', '⚡ 提速卡真香！'],
-        goal: ['🏁 又进一架！光速冲线！', '⚡ 距离夺冠更近一步！'],
+        goal: ['🏁 又进一只！光速冲线！', '⚡ 距离夺冠更近一步！'],
         reply: ['⚡ 少聊两句，看我速通！', '🔥 我只想最快结束这局！', '💨 冲就完事了！'],
-        preRoll: ['⚡ 来个6！直接起飞！', '🔥 快快快，给我出大点数！', '💨 这回合直接甩开你们'],
-        preMove: ['⚡ 让开让开，我冲过来了！', '🔥 飞过去！节奏起飞！'],
-        watchHuman: ['⚡ 快点投呀兄弟，急死我了！', '🔥 别纠结啦，冲鸭！', '💨 我下一把直接起飞'],
-        bystander: ['🔥 打起来打起来！', '⚡ 好机会！趁乱往前冲！', '💨 你们互炸，我偷跑咯'],
+        preRoll: ['🔥 快快快，给我出大点数！', '💨 这回合直接甩开你们'],
+        preMove: ['⚡ 往前冲！节奏不能停！', '💨 继续提速！'],
+        preStomp: ['⚡ 让开让开，直接踩过去！', '💥 挡我路的通通闪开！'],
+        preFly: ['🔥 飞过去！节奏起飞！', '⚡ 顺风大跳，甩开大部队！'],
+        preTakeoff: ['⚡ 出发！全速起跑！'],
+        preGoal: ['🏁 直接冲线进终点！'],
+        watchHuman: ['⚡ 快点投呀，急死我了！', '🔥 别纠结啦，冲鸭！'],
+        bystander: ['🔥 打起来打起来！', '⚡ 好机会！趁乱往前冲！', '💨 你们互丢奶油派，我偷跑咯'],
       },
       tactician: {
         gotStomped: ['🧠 有意思，重新算一下最优解', '📊 小小失误，问题不大'],
-        gotMissiled: ['🧠 被针对了？说明我领先太多', '📊 调整节奏，稳住局面'],
+        gotMissiled: ['🥧 被针对了？说明我领先太多', '📊 调整节奏，稳住局面'],
         stompedEnemy: ['🎯 精准算步，顺路清障！', '🧠 这一步收益拉满'],
         stompRevenge: ['🎯 精准反制', '🧠 正好顺路送你回基地'],
-        fireMissile: ['🚀 精准打击领跑位！', '🎯 这一发导弹性价比很高'],
+        fireMissile: ['🥧 精准打击领跑位！', '🎯 这一记奶油派性价比很高'],
         useSpeedItem: ['🧠 算准格子，直接拿下！', '📊 节奏把控中~'],
-        useShield: ['🛡️ 关键位置先上双保险'],
+        useShield: ['🫧 关键位置先套一层泡泡保险'],
         shopPick: ['🧠 补一张关键功能卡', '📊 这张卡最契合当前局势'],
-        goal: ['🏁 按计划稳步收官！', '🧠 一架稳稳落袋'],
+        goal: ['🏁 按计划稳步收官！', '🧠 一只稳稳落袋'],
         reply: ['🧠 一切都在计算之中', '📊 小心走位哦~', '🎯 看看谁的节奏更稳'],
         preRoll: ['🧠 算下概率，出 4 以上最舒服', '📊 稳扎稳打，看这步怎么落子', '🎯 希望骰子配合一下计算'],
-        preMove: ['🧠 这一步落点最合理', '🎯 刚好踩点，收益不错'],
-        watchHuman: ['🧠 这步挺关键的，好好选', '📊 后面有追兵，注意防踩哦', '🧠 道具留着后面用收益更大'],
+        preMove: ['🧠 这一步落点最合理', '📊 稳步推进，控制风险'],
+        preStomp: ['🎯 刚好踩点，顺路清障！'],
+        preFly: ['🧠 踩中同色连跳，收益拉满！'],
+        preTakeoff: ['🧠 先派一只出基地占节奏'],
+        preGoal: ['🎯 精准卡步，直接进终点！'],
+        watchHuman: ['🧠 这步挺关键的，好好选', '📊 局势挺微妙，看你怎么走'],
         bystander: ['📊 这波博弈有点意思', '🧠 局势瞬间反转了', '🎯 关键道具都交得挺准'],
       },
     };
@@ -3144,11 +3184,36 @@ export class FlightChessEngine {
     if (this.isAI()) {
       this.emitSnapshot();
       const picked = this.aiPick(cands);
-      // 落子前有概率提前说一句（如准备踩人/冲刺）
-      this.emitAiEmote(this.turn, 'preMove', 2600, undefined, {
-        probMult: 1.0,
-        delayMinMs: 250,
-        delayMaxMs: 850,
+      // 严格根据本步真实落点结果选择发言，绝不乱喊“踩人/起飞/大跳”
+      const P = this.players[this.turn];
+      let moveEmoteKind: 'preTakeoff' | 'preGoal' | 'preStomp' | 'preFly' | 'preMove' = 'preMove';
+      let moveProbMult = 0.55;
+      if (picked.plane.pos === -1) {
+        moveEmoteKind = 'preTakeoff';
+        moveProbMult = 0.9;
+      } else {
+        const sim = this.simulateMoveOutcome(picked.plane, die);
+        const willStomp = sim.ringStops.some((sp) => {
+          const rIdx = (P.start + 2 + sp) % 52;
+          return this.planes.some(
+            (q) => q.pid !== this.turn && q.pos >= 1 && q.pos <= 50 && this.ringIndexOf(q) === rIdx,
+          );
+        });
+        if (sim.pos === HOME_END) {
+          moveEmoteKind = 'preGoal';
+          moveProbMult = 1.0;
+        } else if (willStomp) {
+          moveEmoteKind = 'preStomp';
+          moveProbMult = 1.05;
+        } else if (sim.fly || sim.jump) {
+          moveEmoteKind = 'preFly';
+          moveProbMult = 0.95;
+        }
+      }
+      this.emitAiEmote(this.turn, moveEmoteKind, 3200, undefined, {
+        probMult: moveProbMult,
+        delayMinMs: 220,
+        delayMaxMs: 780,
         requireTurnSeq: this.turnSeq,
         allowFollowUp: false,
       });
@@ -4106,6 +4171,7 @@ export class FlightChessEngine {
         });
       }
       await Promise.all(stack.map((p) => this.celebrateGoal(p)));
+      this.syncTimeOfDay();
     }
     this.relayout();
     this.emitSnapshot();
@@ -4573,6 +4639,79 @@ export class FlightChessEngine {
     }
   }
 
+  private syncTimeOfDay(): void {
+    const maxDone = Math.max(
+      0,
+      ...this.players.map((_, pid) => this.planesOf(pid).filter((p) => p.pos === HOME_END).length),
+    );
+    const stage = Math.min(3, maxDone);
+    if (stage <= this.maxDoneStage) return;
+    this.maxDoneStage = stage;
+    const order: TimeOfDay[] = ['morning', 'noon', 'afternoon', 'evening'];
+    const nextTod = order[stage];
+    this.todFrom = this.mapConfig.timePresets[this.timeOfDay];
+    this.todTo = this.mapConfig.timePresets[nextTod];
+    this.timeOfDay = nextTod;
+    this.todBlend = 0;
+
+    const banners: Record<TimeOfDay, string> = {
+      morning: '🌅 清晨微光，对局开始',
+      noon: '☀️ 天色渐亮，进入正午时分！',
+      afternoon: '🌤️ 午后暖阳，棋局渐入佳境！',
+      evening: '🌇 夕阳西下，古城灯火亮起，进入决胜傍晚！',
+    };
+    this.setMsg(banners[nextTod], '#f59e0b', 3600);
+    this.emitSnapshot();
+  }
+
+  private applyTimeOfDayLerp(k: number): void {
+    const ease = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+    const A = this.todFrom;
+    const B = this.todTo;
+
+    if (this.scene.background instanceof THREE.Color) {
+      this._todColA.setHex(A.skyBgHex);
+      this._todColB.setHex(B.skyBgHex);
+      this.scene.background.copy(this._todColA).lerp(this._todColB, ease);
+    }
+    if (this.scene.fog instanceof THREE.Fog) {
+      this._todColA.setHex(A.fogHex);
+      this._todColB.setHex(B.fogHex);
+      this.scene.fog.color.copy(this._todColA).lerp(this._todColB, ease);
+      this.scene.fog.near = THREE.MathUtils.lerp(A.fogNear, B.fogNear, ease);
+      this.scene.fog.far = THREE.MathUtils.lerp(A.fogFar, B.fogFar, ease);
+    }
+
+    this._todColA.setHex(A.hemiSkyHex);
+    this._todColB.setHex(B.hemiSkyHex);
+    this.hemiLight.color.copy(this._todColA).lerp(this._todColB, ease);
+    this._todColA.setHex(A.hemiGroundHex);
+    this._todColB.setHex(B.hemiGroundHex);
+    this.hemiLight.groundColor.copy(this._todColA).lerp(this._todColB, ease);
+    this.hemiLight.intensity = THREE.MathUtils.lerp(A.hemiIntensity, B.hemiIntensity, ease);
+
+    this._todColA.setHex(A.sunColorHex);
+    this._todColB.setHex(B.sunColorHex);
+    this.sunLight.color.copy(this._todColA).lerp(this._todColB, ease);
+    this.sunLight.intensity = THREE.MathUtils.lerp(A.sunIntensity, B.sunIntensity, ease);
+    this._todPosA.set(...A.sunPosition);
+    this._todPosB.set(...B.sunPosition);
+    this.sunLight.position.copy(this._todPosA).lerp(this._todPosB, ease);
+
+    this._todColA.setHex(A.fillColorHex);
+    this._todColB.setHex(B.fillColorHex);
+    this.fillLight.color.copy(this._todColA).lerp(this._todColB, ease);
+    this.fillLight.intensity = THREE.MathUtils.lerp(A.fillIntensity, B.fillIntensity, ease);
+
+    const lantVal = THREE.MathUtils.lerp(A.lanternEmissive, B.lanternEmissive, ease);
+    this.world.lanternMats?.forEach((m) => {
+      m.emissiveIntensity = lantVal;
+    });
+    if (!this.isSoftwareGl) {
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+  }
+
   private stepFrame(): void {
     if (this.isContextLost) {
       this.clock.getDelta();
@@ -4592,6 +4731,10 @@ export class FlightChessEngine {
 
     if (!this.paused) {
       this.timeMs += dt * 1000;
+      if (this.todBlend < 1) {
+        this.todBlend = Math.min(1, this.todBlend + dt / 3.0);
+        this.applyTimeOfDayLerp(this.todBlend);
+      }
       if (this.deadline !== null && this.timeMs >= this.deadline && !this.itemBusy) {
         this.deadline = null;
         if (this.phase === 'awaitRoll' && !this.isAI()) {

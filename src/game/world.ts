@@ -207,6 +207,7 @@ export interface WorldRefs {
   moatTex?: THREE.CanvasTexture;
   waterNormalTex?: THREE.DataTexture;
   waterUniforms?: { uTime: { value: number } };
+  lanternMats?: THREE.MeshStandardMaterial[];
   waterY: number;
   rideToys: RideToyAnim[];
   planeMarks: THREE.Group[];
@@ -1377,6 +1378,7 @@ export function buildAncientWorld(
 
   /* ================= 2. 森林、垂柳、樱花、灌木、野花与小蘑菇 ================= */
   const petals: PetalAnim[] = [];
+  const lanternMats: THREE.MeshStandardMaterial[] = [];
   {
     const barkMat = mat(0x6e4b35, 0.9);
     const darkBarkMat = mat(0x523626, 0.92);
@@ -1875,6 +1877,7 @@ export function buildAncientWorld(
       emissiveIntensity: 0.78,
       roughness: 0.4,
     });
+      lanternMats.push(lantMat);
     // 预先旋转四棱锥使其底边严格平行于 X/Z 轴，避免缩放后旋转产生倾斜菱形畸变
     const hipRoofGeo = new THREE.ConeGeometry(1, 1, 4);
     hipRoofGeo.rotateY(Math.PI / 4);
@@ -2345,6 +2348,7 @@ export function buildAncientWorld(
         emissiveIntensity: 0.86,
         roughness: 0.35,
       });
+      lanternMats.push(treeLantMat);
       const cordMat = mat(0x52341c, 0.7);
       const lanternBodyGeo = new THREE.SphereGeometry(0.06, 12, 9);
       const lanternCapGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.013, 8);
@@ -3607,6 +3611,7 @@ export function buildAncientWorld(
       emissiveIntensity: 0.75,
       roughness: 0.4,
     });
+      lanternMats.push(lantMat);
     for (const lx of [-1, 1]) {
       for (const lz of [-1, 1]) {
         const l = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), lantMat);
@@ -4729,6 +4734,7 @@ export function buildAncientWorld(
       emissiveIntensity: 0.9,
       roughness: 0.35,
     });
+      lanternMats.push(lantMat);
 
     const addCuteFace = (parent: THREE.Group, headY: number, zOff: number, refined = false) => {
       for (const sx of [-1, 1]) {
@@ -5190,6 +5196,7 @@ export function buildAncientWorld(
     moatTex,
     waterNormalTex,
     waterUniforms,
+    lanternMats,
     waterY: WATER_Y,
     rideToys,
     planeMarks,

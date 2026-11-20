@@ -241,6 +241,26 @@ export interface HudPlayerSnapshot {
   quest: PlayerQuestState;
 }
 
+export type TimeOfDay = 'morning' | 'noon' | 'afternoon' | 'evening';
+
+export interface TimeOfDayPreset {
+  label: string;
+  icon: string;
+  skyBgHex: number;
+  fogHex: number;
+  fogNear: number;
+  fogFar: number;
+  hemiSkyHex: number;
+  hemiGroundHex: number;
+  hemiIntensity: number;
+  sunColorHex: number;
+  sunIntensity: number;
+  sunPosition: [number, number, number];
+  fillColorHex: number;
+  fillIntensity: number;
+  lanternEmissive: number;
+}
+
 export type MapId = 'ancient_city';
 
 export interface MapConfig {
@@ -263,6 +283,7 @@ export interface MapConfig {
   fillIntensity: number;
   enablePoemBubbles: boolean;
   enableCritterSpawns: boolean;
+  timePresets: Record<TimeOfDay, TimeOfDayPreset>;
 }
 
 export const MAP_ORDER: MapId[] = ['ancient_city'];
@@ -288,6 +309,76 @@ export const MAPS: Record<MapId, MapConfig> = {
     fillIntensity: 0.34,
     enablePoemBubbles: true,
     enableCritterSpawns: true,
+    timePresets: {
+      morning: {
+        label: '清晨',
+        icon: '🌅',
+        skyBgHex: 0xd8ece9,
+        fogHex: 0xd8ece9,
+        fogNear: 42,
+        fogFar: 96,
+        hemiSkyHex: 0xf4fbff,
+        hemiGroundHex: 0x8ea884,
+        hemiIntensity: 0.72,
+        sunColorHex: 0xffe9c2,
+        sunIntensity: 1.22,
+        sunPosition: [14, 10, 6],
+        fillColorHex: 0xcbe4f6,
+        fillIntensity: 0.36,
+        lanternEmissive: 0.28,
+      },
+      noon: {
+        label: '中午',
+        icon: '☀️',
+        skyBgHex: 0xcfe7f5,
+        fogHex: 0xd7ecf7,
+        fogNear: 52,
+        fogFar: 118,
+        hemiSkyHex: 0xffffff,
+        hemiGroundHex: 0x90ad78,
+        hemiIntensity: 0.78,
+        sunColorHex: 0xfff5dc,
+        sunIntensity: 1.42,
+        sunPosition: [5, 19, 4],
+        fillColorHex: 0xd4e8f8,
+        fillIntensity: 0.38,
+        lanternEmissive: 0.16,
+      },
+      afternoon: {
+        label: '下午',
+        icon: '🌤️',
+        skyBgHex: 0xf2e2c9,
+        fogHex: 0xf0dfca,
+        fogNear: 48,
+        fogFar: 110,
+        hemiSkyHex: 0xfff0d4,
+        hemiGroundHex: 0x969d6e,
+        hemiIntensity: 0.72,
+        sunColorHex: 0xffd29d,
+        sunIntensity: 1.34,
+        sunPosition: [-10, 13, 7],
+        fillColorHex: 0xd9d8ee,
+        fillIntensity: 0.34,
+        lanternEmissive: 0.58,
+      },
+      evening: {
+        label: '傍晚',
+        icon: '🌇',
+        skyBgHex: 0xf0c0a0,
+        fogHex: 0xeab698,
+        fogNear: 44,
+        fogFar: 100,
+        hemiSkyHex: 0xffcfb0,
+        hemiGroundHex: 0x6f687a,
+        hemiIntensity: 0.66,
+        sunColorHex: 0xff9e64,
+        sunIntensity: 1.26,
+        sunPosition: [-16, 7, 9],
+        fillColorHex: 0x9eb2e0,
+        fillIntensity: 0.42,
+        lanternEmissive: 1.45,
+      },
+    },
   },
 };
 
@@ -308,6 +399,7 @@ export interface HudEmoteEvent {
 
 export interface GameHudSnapshot {
   mapId: MapId;
+  timeOfDay: TimeOfDay;
   phase: GamePhase;
   turn: number;
   die: number | null;

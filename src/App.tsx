@@ -49,6 +49,7 @@ function parseUrlSeats(): { seats: SeatConfig[]; hasParam: boolean } {
 
 const INITIAL_SNAPSHOT: GameHudSnapshot = {
   mapId: 'ancient_city',
+  timeOfDay: 'morning',
   phase: 'idle',
   turn: 0,
   die: null,
