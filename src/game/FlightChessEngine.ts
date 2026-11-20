@@ -223,6 +223,8 @@ export class FlightChessEngine {
   private splashCharKey: CharKey = 'yier';
   private splashColor = '#3aa66b';
   private splashVisible = false;
+  private splashItem: ItemType | null = null;
+  private splashKey = 0;
   private splashTimer: number | null = null;
   private splashRaf = 0;
   private shakeKey = 0;
@@ -841,6 +843,7 @@ export class FlightChessEngine {
     this.splashCharKey = P.key;
     this.splashText = isBonus ? `再掷一次！${P.name}` : `轮到你啦！${P.name}`;
     this.splashColor = P.uiColor;
+    this.splashItem = null;
     this.splashVisible = true;
     this.emitSnapshot();
     cancelAnimationFrame(this.splashRaf);
@@ -865,6 +868,7 @@ export class FlightChessEngine {
     this.splashCharKey = P.key;
     this.splashText = `🏪 ${P.name} 购买了「${def.name}」· ${def.shortEffect}`;
     this.splashColor = def.accentColor;
+    this.splashItem = null;
     this.splashVisible = true;
     this.emitSnapshot();
     cancelAnimationFrame(this.splashRaf);
@@ -874,6 +878,7 @@ export class FlightChessEngine {
       this.splashTimer = window.setTimeout(() => {
         if (this.disposed) return;
         this.splashVisible = false;
+        this.splashItem = null;
         this.emitSnapshot();
       }, durationMs);
     });
@@ -890,6 +895,8 @@ export class FlightChessEngine {
     this.splashCharKey = P.key;
     this.splashText = `${def.icon} ${P.name} 使用「${def.name}」· ${detail ?? def.shortEffect}`;
     this.splashColor = def.accentColor;
+    this.splashItem = item;
+    this.splashKey++;
     this.splashVisible = true;
     this.emitSnapshot();
     cancelAnimationFrame(this.splashRaf);
@@ -982,6 +989,8 @@ export class FlightChessEngine {
       splashCharKey: this.splashCharKey,
       splashColor: this.splashColor,
       splashVisible: this.splashVisible,
+      splashItem: this.splashItem,
+      splashKey: this.splashKey,
       shakeKey: this.shakeKey,
       winnerPid: this.winnerPid,
       rankings: this.getRankings(),
@@ -1657,7 +1666,7 @@ export class FlightChessEngine {
     rocket.position.copy(startVec);
     this.scene.add(rocket);
 
-    this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了道具导弹！`, P.uiColor);
+    this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了恶作剧奶油派！`, P.uiColor);
     this.showItemSplash(P, 'missile', `锁定 ${T.name}！`, 2400);
     await this.sleep(1000);
     if (this.disposed) {
@@ -2017,7 +2026,7 @@ export class FlightChessEngine {
         inv.sixDie -= 1;
         this.armedSixDie = true;
         this.turnUsedAtkDef = true;
-        this.setMsg(`🎲 ${P.name} 使用了「6数骰」！`, P.uiColor);
+        this.setMsg(`🎲 ${P.name} 使用了「幸运草莓蛋糕」！`, P.uiColor);
         this.showItemSplash(P, 'sixDie');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
         this.emitSnapshot();
@@ -2028,7 +2037,7 @@ export class FlightChessEngine {
         inv.refuel -= 1;
         this.armedRefuel = true;
         this.turnUsedAtkDef = true;
-        this.setMsg(`⛽ ${P.name} 使用了「空中加油机」！`, P.uiColor);
+        this.setMsg(`⛽ ${P.name} 使用了「再来一口小饼干」！`, P.uiColor);
         this.showItemSplash(P, 'refuel');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
         this.emitSnapshot();
@@ -2039,7 +2048,7 @@ export class FlightChessEngine {
         inv.twinDice -= 1;
         this.armedTwinDice = true;
         this.turnUsedAtkDef = true;
-        this.setMsg(`⚙️ ${P.name} 启动了「动力装置」！`, P.uiColor);
+        this.setMsg(`⚙️ ${P.name} 启动了「双倍珍珠奶茶」！`, P.uiColor);
         this.showItemSplash(P, 'twinDice');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
         this.emitSnapshot();
@@ -2268,7 +2277,7 @@ export class FlightChessEngine {
       this.targetChoices = [];
       this.clearHL();
       beep(660, 0.1, 'triangle', 0.14);
-      this.setMsg('🎲 已激活「6数骰」，下次掷骰必出 6 点（无连投）！');
+      this.setMsg('🎲 已激活「幸运草莓蛋糕」，下次掷骰必出 6 点（无连投）！');
       this.showItemSplash(this.cur(), 'sixDie');
       this.emitSnapshot();
       return;
@@ -2283,7 +2292,7 @@ export class FlightChessEngine {
       this.targetChoices = [];
       this.clearHL();
       beep(620, 0.1, 'triangle', 0.14);
-      this.setMsg('⚙️ 已激活「动力装置」，下次同时掷两颗骰子！');
+      this.setMsg('⚙️ 已激活「双倍珍珠奶茶」，下次同时掷两颗骰子！');
       this.showItemSplash(this.cur(), 'twinDice');
       this.emitSnapshot();
       return;
@@ -2298,7 +2307,7 @@ export class FlightChessEngine {
       this.targetChoices = [];
       this.clearHL();
       beep(700, 0.1, 'triangle', 0.14);
-      this.setMsg('⛽ 已激活「空中加油机」，本次移动后将多一次投骰！');
+      this.setMsg('⛽ 已激活「再来一口小饼干」，本次移动后将多一次投骰！');
       this.showItemSplash(this.cur(), 'refuel');
       this.emitSnapshot();
       return;
@@ -3015,9 +3024,9 @@ export class FlightChessEngine {
       }
       this.recordRollQuest(this.turn, [d1, d2]);
       if (d1 === 6 || d2 === 6) {
-        this.setMsg(`⚙️ 动力装置掷出 ${d1} + ${d2} = ${this.die} 点（含 6 无连投）`);
+        this.setMsg(`⚙️ 双倍珍珠奶茶掷出 ${d1} + ${d2} = ${this.die} 点（含 6 无连投）`);
       } else {
-        this.setMsg(`⚙️ 动力装置掷出 ${d1} + ${d2} = ${this.die} 点`);
+        this.setMsg(`⚙️ 双倍珍珠奶茶掷出 ${d1} + ${d2} = ${this.die} 点`);
       }
       this.emitSnapshot();
       await this.onRolled(this.die, d1 >= 5 || d2 >= 5);

@@ -68,6 +68,8 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   splashCharKey: 'yier',
   splashColor: '#3aa66b',
   splashVisible: false,
+  splashItem: null,
+  splashKey: 0,
   shakeKey: 0,
   winnerPid: null,
   rankings: [],

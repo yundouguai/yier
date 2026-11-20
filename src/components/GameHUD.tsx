@@ -292,20 +292,33 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* Turn splash banner for human turns */}
+      {/* Turn / Item splash banner + floating Yier & Bubu item sticker */}
       <div
-        className={`pointer-events-none fixed left-1/2 top-[24%] md:top-[22%] z-[20] flex items-center gap-2.5 max-w-[calc(100vw-24px)] rounded-[22px] bg-white/95 px-6 py-3 text-lg md:text-[22px] font-extrabold text-slate-800 transition-all duration-200 ${
+        className={`pointer-events-none fixed left-1/2 top-[26%] md:top-[24%] z-[20] flex flex-col items-center gap-1.5 max-w-[calc(100vw-24px)] transition-all duration-200 ${
           snap.splashVisible
             ? 'opacity-100 -translate-x-1/2 -translate-y-1/2 scale-100'
             : 'opacity-0 -translate-x-1/2 -translate-y-1/2 scale-90'
         }`}
-        style={{
-          border: `3px solid ${snap.splashColor}`,
-          boxShadow: `0 18px 46px rgba(0,0,0,0.24), 0 0 0 6px ${snap.splashColor}33`,
-        }}
       >
-        <CharacterAvatar charKey={snap.splashCharKey} size={34} />
-        <span>{snap.splashText}</span>
+        {snap.splashVisible && snap.splashItem && (
+          <img
+            key={`item-sticker-${snap.splashKey}`}
+            src={`./assets/item_${snap.splashItem}.gif?v=${snap.splashKey}`}
+            alt={ITEM_DEFS[snap.splashItem].name}
+            className="h-28 w-28 md:h-32 md:w-32 shrink-0 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.24)]"
+          />
+        )}
+        <div
+          className="flex items-center gap-2.5 rounded-full bg-white/88 px-5 py-2 text-sm sm:text-base md:text-lg font-extrabold text-slate-800 backdrop-blur-sm"
+          style={{
+            border: `2.5px solid ${snap.splashColor}`,
+            boxShadow: `0 12px 32px rgba(0,0,0,0.2), 0 0 0 4px ${snap.splashColor}28`,
+          }}
+        >
+          <CharacterAvatar charKey={snap.splashCharKey} size={28} />
+          {snap.splashItem && <ItemIcon item={snap.splashItem} size={22} />}
+          <span>{snap.splashText}</span>
+        </div>
       </div>
 
       <div className="pointer-events-none fixed inset-0 z-10">
@@ -447,10 +460,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
           {/* 队伍栏下方：极简透明纯文字任务栏（文字内容保持不变） */}
           <div
-            className="pointer-events-auto w-[160px] md:w-[190px] px-1"
+            className="pointer-events-auto w-[166px] md:w-[194px] rounded-xl border border-white/45 bg-white/48 px-2 py-1.5 backdrop-blur-[4px]"
             style={{
-              textShadow:
-                '0 1px 2px rgba(255,255,255,0.95), 0 0 6px rgba(255,255,255,0.88)',
+              textShadow: '0 1px 2px rgba(255,255,255,0.8)',
             }}
           >
             <button
@@ -596,7 +608,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               )}
               {snap.armedRefuel && (
                 <span className="rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-extrabold text-emerald-800 border border-emerald-300">
-                  ⛽ 加油机生效中（+1次投骰）
+                  🍪 再来一口小饼干生效中（+1次投骰）
                 </span>
               )}
 
@@ -814,12 +826,16 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               }}
               title="切换视角（快捷键 V）"
               aria-expanded={camMenuOpen}
-              className="flex h-8 items-center gap-1 rounded-full bg-[#2c9a60] px-3 text-[11px] md:text-xs font-bold text-white shadow-xs transition-colors hover:bg-[#258552] whitespace-nowrap cursor-pointer"
+              className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+                camMenuOpen
+                  ? 'bg-slate-100 text-slate-900'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
             >
               <span>
                 {snap.camMode === 'follow' ? '跟随' : snap.camMode === 'top' ? '俯视' : '自由'}
               </span>
-              <span className="text-[10px] opacity-90">{camMenuOpen ? '▴' : '▾'}</span>
+              <span className="text-[10px] text-slate-400">{camMenuOpen ? '▴' : '▾'}</span>
             </button>
 
             {camMenuOpen && (
@@ -1149,7 +1165,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <div className="flex items-center gap-2.5">
                   <CharacterAvatar charKey={shopPlayer.charKey} size={36} />
                   <h3 className="text-base md:text-lg font-extrabold text-slate-800 drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)]">
-                    🏪 选 1 个道具
+                    🏪 一二布布的小卖部 · 选 1 个
                   </h3>
                 </div>
                 <div aria-live="polite" className="shrink-0 rounded-full bg-amber-400/90 px-3.5 py-1 text-sm font-extrabold text-white tabular-nums shadow-sm">
