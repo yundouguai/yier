@@ -59,9 +59,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [camMenuOpen, setCamMenuOpen] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
-  const [questExpanded, setQuestExpanded] = useState(() =>
-    typeof window === 'undefined' ? true : window.innerWidth >= 900 && window.innerHeight >= 560,
-  );
+  const [partyExpanded, setPartyExpanded] = useState(true);
+  const [questExpanded, setQuestExpanded] = useState(true);
+  const [bottomDockExpanded, setBottomDockExpanded] = useState(true);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
   const [inspectedPid, setInspectedPid] = useState<number | null>(null);
@@ -327,7 +327,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           className="hud-left-corner absolute left-2.5 top-2.5 md:left-3.5 md:top-3.5 flex flex-col items-start gap-1.5"
           style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)' }}
         >
-          <div className="flex w-[124px] md:w-[152px] flex-col gap-1">
+          <div className="flex items-start gap-1">
+            {partyExpanded ? (
+              <>
+                <div className="flex w-[124px] md:w-[152px] flex-col gap-1">
             {snap.players.map((pl, i) => {
               const humanNum = snap.players
                 .slice(0, i + 1)
@@ -456,84 +459,137 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
               );
             })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPartyExpanded(false)}
+                  title="向左收起队伍栏"
+                  aria-label="向左收起队伍栏"
+                  className="pointer-events-auto mt-1 flex h-7 w-5 shrink-0 items-center justify-center rounded-r-lg border border-l-0 border-white/60 bg-white/75 text-[11px] font-bold text-slate-600 shadow-xs backdrop-blur-xs transition-colors hover:bg-white hover:text-slate-900 cursor-pointer"
+                >
+                  ◂
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPartyExpanded(true)}
+                title="展开队伍栏"
+                aria-label="展开队伍栏"
+                className="pointer-events-auto flex items-center gap-1 rounded-r-xl border border-l-0 border-white/70 bg-white/80 px-2 py-1.5 text-[11px] font-extrabold text-slate-700 shadow-sm backdrop-blur-xs transition-colors hover:bg-white cursor-pointer"
+              >
+                <span>队伍</span>
+                <span className="text-[10px]">▸</span>
+              </button>
+            )}
           </div>
 
-          {/* 队伍栏下方：极简透明纯文字任务栏（文字内容保持不变） */}
-          <div
-            className="pointer-events-auto w-[166px] md:w-[194px] rounded-xl border border-white/45 bg-white/48 px-2 py-1.5 backdrop-blur-[4px]"
-            style={{
-              textShadow: '0 1px 2px rgba(255,255,255,0.8)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setQuestExpanded((v) => !v)}
-              title={questExpanded ? '点击收起任务面板' : '点击展开任务面板'}
-              className="flex w-full items-center justify-between gap-1 py-0.5 text-left cursor-pointer"
-            >
-              <span
-                className="truncate max-w-[96px] text-[11px] font-extrabold"
-                style={{ color: questPlayer.uiColor }}
+          {/* 队伍栏下方：极简透明纯文字任务栏（支持向左收起，文字内容保持不变） */}
+          <div className="flex items-start gap-1">
+            {questExpanded ? (
+              <>
+                <div
+                  className="pointer-events-auto w-[166px] md:w-[194px] rounded-xl border border-white/45 bg-white/48 px-2 py-1.5 backdrop-blur-[4px]"
+                  style={{
+                    textShadow: '0 1px 2px rgba(255,255,255,0.8)',
+                  }}
+                >
+                  <div className="flex w-full items-center justify-between gap-1 py-0.5">
+                    <span
+                      className="truncate max-w-[96px] text-[11px] font-extrabold"
+                      style={{ color: questPlayer.uiColor }}
+                    >
+                      {questPlayer.name}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-700 whitespace-nowrap">
+                      任务·道具
+                    </span>
+                  </div>
+
+                  <div className="mt-1 space-y-1.5 text-slate-800">
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] font-extrabold">
+                        <span>🎲 一二的馈赠</span>
+                        <span className="text-[10px] font-bold text-amber-800">随机卡×1</span>
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-2 text-[10px] font-extrabold tabular-nums">
+                        <span
+                          className={
+                            (questPlayer.quest?.roll1 ?? 0) >= 1
+                              ? 'text-emerald-700'
+                              : 'text-slate-700'
+                          }
+                        >
+                          1点 ×{questPlayer.quest?.roll1 ?? 0}
+                        </span>
+                        <span
+                          className={
+                            (questPlayer.quest?.roll2 ?? 0) >= 1
+                              ? 'text-emerald-700'
+                              : 'text-slate-700'
+                          }
+                        >
+                          2点 ×{questPlayer.quest?.roll2 ?? 0}
+                        </span>
+                      </div>
+                      <div className="text-[10px] leading-tight font-semibold text-slate-700">
+                        1点与2点各≥1次，各扣1次兑换
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] font-extrabold">
+                        <span>🛡️ 布布不烦恼</span>
+                        <span className="text-[10px] font-bold text-sky-800">护盾/动力×1</span>
+                      </div>
+                      <div className="mt-0.5 flex items-center justify-between text-[10px] font-bold">
+                        <span className="text-slate-700">被踩累计2次，扣2次兑换</span>
+                        <span className="ml-1 shrink-0 font-extrabold text-sky-800 tabular-nums">
+                          {questPlayer.quest?.stomped ?? 0}/2
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQuestExpanded(false)}
+                  title="向左收起任务栏"
+                  aria-label="向左收起任务栏"
+                  className="pointer-events-auto mt-1 flex h-7 w-5 shrink-0 items-center justify-center rounded-r-lg border border-l-0 border-white/50 bg-white/55 text-[11px] font-bold text-slate-700 backdrop-blur-xs transition-colors hover:bg-white/85 hover:text-slate-900 cursor-pointer"
+                >
+                  ◂
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setQuestExpanded(true)}
+                title="展开任务栏"
+                aria-label="展开任务栏"
+                className="pointer-events-auto flex items-center gap-1 rounded-r-xl border border-l-0 border-white/55 bg-white/65 px-2 py-1.5 text-[11px] font-extrabold text-slate-700 shadow-xs backdrop-blur-xs transition-colors hover:bg-white/90 cursor-pointer"
               >
-                {questPlayer.name}
-              </span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-slate-700 whitespace-nowrap">
-                <span>任务·道具</span>
-                <span>{questExpanded ? '▴' : '▾'}</span>
-              </span>
-            </button>
-
-            {questExpanded && (
-              <div className="mt-1 space-y-1.5 text-slate-800">
-                <div>
-                  <div className="flex items-center justify-between text-[11px] font-extrabold">
-                    <span>🎲 一二的馈赠</span>
-                    <span className="text-[10px] font-bold text-amber-800">随机卡×1</span>
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[10px] font-extrabold tabular-nums">
-                    <span
-                      className={
-                        (questPlayer.quest?.roll1 ?? 0) >= 1
-                          ? 'text-emerald-700'
-                          : 'text-slate-700'
-                      }
-                    >
-                      1点 ×{questPlayer.quest?.roll1 ?? 0}
-                    </span>
-                    <span
-                      className={
-                        (questPlayer.quest?.roll2 ?? 0) >= 1
-                          ? 'text-emerald-700'
-                          : 'text-slate-700'
-                      }
-                    >
-                      2点 ×{questPlayer.quest?.roll2 ?? 0}
-                    </span>
-                  </div>
-                  <div className="text-[10px] leading-tight font-semibold text-slate-700">
-                    1点与2点各≥1次，各扣1次兑换
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between text-[11px] font-extrabold">
-                    <span>🛡️ 布布不烦恼</span>
-                    <span className="text-[10px] font-bold text-sky-800">护盾/动力×1</span>
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-between text-[10px] font-bold">
-                    <span className="text-slate-700">被踩累计2次，扣2次兑换</span>
-                    <span className="ml-1 shrink-0 font-extrabold text-sky-800 tabular-nums">
-                      {questPlayer.quest?.stomped ?? 0}/2
-                    </span>
-                  </div>
-                </div>
-              </div>
+                <span>任务</span>
+                <span className="text-[10px]">▸</span>
+              </button>
             )}
           </div>
         </div>
 
         {/* Bottom-center focal point: Turn Owner + Action/Event Pills side-by-side above Dice Pod */}
         <div className="hud-bottom-dock pointer-events-auto absolute bottom-2.5 md:bottom-4 left-1/2 -translate-x-1/2 flex max-w-[calc(100vw-20px)] flex-col items-center gap-1.5" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+          {!bottomDockExpanded ? (
+            <button
+              type="button"
+              onClick={() => setBottomDockExpanded(true)}
+              title="展开骰子与消息栏"
+              aria-label="展开骰子与消息栏"
+              className="flex items-center gap-1.5 rounded-t-xl rounded-b-lg border border-white/80 bg-white/88 px-3.5 py-1 text-xs font-extrabold text-slate-700 shadow-[0_6px_18px_rgba(30,40,55,0.16)] backdrop-blur-sm transition-colors hover:bg-white cursor-pointer"
+            >
+              <span>▴ 展开操作</span>
+            </button>
+          ) : (
+            <>
           {gmOpen && (
             <div className="anim-card-pop mb-0.5 flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
               <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 border border-emerald-400/30">
@@ -806,7 +862,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             >
               💬
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEmoteOpen(false);
+                setBottomDockExpanded(false);
+              }}
+              title="向下收起操作栏"
+              aria-label="向下收起操作栏"
+              className="flex h-11 w-7 shrink-0 items-center justify-center rounded-[11px] border border-slate-200 bg-slate-50 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
+            >
+              ▾
+            </button>
           </div>
+            </>
+          )}
         </div>
 
         {/* Top-Right Pill Bar: 视角下拉 | 游戏规则 | 声音 | 设置齿轮 */}
