@@ -19,6 +19,7 @@ import {
   CameraMode,
   FLIGHT_FROM,
   FLIGHT_STEP,
+  GiftQuestEvent,
   GameHudSnapshot,
   GamePhase,
   HOME_END,
@@ -201,6 +202,9 @@ export class FlightChessEngine {
   private playerTurnCount: number[] = [];
   private itemLastGainedTurn: Record<ItemType, number>[] = [];
   private latestEmote: HudEmoteEvent | null = null;
+  private giftQuestEvent: GiftQuestEvent | null = null;
+  private giftQuestKey = 0;
+  private giftQuestTimer: number | null = null;
   private emoteKeySeq = 0;
   private lastAiEmoteAt: number[] = [];
   private turnSeq = 0;
@@ -796,6 +800,7 @@ export class FlightChessEngine {
     this.messageKey++;
     this.emitSnapshot();
     if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
+    if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
     if (duration > 0) {
       this.msgTimer = window.setTimeout(() => {
         if (this.disposed) return;
@@ -922,6 +927,7 @@ export class FlightChessEngine {
       messageColor: this.messageColor,
       messageKey: this.messageKey,
       latestEmote: this.latestEmote,
+      giftQuestEvent: this.giftQuestEvent,
       splashText: this.splashText,
       splashAvatar: this.splashAvatar,
       splashCharKey: this.splashCharKey,
@@ -1104,7 +1110,19 @@ export class FlightChessEngine {
       const def = ITEM_DEFS[got];
       const pl = this.players[pid];
       beep(820, 0.12, 'triangle', 0.14);
-      this.setMsg(`🎯 ${pl.name} 完成「一二宝的馈赠」，获得 ${def.icon} ${def.name}！`, pl.uiColor);
+      this.setMsg(`🎯 ${pl.name} 完成「一二的馈赠」，获得 ${def.icon} ${def.name}！`, pl.uiColor);
+      this.giftQuestEvent = {
+        playerName: pl.name,
+        playerColor: pl.uiColor,
+        item: got,
+        key: ++this.giftQuestKey,
+      };
+      if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
+      this.giftQuestTimer = window.setTimeout(() => {
+        if (this.disposed) return;
+        this.giftQuestEvent = null;
+        this.emitSnapshot();
+      }, 3600);
     }
     this.emitSnapshot();
   }
@@ -3744,7 +3762,7 @@ export class FlightChessEngine {
       };
 
       // 直接踩到商店格子时：先打开商店选购，选购完成后再继续触发同色 +4 大跳/飞行
-      if (plane.pos >= 1 && plane.pos <= 50 && this.shopRingSet.has(this.ringIndexOf(plane))) {
+      if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
         const offer = this.pickUniqueShopOffer();
         if (this.isAI()) {
           const chosen = this.aiChooseShopItem(offer, plane.pid);
@@ -3907,7 +3925,7 @@ export class FlightChessEngine {
     this.camFollowObj = null;
 
     // 踩中商店格子：15 秒内从 3 张不重复随机道具卡中选择 1 张
-    if (plane.pos >= 1 && plane.pos <= 50 && this.shopRingSet.has(this.ringIndexOf(plane))) {
+    if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
       const offer = this.pickUniqueShopOffer();
       if (this.isAI()) {
         const chosen = this.aiChooseShopItem(offer, plane.pid);
@@ -4228,7 +4246,7 @@ export class FlightChessEngine {
           }
         } else if (np >= 1 && np <= 50) {
           const newRingIdx = (P.start + 2 + np) % 52;
-          if (this.shopRingSet.has(newRingIdx) && myTotalItems < 2) {
+          if (newRingIdx === (P.start + 40) % 52 && myTotalItems < 2) {
             s += personality === 'tactician' ? 30 : personality === 'chill' ? 14 : 18;
           }
           if (myPlanes.some((q) => q !== p && q.pos === np)) {

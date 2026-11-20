@@ -60,6 +60,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   message: null,
   messageColor: null,
   messageKey: 0,
+  giftQuestEvent: null,
   splashText: null,
   splashAvatar: '🐼',
   splashCharKey: 'yier',

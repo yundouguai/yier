@@ -239,6 +239,13 @@ export interface HudPlayerSnapshot {
   quest: PlayerQuestState;
 }
 
+export interface GiftQuestEvent {
+  playerName: string;
+  playerColor: string;
+  item: ItemType;
+  key: number;
+}
+
 export interface HudEmoteEvent {
   pid: number;
   text: string;
@@ -262,6 +269,7 @@ export interface GameHudSnapshot {
   messageColor: string | null;
   messageKey: number;
   latestEmote: HudEmoteEvent | null;
+  giftQuestEvent: GiftQuestEvent | null;
   splashText: string | null;
   splashAvatar: string;
   splashCharKey: CharKey;

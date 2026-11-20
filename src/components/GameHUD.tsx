@@ -243,6 +243,42 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         }}
       />
 
+      {/* 一二的馈赠任务完成动画提示弹窗 */}
+      {snap.giftQuestEvent && !showSetup && (
+        <div
+          key={snap.giftQuestEvent.key}
+          className="pointer-events-none fixed left-1/2 top-[34%] md:top-[32%] z-[22] -translate-x-1/2 -translate-y-1/2"
+        >
+          <div
+            className="anim-card-pop flex items-center gap-3 rounded-[24px] bg-[#fff8f2]/95 px-4 py-3 md:px-5 md:py-3.5 shadow-[0_20px_52px_rgba(30,20,15,0.28)] backdrop-blur-sm"
+            style={{
+              border: `3px solid ${snap.giftQuestEvent.playerColor}`,
+            }}
+          >
+            <img
+              src="./assets/yier_gift_box.gif"
+              alt="一二的馈赠"
+              className="h-24 w-24 md:h-28 md:w-28 shrink-0 rounded-2xl object-contain"
+            />
+            <div className="min-w-0 pr-1">
+              <div className="text-[11px] md:text-xs font-extrabold tracking-wide text-rose-500">
+                🎁 完成「一二的馈赠」！
+              </div>
+              <div className="mt-1 text-sm md:text-base font-extrabold text-slate-900 whitespace-nowrap">
+                {snap.giftQuestEvent.playerName} 获得{' '}
+                <span style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}>
+                  {ITEM_DEFS[snap.giftQuestEvent.item].icon}{' '}
+                  {ITEM_DEFS[snap.giftQuestEvent.item].name}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11px] font-semibold text-slate-500 whitespace-nowrap">
+                {ITEM_DEFS[snap.giftQuestEvent.item].shortEffect}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Turn splash banner for human turns */}
       <div
         className={`pointer-events-none fixed left-1/2 top-[24%] md:top-[22%] z-[20] flex items-center gap-3 whitespace-nowrap rounded-[22px] bg-white/95 px-6 py-3 text-lg md:text-[22px] font-extrabold text-slate-800 transition-all duration-200 ${
