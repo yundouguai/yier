@@ -2683,12 +2683,6 @@ export class FlightChessEngine {
       }
       const badgeColor =
         ringHex === 0xef4444 ? '#ef4444' : ringHex === 0x2b8bd4 ? '#2b8bd4' : '#1f9d55';
-      const cone = hint.children[0] as THREE.Mesh | undefined;
-      if (cone) {
-        const cMat = cone.material as THREE.MeshStandardMaterial;
-        cMat.color.setHex(ringHex);
-        cMat.emissive.setHex(ringHex);
-      }
       const badge = hint.children[1] as THREE.Sprite | undefined;
       if (badge) {
         const tex = this.getBadgeTexture(label, badgeColor);
