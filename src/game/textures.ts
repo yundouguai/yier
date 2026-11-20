@@ -784,6 +784,106 @@ export function createDiceFaceTexture(n: number, anisotropy: number): THREE.Canv
     ],
   };
 
+  if (n === 5 || n === 6) {
+    const isYier = n === 6;
+    const outline = '#3a231a';
+    const fur = isYier ? '#ffffff' : '#c69069';
+    const cheek = isYier ? '#f7aa9c' : '#f2c56d';
+
+    g.save();
+    g.translate(128, isYier ? 124 : 132);
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+
+    // 一二底部黑色小领结
+    if (isYier) {
+      g.fillStyle = outline;
+      g.beginPath();
+      g.ellipse(-14, 72, 16, 11, -0.35, 0, Math.PI * 2);
+      g.ellipse(14, 72, 16, 11, 0.35, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    // 耳朵
+    for (const sx of [-1, 1]) {
+      g.fillStyle = isYier ? outline : fur;
+      g.strokeStyle = outline;
+      g.lineWidth = 6;
+      g.beginPath();
+      g.arc(sx * 54, -52, 22, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      if (!isYier) {
+        g.fillStyle = outline;
+        g.beginPath();
+        g.arc(sx * 54, -52, 12, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+
+    // 圆润胖脸轮廓
+    g.fillStyle = fur;
+    g.strokeStyle = outline;
+    g.lineWidth = 6.5;
+    g.beginPath();
+    g.ellipse(0, 4, 74, 64, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+
+    // 腮红
+    g.fillStyle = cheek;
+    for (const sx of [-1, 1]) {
+      g.beginPath();
+      g.ellipse(sx * 48, 22, 16, 12.5, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    // 豆豆眼
+    g.fillStyle = outline;
+    for (const sx of [-1, 1]) {
+      g.beginPath();
+      g.arc(sx * 31, 6, 7.2, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    // 张开的小嘴与粉红舌头
+    g.fillStyle = '#ef7a88';
+    g.strokeStyle = outline;
+    g.lineWidth = 4.5;
+    g.beginPath();
+    g.ellipse(0, 26, 8.5, 11.5, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+
+    // ω 上唇
+    g.fillStyle = fur;
+    g.beginPath();
+    g.rect(-13, 8, 26, 10);
+    g.fill();
+    g.strokeStyle = outline;
+    g.lineWidth = 4.5;
+    g.beginPath();
+    g.moveTo(-10, 14);
+    g.quadraticCurveTo(-5, 22, 0, 15);
+    g.quadraticCurveTo(5, 22, 10, 14);
+    g.stroke();
+
+    // 举在左脸侧的小爪爪（比心/小拳头）
+    g.fillStyle = fur;
+    g.strokeStyle = outline;
+    g.lineWidth = 5.5;
+    g.beginPath();
+    g.ellipse(-38, 44, 18, 16, -0.25, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.beginPath();
+    g.arc(-30, 35, 6.5, -0.4, Math.PI * 1.1);
+    g.stroke();
+
+    g.restore();
+    return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+  }
+
   const isRed = n === 1 || n === 4;
   const pipRadius = n === 1 ? 35 : 22.5;
   for (const [x, y] of P[n]) {
@@ -836,6 +936,7 @@ export function createDiceFaceTexture(n: number, anisotropy: number): THREE.Canv
 export function createNumberBadgeTexture(
   label: number | string,
   anisotropy: number,
+  bgColor = '#1f9d55',
 ): THREE.CanvasTexture {
   const text = String(label);
   const c = document.createElement('canvas');
@@ -843,7 +944,7 @@ export function createNumberBadgeTexture(
   if (text.length <= 1) {
     c.width = 128;
     const g = c.getContext('2d')!;
-    g.fillStyle = '#1f9d55';
+    g.fillStyle = bgColor;
     g.beginPath();
     g.arc(64, 64, 54, 0, Math.PI * 2);
     g.fill();
@@ -862,7 +963,7 @@ export function createNumberBadgeTexture(
     const w = c.width - pad * 2;
     const h = 108;
     const r = h / 2;
-    g.fillStyle = '#1f9d55';
+    g.fillStyle = bgColor;
     g.beginPath();
     g.roundRect(pad, 10, w, h, r);
     g.fill();

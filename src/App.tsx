@@ -300,12 +300,13 @@ export default function App() {
     transitionWaitRef.current = false;
     setAllHumansPrompt(false);
     setAllHumansDismissed(false);
-    setShowSetup(false);
+    setDraftLocalChars([...activeLocalChars]);
     setMatchmaking(null);
-    setAutoStart(true);
-    setSnap((prev) => ({ ...prev, paused: false }));
+    setShowSetup(true);
+    setAutoStart(false);
+    setSnap((prev) => ({ ...prev, paused: false, winnerPid: null, phase: 'idle' }));
     setSessionId((id) => id + 1);
-  }, [clearMatchTimers]);
+  }, [activeLocalChars, clearMatchTimers]);
 
   const handleToggleMute = useCallback(() => {
     setMuted(toggleAudioMuted());
@@ -354,12 +355,13 @@ export default function App() {
   const allHumansFinished =
     humanPlayers.length > 0 && humanPlayers.every((p) => p.doneCount === 4);
 
+  const isPlaying = snap.phase !== 'over' && snap.phase !== 'idle';
+
   useEffect(() => {
     if (
       !allHumansFinished ||
       allHumansDismissed ||
-      snap.phase === 'over' ||
-      snap.phase === 'idle' ||
+      !isPlaying ||
       showSetup ||
       matchmaking !== null
     ) {
@@ -369,7 +371,7 @@ export default function App() {
       setAllHumansPrompt(true);
     }, 6000);
     return () => window.clearTimeout(tid);
-  }, [allHumansFinished, allHumansDismissed, snap.phase, showSetup, matchmaking]);
+  }, [allHumansFinished, allHumansDismissed, isPlaying, showSetup, matchmaking]);
 
   const winner =
     snap.winnerPid !== null ? (snap.players[snap.winnerPid] ?? null) : null;

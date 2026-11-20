@@ -692,11 +692,11 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
     new THREE.MeshStandardMaterial({
       color: 0x6ce5ff,
       emissive: 0x26b6e8,
-      emissiveIntensity: 0.42,
-      roughness: 0.16,
-      metalness: 0.08,
+      emissiveIntensity: 0.14,
+      roughness: 0.2,
+      metalness: 0.05,
       transparent: true,
-      opacity: 0.27,
+      opacity: 0.14,
       depthWrite: false,
     }),
   );
@@ -705,14 +705,14 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   shieldMesh.add(dome);
 
   const eqRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.455, 0.016, 8, 32),
+    new THREE.TorusGeometry(0.455, 0.011, 8, 32),
     new THREE.MeshStandardMaterial({
       color: 0x8ef5ff,
       emissive: 0x38bdf8,
-      emissiveIntensity: 0.65,
-      roughness: 0.25,
+      emissiveIntensity: 0.22,
+      roughness: 0.28,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.45,
     }),
   );
   eqRing.rotation.x = Math.PI / 2 - 0.18;

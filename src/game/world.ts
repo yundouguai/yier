@@ -3416,8 +3416,8 @@ export function buildAncientWorld(
 
   buildGoalBay([-1.75, -1.75], [-1.75, 1.75], [0, 0], slotPlayer(0));
   buildGoalBay([1.75, -1.75], [1.75, 1.75], [0, 0], slotPlayer(2));
-  buildGoalBay([-1.75, 1.75], [1.75, 1.75], [0, 0], slotPlayer(1));
-  buildGoalBay([-1.75, -1.75], [1.75, -1.75], [0, 0], slotPlayer(3));
+  buildGoalBay([-1.75, 1.75], [1.75, 1.75], [0, 0], slotPlayer(3));
+  buildGoalBay([-1.75, -1.75], [1.75, -1.75], [0, 0], slotPlayer(1));
 
   // 四条对角乌木镶花梨分界梁
   for (let k = 0; k < 4; k++) {

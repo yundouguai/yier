@@ -192,6 +192,7 @@ export class FlightChessEngine {
   private shopDeadline: number | null = null;
   private shopPid: number | null = null;
   private shopPendingAgain = false;
+  private shopPostAction: (() => Promise<void>) | null = null;
   private lastShopSec = -1;
   private itemBusy = false;
 
@@ -824,6 +825,31 @@ export class FlightChessEngine {
     });
   }
 
+  private showItemSplash(
+    P: PlayerConfig,
+    item: ItemType,
+    detail?: string,
+    durationMs = 2300,
+  ): void {
+    const def = ITEM_DEFS[item];
+    this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
+    this.splashCharKey = P.key;
+    this.splashText = `${def.icon} ${P.name} 使用「${def.name}」· ${detail ?? def.shortEffect}`;
+    this.splashColor = def.accentColor;
+    this.splashVisible = true;
+    this.emitSnapshot();
+    cancelAnimationFrame(this.splashRaf);
+    if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
+    this.splashRaf = requestAnimationFrame(() => {
+      if (this.disposed) return;
+      this.splashTimer = window.setTimeout(() => {
+        if (this.disposed) return;
+        this.splashVisible = false;
+        this.emitSnapshot();
+      }, durationMs);
+    });
+  }
+
   private triggerShake(): void {
     this.shakeKey++;
     this.emitSnapshot();
@@ -955,9 +981,22 @@ export class FlightChessEngine {
 
   private syncShieldVisuals(): void {
     for (const p of this.planes) {
-      if (p.shieldMesh) {
-        p.shieldMesh.visible = p.shielded && p.pos >= 0 && p.pos < HOME_END;
+      if (!p.shieldMesh) continue;
+      if (!p.shielded || p.pos < 0 || p.pos >= HOME_END) {
+        p.shieldMesh.visible = false;
+        continue;
       }
+      if (p.pos >= 1) {
+        const stack = this.planes
+          .filter((q) => q.pid === p.pid && q.pos === p.pos)
+          .sort((a, b) => a.idx - b.idx);
+        const firstShielded = stack.find((q) => q.shielded);
+        if (firstShielded && firstShielded !== p) {
+          p.shieldMesh.visible = false;
+          continue;
+        }
+      }
+      p.shieldMesh.visible = true;
     }
   }
 
@@ -1076,10 +1115,12 @@ export class FlightChessEngine {
     q.stomped += count;
     while (q.stomped >= 2) {
       q.stomped -= 2;
-      this.grantItem(victimPid, 'shield');
+      const reward: ItemType = Math.random() < 0.5 ? 'shield' : 'twinDice';
+      this.grantItem(victimPid, reward);
+      const def = ITEM_DEFS[reward];
       const pl = this.players[victimPid];
       beep(720, 0.12, 'triangle', 0.14);
-      this.setMsg(`🛡️ ${pl.name} 触发「布布不烦恼」，任务奖励：护盾 ×1！`, pl.uiColor);
+      this.setMsg(`${def.icon} ${pl.name} 触发「布布不烦恼」，任务奖励：${def.name} ×1！`, pl.uiColor);
     }
     this.emitSnapshot();
   }
@@ -1527,6 +1568,13 @@ export class FlightChessEngine {
     this.scene.add(rocket);
 
     this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了道具导弹！`, P.uiColor);
+    this.showItemSplash(P, 'missile', `锁定 ${T.name}！`, 2400);
+    await this.sleep(1000);
+    if (this.disposed) {
+      this.scene.remove(rocket);
+      this.itemBusy = false;
+      return;
+    }
     if (P.type === 'ai') {
       const hadGrudge = (this.offenseScores[attackerPid]?.[target.pid] ?? 0) >= 0.95;
       this.emitAiEmote(
@@ -1600,41 +1648,64 @@ export class FlightChessEngine {
       const fromPos = target.pos;
       const stepsBack = Math.min(6, Math.max(0, fromPos - 1));
       if (stepsBack > 0) {
-        this.setMsg(`💥 命中！${T.name} 的棋子后退 ${stepsBack} 格（不触发大跳与飞机）`, P.uiColor);
-        let curPos = fromPos;
-        for (let s = 0; s < stepsBack; s++) {
-          curPos = Math.max(1, curPos - 1);
-          targetStack.forEach((p) => (p.pos = curPos));
-          if (s === 0) {
-            this.relayout();
-          }
-          const c = this.posToCell(T, curPos);
-          const yaw = this.faceTravelDir(target);
-          const baseCount = this.planes.filter(
-            (q) => !targetStack.includes(q) && q.pid === target.pid && q.pos === curPos,
-          ).length;
-          sndHop();
-          await Promise.all(
-            targetStack.map((p, i) =>
-              this.hopTo(
-                p,
-                c[0],
-                c[1],
-                yaw,
-                0.42,
-                210,
-                s % 2 === 0 ? 1 : -1,
-                0.12 + (baseCount + i) * STACK_STEP_Y,
-              ),
-            ),
-          );
-          if (this.disposed) {
-            this.itemBusy = false;
-            return;
-          }
+        const finalPos = Math.max(1, fromPos - 6);
+        this.setMsg(`💥 命中！${T.name} 的棋子被炸飞后退 ${stepsBack} 格！`, P.uiColor);
+        targetStack.forEach((p) => {
+          p.pos = finalPos;
+          p.animating = true;
+          p.mesh.userData.smokeUntil = this.timeMs + 4200;
+        });
+        const c = this.posToCell(T, finalPos);
+        const yaw = this.faceTravelDir(target);
+        const baseCount = this.planes.filter(
+          (q) => !targetStack.includes(q) && q.pid === target.pid && q.pos === finalPos,
+        ).length;
+
+        await Promise.all(
+          targetStack.map((p, i) => {
+            const m = p.mesh;
+            const pt = m.userData.parts as PlaneParts;
+            const sx = m.position.x;
+            const sy = m.position.y;
+            const sz = m.position.z;
+            const syaw = m.rotation.y;
+            const landY = 0.12 + (baseCount + i) * STACK_STEP_Y;
+            return this.tween(640, (k) => {
+              const ease = 1 - Math.pow(1 - k, 1.8);
+              m.position.x = THREE.MathUtils.lerp(sx, c[0], ease);
+              m.position.z = THREE.MathUtils.lerp(sz, c[1], ease);
+              m.position.y = THREE.MathUtils.lerp(sy, landY, ease) + Math.sin(k * Math.PI) * 2.15;
+              m.rotation.y = lerpAngle(syaw, yaw, ease);
+              pt.animRoot.rotation.x = -k * Math.PI * 2;
+              pt.animRoot.rotation.z = Math.sin(k * Math.PI * 3) * 0.42;
+              pt.leftArm.rotation.z = 1.45;
+              pt.rightArm.rotation.z = -1.45;
+              pt.leftFoot.rotation.x = Math.sin(k * Math.PI * 6) * 0.6;
+              pt.rightFoot.rotation.x = -Math.sin(k * Math.PI * 6) * 0.6;
+            }).then(() => {
+              m.position.set(c[0], landY, c[1]);
+              m.rotation.set(0, yaw, 0);
+              pt.animRoot.rotation.set(0, 0, 0);
+              pt.leftArm.rotation.set(0, 0, 0);
+              pt.rightArm.rotation.set(0, 0, 0);
+              pt.leftFoot.rotation.set(0, 0, 0);
+              pt.rightFoot.rotation.set(0, 0, 0);
+              p.animating = false;
+            });
+          }),
+        );
+        if (this.disposed) {
+          this.itemBusy = false;
+          return;
         }
+        this.spawnImpact(c[0], c[1]);
+        // 击退落点若有其他玩家棋子，触发踩踏/破盾效果
+        await this.captureAt(target);
       } else {
-        this.setMsg(`💥 导弹命中 ${T.name}（已在第 1 格，无法继续后退）`, P.uiColor);
+        targetStack.forEach((p) => {
+          p.mesh.userData.smokeUntil = this.timeMs + 4200;
+        });
+        this.setMsg(`💥 导弹命中 ${T.name}（已在第 1 格，头上冒烟啦）`, P.uiColor);
       }
       this.onRetaliationSuccess(attackerPid, target.pid, 'missile');
     }
@@ -1787,8 +1858,9 @@ export class FlightChessEngine {
                 : !best.t.plane.shielded &&
                   (best.t.plane.pos >= 26 || best.t.stackCount >= 2 || best.isStompPursuer || best.threatCoeff >= 1.85));
 
-        if (shouldFire) {
+        if (shouldFire && !this.turnUsedAtkDef) {
           inv.missile -= 1;
+          this.turnUsedAtkDef = true;
           await this.fireMissile(me, best.t.plane);
           if (this.disposed) return;
           await this.sleep(360);
@@ -1818,9 +1890,10 @@ export class FlightChessEngine {
           const cPos = this.posToCell(P, endangered[0].c.plane.pos);
           this.spawnShieldBreak(cPos[0], cPos[1]);
           this.setMsg(`🛡️ ${P.name} 为棋子开启了护盾！`, P.uiColor);
+          this.showItemSplash(P, 'shield');
           this.emitAiEmote(me, 'useShield', 1800);
           this.emitSnapshot();
-          await this.sleep(650);
+          await this.sleep(1650);
           return true;
         }
         return false;
@@ -1854,9 +1927,10 @@ export class FlightChessEngine {
         this.armedSixDie = true;
         this.turnUsedAtkDef = true;
         this.setMsg(`🎲 ${P.name} 使用了「6数骰」！`, P.uiColor);
+        this.showItemSplash(P, 'sixDie');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
         this.emitSnapshot();
-        await this.sleep(500);
+        await this.sleep(1650);
       };
 
       const useRefuel = async () => {
@@ -1864,9 +1938,10 @@ export class FlightChessEngine {
         this.armedRefuel = true;
         this.turnUsedAtkDef = true;
         this.setMsg(`⛽ ${P.name} 使用了「空中加油机」！`, P.uiColor);
+        this.showItemSplash(P, 'refuel');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
         this.emitSnapshot();
-        await this.sleep(500);
+        await this.sleep(1650);
       };
 
       const useTwinDice = async () => {
@@ -1874,9 +1949,10 @@ export class FlightChessEngine {
         this.armedTwinDice = true;
         this.turnUsedAtkDef = true;
         this.setMsg(`⚙️ ${P.name} 启动了「动力装置」！`, P.uiColor);
+        this.showItemSplash(P, 'twinDice');
         this.emitAiEmote(me, 'useSpeedItem', 1800);
         this.emitSnapshot();
-        await this.sleep(500);
+        await this.sleep(1650);
       };
 
       // 刚在本回合（例如连投前）或才拿到还没隔一轮时，谨慎持有，除非遇到极高风险/绝杀
@@ -2069,6 +2145,7 @@ export class FlightChessEngine {
       this.clearHL();
       beep(660, 0.1, 'triangle', 0.14);
       this.setMsg('🎲 已激活「6数骰」，下次掷骰必出 6 点（无连投）！');
+      this.showItemSplash(this.cur(), 'sixDie');
       this.emitSnapshot();
       return;
     }
@@ -2083,6 +2160,7 @@ export class FlightChessEngine {
       this.clearHL();
       beep(620, 0.1, 'triangle', 0.14);
       this.setMsg('⚙️ 已激活「动力装置」，下次同时掷两颗骰子！');
+      this.showItemSplash(this.cur(), 'twinDice');
       this.emitSnapshot();
       return;
     }
@@ -2097,6 +2175,7 @@ export class FlightChessEngine {
       this.clearHL();
       beep(700, 0.1, 'triangle', 0.14);
       this.setMsg('⛽ 已激活「空中加油机」，本次移动后将多一次投骰！');
+      this.showItemSplash(this.cur(), 'refuel');
       this.emitSnapshot();
       return;
     }
@@ -2119,7 +2198,7 @@ export class FlightChessEngine {
       this.targetChoices = choices;
       this.highlight(
         choices.map((c) => ({ plane: c.plane })),
-        type === 'shield' ? 0x2b8bd4 : 0x8b5cf6,
+        type === 'shield' ? 0x2b8bd4 : 0xef4444,
       );
       this.setMsg(
         type === 'shield'
@@ -2165,10 +2244,12 @@ export class FlightChessEngine {
       this.spawnShieldBreak(cPos[0], cPos[1]);
       beep(740, 0.12, 'triangle', 0.14);
       this.setMsg(`🛡️ 已为 #${match.plane.idx + 1} 号棋子开启护盾（不可叠加）！`);
+      this.showItemSplash(this.cur(), 'shield', `为 #${match.plane.idx + 1} 号棋子开启护盾`);
       this.emitSnapshot();
     } else if (kind === 'missile') {
-      if (inv.missile <= 0) return;
+      if (inv.missile <= 0 || this.turnUsedAtkDef) return;
       inv.missile -= 1;
+      this.turnUsedAtkDef = true;
       void this.fireMissile(this.turn, match.plane);
     }
   }
@@ -2180,15 +2261,23 @@ export class FlightChessEngine {
     const pid = this.shopPid;
     const pl = this.players[pid];
     const again = this.shopPendingAgain;
+    const postAction = this.shopPostAction;
     this.grantItem(pid, item);
     this.shopOffer = null;
     this.shopDeadline = null;
     this.shopPid = null;
     this.shopPendingAgain = false;
+    this.shopPostAction = null;
     this.lastShopSec = -1;
     const def = ITEM_DEFS[item];
     beep(784, 0.14, 'triangle', 0.15);
     this.setMsg(`🎁 ${pl.name} 在商店获得了 ${def.icon} ${def.name}！`, pl.uiColor);
+    if (postAction) {
+      this.phase = 'moving';
+      this.emitSnapshot();
+      void postAction();
+      return;
+    }
     this.emitSnapshot();
     this.endTurn(again);
   }
@@ -2541,11 +2630,12 @@ export class FlightChessEngine {
   }
 
   /* ================= Highlighting ================= */
-  private getBadgeTexture(label: string): THREE.CanvasTexture {
-    let tex = this.badgeTexCache.get(label);
+  private getBadgeTexture(label: string, bgColor = '#1f9d55'): THREE.CanvasTexture {
+    const key = `${label}_${bgColor}`;
+    let tex = this.badgeTexCache.get(key);
     if (!tex) {
-      tex = createNumberBadgeTexture(label, this.anisotropy);
-      this.badgeTexCache.set(label, tex);
+      tex = createNumberBadgeTexture(label, this.anisotropy, bgColor);
+      this.badgeTexCache.set(key, tex);
     }
     return tex;
   }
@@ -2569,7 +2659,7 @@ export class FlightChessEngine {
         ring.position.set(0, -0.02, 0);
         this.hlRings.push(ring);
       }
-      const groupKey = c.plane.pos <= 0 ? `single_${c.plane.idx}` : `${c.plane.pid}_${cellKey}`;
+      const groupKey = c.plane.pos <= 0 ? `single_${c.plane.pid}_${c.plane.idx}` : `${c.plane.pid}_${cellKey}`;
       const arr = hintGroups.get(groupKey) ?? [];
       arr.push(c.plane);
       hintGroups.set(groupKey, arr);
@@ -2591,9 +2681,11 @@ export class FlightChessEngine {
         cm.color.setHex(ringHex);
         cm.emissive.setHex(ringHex);
       }
+      const badgeColor =
+        ringHex === 0xef4444 ? '#ef4444' : ringHex === 0x2b8bd4 ? '#2b8bd4' : '#1f9d55';
       const badge = hint.children[1] as THREE.Sprite | undefined;
       if (badge) {
-        const tex = this.getBadgeTexture(label);
+        const tex = this.getBadgeTexture(label, badgeColor);
         const mat = badge.material as THREE.SpriteMaterial;
         if (mat.map !== tex) {
           mat.map = tex;
@@ -3562,6 +3654,124 @@ export class FlightChessEngine {
       }
       await this.captureAt(plane);
 
+      const continueAfterDirectShop = async () => {
+        if (this.disposed) return;
+        if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
+          await this.sleep(320);
+          if (this.disposed) return;
+          if (plane.pos === FLIGHT_FROM) {
+            this.setMsg('🌀 踏上飞行航线，直飞对面！');
+            sndCap();
+            const cFrom = this.posToCell(P, plane.pos);
+            setPos(plane.pos + FLIGHT_STEP);
+            const cTo = this.posToCell(P, plane.pos);
+            await Promise.all([
+              this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 2200),
+              new Promise<void>((res) =>
+                this.after(980, () => {
+                  this.captureFlyCross(plane.pid).then(res);
+                }),
+              ),
+            ]);
+            await this.captureAt(plane);
+            await this.sleep(320);
+            if (this.disposed) return;
+            this.setMsg('⚡ 同色顺风再跳 4 格！');
+            beep(540, 0.12, 'triangle', 0.14);
+            setPos(plane.pos + 4);
+            await hopAll(
+              this.posToCell(P, plane.pos),
+              this.faceTravelDir(plane),
+              1.15,
+              820,
+              1,
+              plane.pos,
+              stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
+            );
+            await this.captureAt(plane);
+          } else {
+            this.setMsg('⚡ 落在己方颜色格，跳跃前进 4 格！');
+            beep(540, 0.12, 'triangle', 0.14);
+            setPos(plane.pos + 4);
+            await hopAll(
+              this.posToCell(P, plane.pos),
+              this.faceTravelDir(plane),
+              1.15,
+              820,
+              1,
+              plane.pos,
+              stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
+            );
+            await this.captureAt(plane);
+            if (plane.pos === FLIGHT_FROM) {
+              await this.sleep(320);
+              if (this.disposed) return;
+              this.setMsg('🌀 连跳触发飞行航线，直飞对面！');
+              sndCap();
+              const cFrom = this.posToCell(P, plane.pos);
+              setPos(plane.pos + FLIGHT_STEP);
+              const cTo = this.posToCell(P, plane.pos);
+              await Promise.all([
+                this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 2200),
+                new Promise<void>((res) =>
+                  this.after(980, () => {
+                    this.captureFlyCross(plane.pid).then(res);
+                  }),
+                ),
+              ]);
+              await this.captureAt(plane);
+            }
+          }
+        }
+        if (this.disposed) return;
+        this.relayout();
+        this.emitSnapshot();
+        const willRollAgainAfter =
+          this.pendingExtraRoll || (!this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3);
+        this.pendingExtraRoll = false;
+        this.suppressSixBonusThisRoll = false;
+        await this.sleep(450);
+        if (this.disposed) return;
+        if (this.camFollowPlane && this.camMode === 'follow' && !this.camUserInteracting) {
+          const home = this.getHomeCameraPose();
+          _scratchCamOffset.copy(this.camera.position).sub(this.controls.target);
+          _scratchCamSpherical.setFromVector3(_scratchCamOffset);
+          this.setCamGoal(home.tx, home.ty, home.tz, home.radius, home.phi, _scratchCamSpherical.theta);
+        }
+        this.camFollowPlane = null;
+        this.camFollowObj = null;
+        this.endTurn(willRollAgainAfter);
+      };
+
+      // 直接踩到商店格子时：先打开商店选购，选购完成后再继续触发同色 +4 大跳/飞行
+      if (plane.pos >= 1 && plane.pos <= 50 && this.shopRingSet.has(this.ringIndexOf(plane))) {
+        const offer = this.pickUniqueShopOffer();
+        if (this.isAI()) {
+          const chosen = this.aiChooseShopItem(offer, plane.pid);
+          this.grantItem(plane.pid, chosen);
+          const def = ITEM_DEFS[chosen];
+          beep(740, 0.12, 'triangle', 0.14);
+          this.setMsg(`🏪 ${P.name} 踏入商店，选择了 ${def.icon} ${def.name}！`, P.uiColor);
+          this.emitAiEmote(plane.pid, 'shopPick', 1400);
+          this.emitSnapshot();
+          await this.sleep(750);
+          await continueAfterDirectShop();
+          return;
+        } else {
+          this.shopOffer = offer;
+          this.shopPid = plane.pid;
+          this.shopPendingAgain = false;
+          this.shopPostAction = continueAfterDirectShop;
+          this.shopDeadline = this.timeMs + 15000;
+          this.lastShopSec = 15;
+          this.phase = 'shopChoice';
+          beep(840, 0.14, 'triangle', 0.15);
+          this.setMsg(`🏪 ${P.name} 踏入道具商店，请于 15 秒内挑选 1 张道具卡！`, P.uiColor);
+          this.emitSnapshot();
+          return;
+        }
+      }
+
       if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
         await this.sleep(320);
         if (this.disposed) return;
@@ -4308,7 +4518,19 @@ export class FlightChessEngine {
             eqRing.rotation.z = t * 1.45 + p.phase;
             eqRing.position.y = 0.34 + Math.sin(t * 3.1 + p.phase) * 0.02;
           }
-          p.shieldMesh.scale.setScalar(1 + Math.sin(t * 2.6 + p.phase) * 0.025);
+          const sTotal = p.pos >= 1 ? ((p.mesh.userData.stackTotal as number) || 1) : 1;
+          const sIdx = p.pos >= 1 ? ((p.mesh.userData.stackIdx as number) || 0) : 0;
+          const pulse = 1 + Math.sin(t * 2.6 + p.phase) * 0.02;
+          if (sTotal >= 2) {
+            const centerOffsetY = ((sTotal - 1) * 0.5 - sIdx) * (STACK_STEP_Y / 0.92);
+            const sx = (1 + (sTotal - 1) * 0.14) * pulse;
+            const sy = (1 + (sTotal - 1) * 0.72) * pulse;
+            p.shieldMesh.position.set(0, centerOffsetY - 0.34 * (sy - 1), 0);
+            p.shieldMesh.scale.set(sx, sy, sx);
+          } else {
+            p.shieldMesh.position.set(0, 0, 0);
+            p.shieldMesh.scale.setScalar(pulse);
+          }
         }
 
         const baseScale = p.pos === -1 ? 1.12 : 0.92;
@@ -4328,6 +4550,46 @@ export class FlightChessEngine {
           baseY !== undefined &&
           baseZ !== undefined &&
           baseYaw !== undefined;
+
+        const smokeUntil = (p.mesh.userData.smokeUntil as number) || 0;
+        let smokeGrp = p.mesh.userData.smokeGroup as THREE.Group | undefined;
+        if (this.timeMs < smokeUntil && p.pos >= 1) {
+          if (!smokeGrp) {
+            smokeGrp = new THREE.Group();
+            const puffGeo = new THREE.SphereGeometry(0.055, 10, 8);
+            for (let k = 0; k < 5; k++) {
+              const mat = new THREE.MeshStandardMaterial({
+                color: k % 2 === 0 ? 0x6b7280 : 0x9ca3af,
+                transparent: true,
+                opacity: 0.72,
+                roughness: 0.92,
+                depthWrite: false,
+              });
+              const puff = new THREE.Mesh(puffGeo, mat);
+              puff.userData.seed = k / 5;
+              smokeGrp.add(puff);
+            }
+            p.mesh.add(smokeGrp);
+            p.mesh.userData.smokeGroup = smokeGrp;
+          }
+          smokeGrp.visible = true;
+          smokeGrp.children.forEach((child, idx) => {
+            const puff = child as THREE.Mesh;
+            const phase = ((t * 0.95 + (puff.userData.seed as number)) % 1 + 1) % 1;
+            const ang = idx * 1.3 + phase * 3.2;
+            const rad = 0.04 + phase * 0.11;
+            puff.position.set(
+              Math.cos(ang) * rad,
+              0.74 + phase * 0.56,
+              Math.sin(ang) * rad,
+            );
+            const sc = 0.55 + phase * 1.05;
+            puff.scale.setScalar(sc);
+            (puff.material as THREE.MeshStandardMaterial).opacity = (1 - phase) * 0.75;
+          });
+        } else if (smokeGrp) {
+          smokeGrp.visible = false;
+        }
 
         if (isStackedOnBoard) {
           // 整座叠叠乐作为一个统一整体：使用 YXZ 欧拉角在角色自身朝向的前后方向摇摆（几乎无左右侧倒穿帮），
@@ -4673,27 +4935,29 @@ export class FlightChessEngine {
       }
 
       if (this.diceRig.diceHint.visible) {
-        const pulse = 0.5 + 0.5 * Math.sin(t * 2.8);
-        const rippleCycle = (t * 0.55) % 1;
+        const pulse = 0.5 + 0.5 * Math.sin(t * 3.4);
+        const rippleCycle = (t * 0.72) % 1;
         this.diceRig.dhRing.scale.setScalar(
-          (this.diceHovered ? 1.08 : 1.0) + pulse * 0.05,
+          (this.diceHovered ? 1.24 : 1.12) + pulse * 0.1,
         );
         (this.diceRig.dhRing.material as THREE.MeshBasicMaterial).opacity =
-          (this.diceHovered ? 0.88 : 0.62) + pulse * 0.2;
-        this.diceRig.dhRipple.scale.setScalar(1 + rippleCycle * 0.62);
+          (this.diceHovered ? 0.98 : 0.84) + pulse * 0.16;
+        this.diceRig.dhRipple.scale.setScalar(1 + rippleCycle * 0.95);
         (this.diceRig.dhRipple.material as THREE.MeshBasicMaterial).opacity =
-          (1 - rippleCycle) * (this.diceHovered ? 0.52 : 0.36);
+          (1 - rippleCycle) * (this.diceHovered ? 0.78 : 0.58);
 
         const idleFloatY =
-          DICE_REST_Y + (this.diceHovered ? 0.08 : 0.03) + Math.sin(t * 2.8) * 0.025;
+          DICE_REST_Y + (this.diceHovered ? 0.24 : 0.16) + Math.sin(t * 3.2) * 0.055;
         this.diceRig.dice.position.y = THREE.MathUtils.lerp(
           this.diceRig.dice.position.y,
           idleFloatY,
           Math.min(1, dt * 10),
         );
+        const shadowScale = Math.max(0.68, 1 - (this.diceRig.dice.position.y - DICE_REST_Y) * 0.85);
+        this.diceRig.diceShadow.scale.setScalar(shadowScale);
         this.diceRig.diceMaterials.forEach((m) => {
-          m.emissive.setHex(0xfff4d8);
-          m.emissiveIntensity = this.diceHovered ? 0.12 : 0.04;
+          m.emissive.setHex(0xffeaa8);
+          m.emissiveIntensity = (this.diceHovered ? 0.26 : 0.14) + pulse * 0.1;
         });
       } else {
         if (this.phase !== 'rolling') {
@@ -4703,6 +4967,7 @@ export class FlightChessEngine {
             Math.min(1, dt * 12),
           );
         }
+        this.diceRig.diceShadow.scale.setScalar(1);
         this.diceRig.diceMaterials.forEach((m) => {
           m.emissiveIntensity = 0;
         });

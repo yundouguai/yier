@@ -210,16 +210,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const secondPips = secondDieFace ? (HUD_PIPS[secondDieFace] ?? []) : [];
   const secondRedFace = secondDieFace === 1 || secondDieFace === 4;
 
-  // 任务栏展示对象：支持点击队伍栏任意玩家查看；轮到人类玩家时自动切回自己
-  const firstHumanPid = snap.players.findIndex((p) => p.type === 'human');
-  const fallbackHumanPid =
-    snap.players[lastHumanPidRef.current]?.type === 'human'
-      ? lastHumanPidRef.current
-      : firstHumanPid;
-  const autoQuestPid =
-    cur.type === 'human' ? snap.turn : fallbackHumanPid >= 0 ? fallbackHumanPid : snap.turn;
+  // 回合切换时自动切到当前行动玩家；点击任意玩家卡片直接切过去看
+  useEffect(() => {
+    setInspectedPid(null);
+  }, [snap.turn]);
+
   const effectiveQuestPid =
-    inspectedPid !== null && snap.players[inspectedPid] ? inspectedPid : autoQuestPid;
+    inspectedPid !== null && snap.players[inspectedPid] ? inspectedPid : snap.turn;
   const questPlayer = snap.players[effectiveQuestPid] ?? cur;
   const questHeldItems = ITEM_ORDER.filter((t) => (questPlayer.items?.[t] ?? 0) > 0);
   const questTotalCards = questHeldItems.reduce(
@@ -280,7 +277,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <div key={i} className="relative">
                   <button
                     type="button"
-                    onClick={() => setInspectedPid((prev) => (prev === i ? null : i))}
+                    onClick={() => setInspectedPid(i)}
                     title={`点击查看 ${pl.name} 的任务与道具详情`}
                     className={`pointer-events-auto flex w-full items-start gap-2 rounded-[13px] px-2.5 py-1.5 md:px-3 md:py-2 text-left transition-all duration-200 cursor-pointer hover:bg-white ${
                       pl.active
@@ -427,7 +424,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </button>
 
             {questExpanded && (
-              <div className="anim-card-pop mt-1.5 w-[154px] md:w-[184px] rounded-xl border border-white/80 bg-white/88 p-2 shadow-lg backdrop-blur-sm">
+              <div className="anim-card-pop mt-1.5 w-[168px] md:w-[196px] rounded-xl border border-white/80 bg-white/90 p-2 shadow-lg backdrop-blur-sm">
                 <div className="flex items-center justify-between gap-1 border-b border-slate-100 pb-1">
                   <span
                     className="truncate max-w-[96px] rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white"
@@ -439,18 +436,61 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
 
                 <div className="mt-1.5 space-y-1.5">
-                  <div className="flex items-center justify-between gap-1 rounded-lg bg-amber-50/80 px-2 py-1 text-[10px] border border-amber-200/60">
-                    <span className="font-bold text-slate-700">🎲 1·2点馈赠</span>
-                    <span className="font-extrabold text-amber-700 tabular-nums">
-                      1×{questPlayer.quest?.roll1 ?? 0} · 2×{questPlayer.quest?.roll2 ?? 0}
-                    </span>
+                  <div className="rounded-lg bg-amber-50/85 px-2 py-1.5 border border-amber-200/65">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-800">
+                      <span>🎲 一二的馈赠</span>
+                      <span className="text-[9px] font-semibold text-amber-700">随机卡×1</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1 text-[10px] font-bold tabular-nums">
+                      <span
+                        className={`flex-1 rounded px-1 py-0.5 text-center ${
+                          (questPlayer.quest?.roll1 ?? 0) >= 1
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-white text-slate-600 border border-amber-200/80'
+                        }`}
+                      >
+                        1点 ×{questPlayer.quest?.roll1 ?? 0}
+                      </span>
+                      <span
+                        className={`flex-1 rounded px-1 py-0.5 text-center ${
+                          (questPlayer.quest?.roll2 ?? 0) >= 1
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-white text-slate-600 border border-amber-200/80'
+                        }`}
+                      >
+                        2点 ×{questPlayer.quest?.roll2 ?? 0}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
+                      1点与2点各≥1次，各扣1次兑换
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-1 rounded-lg bg-sky-50/80 px-2 py-1 text-[10px] border border-sky-200/60">
-                    <span className="font-bold text-slate-700">🛡️ 被踩护盾</span>
-                    <span className="font-extrabold text-sky-700 tabular-nums">
-                      {questPlayer.quest?.stomped ?? 0}/2
-                    </span>
+                  <div className="rounded-lg bg-sky-50/85 px-2 py-1.5 border border-sky-200/65">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-800">
+                      <span>🛡️ 布布不烦恼</span>
+                      <span className="text-[9px] font-semibold text-sky-700">护盾/动力×1</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <div className="flex flex-1 gap-1">
+                        {[0, 1].map((step) => (
+                          <span
+                            key={step}
+                            className={`h-1.5 flex-1 rounded-full ${
+                              step < (questPlayer.quest?.stomped ?? 0)
+                                ? 'bg-sky-500'
+                                : 'bg-sky-200/70'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-extrabold text-sky-700 tabular-nums">
+                        {questPlayer.quest?.stomped ?? 0}/2
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
+                      被踩累计2次，扣2次兑换
+                    </div>
                   </div>
 
                   {questHeldItems.length > 0 && (
@@ -538,50 +578,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           )}
 
-          {/* 目标棋子快捷点选条（护盾 / 导弹激活时弹出） */}
-          {humanTurn && snap.phase === 'awaitRoll' && snap.pendingItemTarget !== null && (
-            <div className="anim-card-pop mb-0.5 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border-2 border-sky-300 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-md">
-              <span className="text-[11px] md:text-xs font-extrabold text-slate-800">
-                {snap.pendingItemTarget === 'shield' ? '🛡️ 护盾目标：' : '🚀 导弹目标：'}
-              </span>
-              {snap.targetChoices.map((tc) => (
-                <button
-                  key={`${tc.pid}-${tc.idx}`}
-                  type="button"
-                  onClick={() => onPickItemTarget(tc.pid, tc.idx)}
-                  className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-800 transition hover:border-sky-400 hover:bg-sky-50 cursor-pointer"
-                >
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: tc.ownerColor }}
-                  />
-                  <span>
-                    {tc.ownerName} #{tc.idx + 1}
-                  </span>
-                  <span className="text-[10px] text-slate-400">
-                    {tc.pos === 0 ? '起点' : tc.pos >= 51 ? `内圈${tc.pos - 50}` : `${tc.pos}格`}
-                  </span>
-                  {tc.stackCount >= 2 && (
-                    <span className="rounded bg-amber-100 px-1 text-[9px] text-amber-800">
-                      叠×{tc.stackCount}
-                    </span>
-                  )}
-                  {tc.shielded && (
-                    <span className="rounded bg-cyan-100 px-1 text-[9px] text-cyan-800">
-                      🛡
-                    </span>
-                  )}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={onCancelItemTarget}
-                className="rounded-xl bg-slate-200/80 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-300 cursor-pointer"
-              >
-                取消
-              </button>
-            </div>
-          )}
+
 
           {/* 己方道具卡栏 + 已激活增益提示 */}
           {deckPlayer && (heldItemEntries.length > 0 || snap.armedSixDie || snap.armedTwinDice || snap.armedRefuel) && (
@@ -997,21 +994,55 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <span className="shrink-0 font-semibold text-slate-800">获取途径</span>
                       <span>
                         踩中棋盘上的 <b className="text-amber-700">🍰 草莓蛋糕商店格</b> 可在 15 秒内从 3
-                        张不重复随机道具卡中挑选 1 张；完成左侧悬赏任务（<b>一二宝的馈赠</b>：1点与2点同时≥1次奖随机卡；<b>布布不烦恼</b>：累计被踩2次奖护盾）也可获得。
+                        张不重复随机道具卡中挑选 1 张；完成左侧悬赏任务（<b>一二的馈赠</b>：1点与2点同时≥1次奖随机卡；<b>布布不烦恼</b>：累计被踩2次随机奖护盾或动力装置）也可获得。
                       </span>
                     </li>
                     <li className="flex gap-2.5">
                       <span className="shrink-0 font-semibold text-slate-800">使用限制</span>
                       <span>
-                        在回合内投骰前使用。单回合（含奖励连投）最多使用 <b className="text-slate-900">1 张攻击或防护类道具</b>；导弹属于环境反制卡，不受此上限约束。
+                        在回合内投骰前使用。单回合（含奖励连投）最多使用 <b className="text-slate-900">1 张攻击或防护类道具</b>（导弹与 6数骰、动力装置、空中加油机同属攻击类道具）。
                       </span>
                     </li>
-                    <li className="flex gap-2.5">
-                      <span className="shrink-0 font-semibold text-slate-800">道具效果</span>
-                      <span>
-                        <b>6数骰</b>（必出6无连投）、<b>动力装置</b>（投两骰，出6无连投）、<b>空中加油机</b>（多一次投骰，出6无连投）、<b>护盾</b>（抵挡1次导弹或被踩且同格挤脸站立，不可叠加）、<b>导弹</b>（击中敌方非起/终点棋子后退6格且不触发大跳与飞机）。
-                      </span>
-                    </li>
+                  </ul>
+                  <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+                    <table className="w-full border-collapse text-left text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-700 border-b border-slate-200">
+                          <th className="px-2.5 py-2 font-bold whitespace-nowrap">道具</th>
+                          <th className="px-2.5 py-2 font-bold whitespace-nowrap">类型</th>
+                          <th className="px-2.5 py-2 font-bold">效果与限制</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {ITEM_ORDER.map((itemKey) => {
+                          const def = ITEM_DEFS[itemKey];
+                          const isDefense = def.category === 'defense';
+                          return (
+                            <tr key={itemKey}>
+                              <td className="px-2.5 py-2 font-bold text-slate-800 whitespace-nowrap">
+                                {def.icon} {def.name}
+                              </td>
+                              <td className="px-2.5 py-2 whitespace-nowrap">
+                                <span
+                                  className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                    isDefense
+                                      ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                      : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  }`}
+                                >
+                                  {isDefense ? '防御' : '攻击'}
+                                </span>
+                              </td>
+                              <td className="px-2.5 py-2 text-slate-600 leading-snug">
+                                {def.shortEffect}（{def.limitNote}）
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ul className="hidden">
                   </ul>
                 </section>
               </div>
@@ -1079,8 +1110,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         <h4 className="mt-2.5 text-sm font-extrabold text-slate-900">
                           {def.name}
                         </h4>
-                        <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                          {def.desc}
+                        <p className="mt-1 text-xs leading-snug text-slate-600">
+                          {def.shortEffect}
                         </p>
                       </div>
 
