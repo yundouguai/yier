@@ -4,10 +4,13 @@ import {
   CHARS,
   CharKey,
   HudPlayerSnapshot,
+  MAPS,
+  MapId,
 } from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
 
 export interface MatchmakingState {
+  mapId?: MapId;
   localChars: CharKey[];
   matchedChars: CharKey[];
   matchedPersonalities?: AiPersonality[];
@@ -85,6 +88,9 @@ export const Overlays: React.FC<OverlaysProps> = ({
             </div>
             <h2 className="mt-3 text-xl font-bold text-slate-900">
               {isLaunching ? '匹配完成，正在加载棋盘…' : '正在在线匹配对手…'}
+              <span className="ml-1.5 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                🗺️ {MAPS[matchmaking.mapId ?? 'ancient_city'].name}
+              </span>
             </h2>
             <p className="mt-1 text-xs text-slate-500">
               {isLaunching

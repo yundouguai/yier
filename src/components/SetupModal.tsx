@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { CHARS, CHAR_KEYS, CharKey, toColorHex } from '../game/constants';
+import { CHARS, CHAR_KEYS, CharKey, MAP_ORDER, MAPS, MapId, toColorHex } from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
 
 interface SetupModalProps {
@@ -7,7 +7,9 @@ interface SetupModalProps {
   localChars: CharKey[];
   canResume: boolean;
   hasChanges: boolean;
+  selectedMapId: MapId;
   onChangeLocalChars: (next: CharKey[]) => void;
+  onChangeMapId: (mapId: MapId) => void;
   onResume: () => void;
   onStart: () => void;
 }
@@ -17,22 +19,24 @@ export const SetupModal: React.FC<SetupModalProps> = ({
   localChars,
   canResume,
   hasChanges,
+  selectedMapId,
   onChangeLocalChars,
+  onChangeMapId,
   onResume,
   onStart,
 }) => {
-  if (!open) return null;
-
-  const localCount = localChars.length;
-
   useEffect(() => {
-    if (!canResume) return;
+    if (!open || !canResume) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onResume();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [canResume, onResume]);
+  }, [open, canResume, onResume]);
+
+  if (!open) return null;
+
+  const localCount = localChars.length;
   const needMatch = 4 - localCount;
 
   const cycleChar = (idx: number, dir: number) => {
@@ -159,6 +163,47 @@ export const SetupModal: React.FC<SetupModalProps> = ({
               <span>添加本地玩家（{localCount}/4）</span>
             </button>
           )}
+        </div>
+
+
+        <div className="mt-4 pt-3.5 border-t border-slate-100">
+          <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-500">
+            <span>选择地图</span>
+            <span className="text-[11px] font-medium text-slate-400">当前开放 {MAP_ORDER.length} 张</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {MAP_ORDER.map((id) => {
+              const cfg = MAPS[id];
+              const active = selectedMapId === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onChangeMapId(id)}
+                  className={`flex items-center justify-between gap-3 rounded-[14px] border-2 px-3.5 py-2.5 text-left transition-all cursor-pointer ${
+                    active
+                      ? 'border-[#2c9a60] bg-emerald-50/70 shadow-xs'
+                      : 'border-slate-200 bg-slate-50/70 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-xs">
+                      🏯
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold text-slate-800">{cfg.name}</div>
+                      <div className="truncate text-[11px] font-medium text-slate-500">{cfg.subtitle}</div>
+                    </div>
+                  </div>
+                  {active && (
+                    <span className="shrink-0 rounded-full bg-[#2c9a60] px-2.5 py-0.5 text-[11px] font-extrabold text-white">
+                      ✓ 已选
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {canResume ? (

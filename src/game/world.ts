@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   FLIGHT_FROM,
   FLIGHT_STEP,
+  MapId,
   NEUTRAL_CELL,
   PlayerConfig,
   Point2D,
@@ -5182,4 +5183,17 @@ export function buildAncientWorld(
     hillH,
     spawnCritter,
   };
+}
+
+export function buildWorldByMapId(
+  mapId: MapId,
+  scene: THREE.Scene,
+  players: PlayerConfig[],
+  anisotropy: number,
+): WorldRefs {
+  switch (mapId) {
+    case 'ancient_city':
+    default:
+      return buildAncientWorld(scene, players, anisotropy);
+  }
 }

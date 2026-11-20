@@ -17,6 +17,7 @@ import {
   CharKey,
   DEFAULT_SEATS,
   GameHudSnapshot,
+  MapId,
   SeatConfig,
 } from './game/constants';
 
@@ -45,6 +46,7 @@ function parseUrlSeats(): { seats: SeatConfig[]; hasParam: boolean } {
 }
 
 const INITIAL_SNAPSHOT: GameHudSnapshot = {
+  mapId: 'ancient_city',
   phase: 'idle',
   turn: 0,
   die: null,
@@ -119,6 +121,8 @@ export default function App() {
   const transitionWaitRef = useRef(false);
 
   const [activeSeats, setActiveSeats] = useState<SeatConfig[]>(initialParsed.current.seats);
+  const [activeMapId, setActiveMapId] = useState<MapId>('ancient_city');
+  const [draftMapId, setDraftMapId] = useState<MapId>('ancient_city');
   const [activeLocalChars, setActiveLocalChars] = useState<CharKey[]>(
     initialLocalChars.length > 0 ? initialLocalChars : ['yier'],
   );
@@ -145,7 +149,7 @@ export default function App() {
   }, [clearMatchTimers]);
 
   const canResume = snap.phase !== 'idle' && snap.winnerPid === null && !matchmaking;
-  const hasSeatChanges = JSON.stringify(draftLocalChars) !== JSON.stringify(activeLocalChars);
+  const hasSeatChanges = JSON.stringify(draftLocalChars) !== JSON.stringify(activeLocalChars) || draftMapId !== activeMapId;
 
   // Mount & manage WebGL engine lifecycle cleanly
   useEffect(() => {
@@ -171,6 +175,7 @@ export default function App() {
         }, 120);
         matchTimersRef.current.push(revealTid);
       },
+      activeMapId,
     );
     engineRef.current = engine;
 
@@ -202,6 +207,7 @@ export default function App() {
           personality: personalities[idx],
         })),
       ];
+      setActiveMapId(draftMapId);
       setActiveLocalChars([...locals]);
       setActiveSeats(nextSeats);
       setShowSetup(false);
@@ -253,6 +259,7 @@ export default function App() {
 
     setShowSetup(false);
     setMatchmaking({
+      mapId: draftMapId,
       localChars: [...draftLocalChars],
       matchedChars,
       matchedPersonalities,
@@ -431,7 +438,9 @@ export default function App() {
         localChars={draftLocalChars}
         canResume={canResume}
         hasChanges={hasSeatChanges}
+        selectedMapId={draftMapId}
         onChangeLocalChars={setDraftLocalChars}
+        onChangeMapId={setDraftMapId}
         onResume={handleResumeFromSetup}
         onStart={handleStartGame}
       />

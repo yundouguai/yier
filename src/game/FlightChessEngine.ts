@@ -28,6 +28,9 @@ import {
   ITEM_ORDER,
   ItemTargetChoice,
   ItemType,
+  MAPS,
+  MapConfig,
+  MapId,
   ORIENT,
   PlayerConfig,
   PlayerQuestState,
@@ -53,7 +56,7 @@ import {
   makePlaneModel,
 } from './pieces';
 import { createNumberBadgeTexture } from './textures';
-import { WorldRefs, buildAncientWorld } from './world';
+import { WorldRefs, buildWorldByMapId } from './world';
 
 const TIMEOUT = 30000;
 const STACK_STEP_Y = 0.625;
@@ -132,6 +135,8 @@ function detectSoftwareGl(): boolean {
 
 export class FlightChessEngine {
   private container: HTMLElement;
+  private readonly mapId: MapId;
+  private readonly mapConfig: MapConfig;
   private onSnapshot: (snap: GameHudSnapshot) => void;
   private onContextLostCb?: (lost: boolean) => void;
 
@@ -262,8 +267,11 @@ export class FlightChessEngine {
     onSnapshot: (snap: GameHudSnapshot) => void,
     onContextLost?: (lost: boolean) => void,
     onReady?: () => void,
+    mapId: MapId = 'ancient_city',
   ) {
     this.container = container;
+    this.mapId = mapId;
+    this.mapConfig = MAPS[mapId] ?? MAPS.ancient_city;
     this.onSnapshot = onSnapshot;
     this.onContextLostCb = onContextLost;
 
@@ -346,8 +354,9 @@ export class FlightChessEngine {
     this.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xdbe8df);
-    this.scene.fog = new THREE.Fog(0xdbe8df, 48, 108);
+    this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
+    this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
+    this.scene.fog = new THREE.Fog(this.mapConfig.fogHex, this.mapConfig.fogNear, this.mapConfig.fogFar);
 
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     const roomEnv = new RoomEnvironment();
@@ -411,7 +420,7 @@ export class FlightChessEngine {
     this.scene.add(fill);
 
     // World & Pieces
-    this.world = buildAncientWorld(this.scene, this.players, this.anisotropy);
+    this.world = buildWorldByMapId(this.mapId, this.scene, this.players, this.anisotropy);
     this.shopRingSet = new Set(this.world.shopRingIndices);
     this.playerItems = this.players.map(() => ({
       sixDie: 0,
@@ -943,6 +952,7 @@ export class FlightChessEngine {
     });
 
     this.onSnapshot({
+      mapId: this.mapId,
       phase: this.phase,
       turn: this.turn,
       die: this.die,

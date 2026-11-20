@@ -239,6 +239,34 @@ export interface HudPlayerSnapshot {
   quest: PlayerQuestState;
 }
 
+export type MapId = 'ancient_city';
+
+export interface MapConfig {
+  id: MapId;
+  name: string;
+  subtitle: string;
+  skyBgHex: number;
+  fogHex: number;
+  fogNear: number;
+  fogFar: number;
+  themeAccent: string;
+}
+
+export const MAP_ORDER: MapId[] = ['ancient_city'];
+
+export const MAPS: Record<MapId, MapConfig> = {
+  ancient_city: {
+    id: 'ancient_city',
+    name: '古城地图',
+    subtitle: '护城河 · 熊熊坊 · 江南庭院',
+    skyBgHex: 0xdbe8df,
+    fogHex: 0xdbe8df,
+    fogNear: 48,
+    fogFar: 108,
+    themeAccent: '#2c9a60',
+  },
+};
+
 export interface GiftQuestEvent {
   questType?: 'gift' | 'bubu';
   playerName: string;
@@ -255,6 +283,7 @@ export interface HudEmoteEvent {
 }
 
 export interface GameHudSnapshot {
+  mapId: MapId;
   phase: GamePhase;
   turn: number;
   die: number | null;
