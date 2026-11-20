@@ -334,6 +334,7 @@ export interface GameHudSnapshot {
   rankings: number[];
   gmDie: number | null;
   turnUsedAtkDef: boolean;
+  turnUsedDef: boolean;
   armedSixDie: boolean;
   armedTwinDice: boolean;
   armedRefuel: boolean;

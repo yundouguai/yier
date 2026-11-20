@@ -955,23 +955,38 @@ export function buildAncientWorld(
     g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const waterMat = new THREE.MeshPhysicalMaterial({
-      color: 0xffffff,
-      map: moatTex,
-      normalMap: waterNormalTex,
-      normalScale: new THREE.Vector2(0.28, 0.28),
-      vertexColors: true,
-      roughness: 0.34,
-      metalness: 0.0,
-      clearcoat: 0.14,
-      clearcoatRoughness: 0.3,
-      ior: 1.333,
-      reflectivity: 0.28,
-      envMapIntensity: 0.22,
-      transparent: true,
-      opacity: 0.78,
-      depthWrite: false,
-    });
+    const isLowPower = anisotropy <= 4;
+    const waterMat = isLowPower
+      ? new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: moatTex,
+          normalMap: waterNormalTex,
+          normalScale: new THREE.Vector2(0.26, 0.26),
+          vertexColors: true,
+          roughness: 0.34,
+          metalness: 0.0,
+          envMapIntensity: 0.22,
+          transparent: true,
+          opacity: 0.78,
+          depthWrite: false,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: 0xffffff,
+          map: moatTex,
+          normalMap: waterNormalTex,
+          normalScale: new THREE.Vector2(0.28, 0.28),
+          vertexColors: true,
+          roughness: 0.34,
+          metalness: 0.0,
+          clearcoat: 0.14,
+          clearcoatRoughness: 0.3,
+          ior: 1.333,
+          reflectivity: 0.28,
+          envMapIntensity: 0.22,
+          transparent: true,
+          opacity: 0.78,
+          depthWrite: false,
+        });
     waterMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = waterUniforms.uTime;
       shader.vertexShader = shader.vertexShader

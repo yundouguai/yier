@@ -242,12 +242,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         }}
       />
 
-      {/* 一二的馈赠 / 布布不烦恼 任务完成悬浮表情 + 飘出获得道具 */}
+      {/* 一二的馈赠 / 布布不烦恼 任务完成悬浮表情 + 飘出获得道具（严格居中） */}
       {snap.giftQuestEvent && !showSetup && (
         <div
           key={snap.giftQuestEvent.key}
-          className="hud-gift-toast pointer-events-none fixed left-1/2 top-[33%] md:top-[31%] z-[22] max-w-[calc(100vw-24px)] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
+          className="pointer-events-none fixed inset-0 z-[22] flex items-center justify-center p-4"
         >
+          <div className="hud-gift-toast-inner flex max-w-[calc(100vw-24px)] flex-col items-center">
           <div
             className="anim-gift-float mb-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 max-w-[calc(100vw-28px)] rounded-full bg-white/65 px-4 py-1.5 text-sm sm:text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
             style={{
@@ -289,35 +290,40 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼' : '一二的馈赠'}
             className="anim-gift-sticker h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
           />
+          </div>
         </div>
       )}
 
-      {/* Turn / Item splash banner + floating Yier & Bubu item sticker */}
+      {/* Turn / Item splash banner + floating Yier & Bubu item sticker（严格居中） */}
       <div
-        className={`pointer-events-none fixed left-1/2 top-[26%] md:top-[24%] z-[20] flex flex-col items-center gap-1.5 max-w-[calc(100vw-24px)] transition-all duration-200 ${
-          snap.splashVisible
-            ? 'opacity-100 -translate-x-1/2 -translate-y-1/2 scale-100'
-            : 'opacity-0 -translate-x-1/2 -translate-y-1/2 scale-90'
+        className={`pointer-events-none fixed inset-0 z-[20] flex items-center justify-center p-4 transition-opacity duration-200 ${
+          snap.splashVisible ? 'opacity-100' : 'opacity-0'
         }`}
       >
-        {snap.splashVisible && snap.splashItem && (
-          <img
-            key={`item-sticker-${snap.splashKey}`}
-            src={`./assets/item_${snap.splashItem}.gif?v=${snap.splashKey}`}
-            alt={ITEM_DEFS[snap.splashItem].name}
-            className="h-28 w-28 md:h-32 md:w-32 shrink-0 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.24)]"
-          />
-        )}
         <div
-          className="flex items-center gap-2.5 rounded-full bg-white/88 px-5 py-2 text-sm sm:text-base md:text-lg font-extrabold text-slate-800 backdrop-blur-sm"
-          style={{
-            border: `2.5px solid ${snap.splashColor}`,
-            boxShadow: `0 12px 32px rgba(0,0,0,0.2), 0 0 0 4px ${snap.splashColor}28`,
-          }}
+          className={`hud-item-splash-inner flex max-w-[calc(100vw-24px)] flex-col items-center gap-1.5 transition-transform duration-200 ${
+            snap.splashVisible ? 'scale-100' : 'scale-90'
+          }`}
         >
-          <CharacterAvatar charKey={snap.splashCharKey} size={28} />
-          {snap.splashItem && <ItemIcon item={snap.splashItem} size={22} />}
-          <span>{snap.splashText}</span>
+          {snap.splashVisible && snap.splashItem && (
+            <img
+              key={`item-sticker-${snap.splashKey}`}
+              src={`./assets/item_${snap.splashItem}.gif?v=${snap.splashKey}`}
+              alt={ITEM_DEFS[snap.splashItem].name}
+              className="h-28 w-28 md:h-32 md:w-32 shrink-0 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.24)]"
+            />
+          )}
+          <div
+            className="flex flex-wrap items-center justify-center gap-2 rounded-full bg-white/88 px-5 py-2 text-sm sm:text-base md:text-lg font-extrabold text-slate-800 backdrop-blur-sm"
+            style={{
+              border: `2.5px solid ${snap.splashColor}`,
+              boxShadow: `0 12px 32px rgba(0,0,0,0.2), 0 0 0 4px ${snap.splashColor}28`,
+            }}
+          >
+            <CharacterAvatar charKey={snap.splashCharKey} size={28} />
+            {snap.splashItem && <ItemIcon item={snap.splashItem} size={22} />}
+            <span>{snap.splashText}</span>
+          </div>
         </div>
       </div>
 
@@ -465,7 +471,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   onClick={() => setPartyExpanded(false)}
                   title="向左收起队伍栏"
                   aria-label="向左收起队伍栏"
-                  className="pointer-events-auto mt-1 flex h-7 w-5 shrink-0 items-center justify-center rounded-r-lg border border-l-0 border-white/60 bg-white/75 text-[11px] font-bold text-slate-600 shadow-xs backdrop-blur-xs transition-colors hover:bg-white hover:text-slate-900 cursor-pointer"
+                  className="pointer-events-auto mt-1.5 -ml-0.5 flex h-5 w-4 shrink-0 items-center justify-center rounded-full bg-white/35 text-[9px] font-bold text-slate-500/80 backdrop-blur-[2px] transition-all hover:bg-white/75 hover:text-slate-800 cursor-pointer"
                 >
                   ◂
                 </button>
@@ -476,10 +482,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 onClick={() => setPartyExpanded(true)}
                 title="展开队伍栏"
                 aria-label="展开队伍栏"
-                className="pointer-events-auto flex items-center gap-1 rounded-r-xl border border-l-0 border-white/70 bg-white/80 px-2 py-1.5 text-[11px] font-extrabold text-slate-700 shadow-sm backdrop-blur-xs transition-colors hover:bg-white cursor-pointer"
+                className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-white/55 px-2 py-1 text-[10px] font-bold text-slate-600 backdrop-blur-xs transition-colors hover:bg-white/85 hover:text-slate-900 cursor-pointer"
               >
                 <span>队伍</span>
-                <span className="text-[10px]">▸</span>
+                <span className="text-[9px]">▸</span>
               </button>
             )}
           </div>
@@ -494,17 +500,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     textShadow: '0 1px 2px rgba(255,255,255,0.8)',
                   }}
                 >
-                  <div className="flex w-full items-center justify-between gap-1 py-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setQuestExpanded(false)}
+                    title="向左收起任务栏"
+                    aria-label="向左收起任务栏"
+                    className="flex w-full items-center justify-between gap-1 py-0.5 text-left cursor-pointer group"
+                  >
                     <span
-                      className="truncate max-w-[96px] text-[11px] font-extrabold"
+                      className="truncate max-w-[92px] text-[11px] font-extrabold"
                       style={{ color: questPlayer.uiColor }}
                     >
                       {questPlayer.name}
                     </span>
-                    <span className="text-[10px] font-bold text-slate-700 whitespace-nowrap">
-                      任务·道具
+                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-700 whitespace-nowrap">
+                      <span>任务·道具</span>
+                      <span className="text-[9px] text-slate-400 transition-colors group-hover:text-slate-700">◂</span>
                     </span>
-                  </div>
+                  </button>
 
                   <div className="mt-1 space-y-1.5 text-slate-800">
                     <div>
@@ -551,15 +564,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setQuestExpanded(false)}
-                  title="向左收起任务栏"
-                  aria-label="向左收起任务栏"
-                  className="pointer-events-auto mt-1 flex h-7 w-5 shrink-0 items-center justify-center rounded-r-lg border border-l-0 border-white/50 bg-white/55 text-[11px] font-bold text-slate-700 backdrop-blur-xs transition-colors hover:bg-white/85 hover:text-slate-900 cursor-pointer"
-                >
-                  ◂
-                </button>
+
               </>
             ) : (
               <button
@@ -567,10 +572,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 onClick={() => setQuestExpanded(true)}
                 title="展开任务栏"
                 aria-label="展开任务栏"
-                className="pointer-events-auto flex items-center gap-1 rounded-r-xl border border-l-0 border-white/55 bg-white/65 px-2 py-1.5 text-[11px] font-extrabold text-slate-700 shadow-xs backdrop-blur-xs transition-colors hover:bg-white/90 cursor-pointer"
+                className="pointer-events-auto flex items-center gap-0.5 rounded-full bg-white/48 px-2 py-1 text-[10px] font-bold text-slate-600 backdrop-blur-xs transition-colors hover:bg-white/80 hover:text-slate-900 cursor-pointer"
               >
                 <span>任务</span>
-                <span className="text-[10px]">▸</span>
+                <span className="text-[9px]">▸</span>
               </button>
             )}
           </div>
@@ -671,8 +676,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               {heldItemEntries.map((itemKey) => {
                 const def = ITEM_DEFS[itemKey];
                 const count = deckPlayer.items[itemKey];
-                const isCounter = def.category === 'counter';
-                const blockedByCap = !isCounter && snap.turnUsedAtkDef;
+                const isDefenseCard = itemKey === 'shield';
+                const blockedByCap = isDefenseCard ? snap.turnUsedDef : snap.turnUsedAtkDef;
                 const canUseNow = snap.phase === 'awaitRoll' && !blockedByCap;
                 const isPickingThis = snap.pendingItemTarget === itemKey;
                 return (
@@ -702,7 +707,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         </span>
                       </div>
                       <div className="text-[9px] font-medium text-slate-500">
-                        {blockedByCap ? '本回合已用攻/防卡' : def.shortEffect}
+                        {blockedByCap ? (isDefenseCard ? '下回合再洗香香~' : '已经吃不下啦~') : def.shortEffect}
                       </div>
                     </div>
                   </button>

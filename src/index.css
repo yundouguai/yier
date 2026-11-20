@@ -175,8 +175,10 @@
     transform: scale(0.78);
     transform-origin: bottom center;
   }
-  .hud-gift-toast {
-    top: 24% !important;
-    transform: translate(-50%, -50%) scale(0.76);
+  .hud-gift-toast-inner {
+    transform: scale(0.78);
+  }
+  .hud-item-splash-inner {
+    transform: scale(0.82);
   }
 }

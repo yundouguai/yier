@@ -146,6 +146,12 @@ export class FlightChessEngine {
   private controls: OrbitControls;
   private envRT: THREE.WebGLRenderTarget;
   private isSoftwareGl: boolean;
+  private isMobile: boolean;
+  private frameCounter = 0;
+  private shadowInterval = 1;
+  private perfFrameAccum = 0;
+  private perfFrameCount = 0;
+  private perfDowngraded = false;
   private anisotropy: number;
 
   private players: PlayerConfig[];
@@ -187,6 +193,7 @@ export class FlightChessEngine {
   private playerItems: Record<ItemType, number>[] = [];
   private playerQuests: PlayerQuestState[] = [];
   private turnUsedAtkDef = false;
+  private turnUsedDef = false;
   private armedSixDie = false;
   private armedTwinDice = false;
   private armedRefuel = false;
@@ -258,7 +265,9 @@ export class FlightChessEngine {
   private boundPointerMove: (e: PointerEvent) => void;
   private boundPointerUp: (e: PointerEvent) => void;
   private boundContextLost: (e: Event) => void;
+  private isContextLost = false;
   private boundContextRestored: () => void;
+  private boundVisibilityChange: () => void;
   private boundControlsStart: () => void;
   private boundControlsEnd: () => void;
 
@@ -338,22 +347,33 @@ export class FlightChessEngine {
     this.lastAiEmoteAt = this.players.map(() => -9999);
 
     this.isSoftwareGl = detectSoftwareGl();
+    this.isMobile =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (navigator.maxTouchPoints > 1 && Math.min(window.innerWidth, window.innerHeight) < 820);
     this.renderer = new THREE.WebGLRenderer({
-      antialias: !this.isSoftwareGl,
+      antialias: !this.isSoftwareGl && !this.isMobile,
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(
-      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2),
-    );
+    const maxDpr = this.isSoftwareGl ? 1 : this.isMobile ? 1.25 : 1.75;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = this.isMobile
+      ? THREE.PCFShadowMap
+      : THREE.PCFSoftShadowMap;
+    if (this.isMobile && !this.isSoftwareGl) {
+      // 移动端隔帧刷新阴影，显著降低 Shadow Pass GPU 负载
+      this.renderer.shadowMap.autoUpdate = false;
+      this.renderer.shadowMap.needsUpdate = true;
+      this.shadowInterval = 2;
+    }
     this.container.appendChild(this.renderer.domElement);
 
-    this.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    this.anisotropy = this.isMobile ? Math.min(4, maxAniso) : maxAniso;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
@@ -416,7 +436,8 @@ export class FlightChessEngine {
     );
     sun.position.set(...this.mapConfig.sunPosition);
     sun.castShadow = !this.isSoftwareGl;
-    const shadowDim = window.innerWidth < 900 || window.innerHeight < 560 ? 1024 : 2048;
+    const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 4;
+    const shadowDim = this.isMobile ? (devMem <= 3 ? 512 : 1024) : window.innerWidth < 900 || window.innerHeight < 560 ? 1024 : 2048;
     sun.shadow.mapSize.set(shadowDim, shadowDim);
     sun.shadow.camera.left = -13;
     sun.shadow.camera.right = 13;
@@ -662,10 +683,23 @@ export class FlightChessEngine {
     };
     this.boundContextLost = (e: Event) => {
       e.preventDefault();
+      this.isContextLost = true;
       this.onContextLostCb?.(true);
     };
     this.boundContextRestored = () => {
+      this.isContextLost = false;
+      this.restoreGpuResources();
       this.onContextLostCb?.(false);
+    };
+    this.boundVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !this.disposed) {
+        // 丢弃后台挂起期间累积的巨大时间差，防止动画/小动物/贴图 UV 瞬移
+        this.clock.getDelta();
+        if (!this.isContextLost) {
+          this.renderer.shadowMap.needsUpdate = true;
+          this.renderer.render(this.scene, this.camera);
+        }
+      }
     };
     this.boundControlsStart = () => {
       this.camUserInteracting = true;
@@ -678,6 +712,7 @@ export class FlightChessEngine {
     };
 
     window.addEventListener('resize', this.boundResize);
+    document.addEventListener('visibilitychange', this.boundVisibilityChange);
     this.controls.addEventListener('start', this.boundControlsStart);
     this.controls.addEventListener('end', this.boundControlsEnd);
     this.renderer.domElement.addEventListener('pointerdown', this.boundPointerDown);
@@ -789,7 +824,8 @@ export class FlightChessEngine {
   private scheduleCritter(kind: 'rabbit' | 'bird' | 'fly' | 'fish', delay: number): void {
     this.after(delay, () => {
       if (this.disposed) return;
-      if (this.mapConfig.enableCritterSpawns) this.world.spawnCritter?.(kind);
+      const maxCritters = this.isMobile ? 3 : 8;
+      if (this.mapConfig.enableCritterSpawns && this.world.critters.length < maxCritters) this.world.spawnCritter?.(kind);
       this.scheduleCritter(kind, rnd(5500, 12000));
     });
   }
@@ -893,7 +929,7 @@ export class FlightChessEngine {
     const def = ITEM_DEFS[item];
     this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
     this.splashCharKey = P.key;
-    this.splashText = `${def.icon} ${P.name} 使用「${def.name}」· ${detail ?? def.shortEffect}`;
+    this.splashText = item === 'shield' ? '🫧 香布布~香布布~浑身香香的布布~' : `${def.icon} ${P.name} 使用「${def.name}」· ${detail ?? def.shortEffect}`;
     this.splashColor = def.accentColor;
     this.splashItem = item;
     this.splashKey++;
@@ -996,6 +1032,7 @@ export class FlightChessEngine {
       rankings: this.getRankings(),
       gmDie: this.gmNextDie,
       turnUsedAtkDef: this.turnUsedAtkDef,
+      turnUsedDef: this.turnUsedDef,
       armedSixDie: this.armedSixDie,
       armedTwinDice: this.armedTwinDice,
       armedRefuel: this.armedRefuel,
@@ -1081,17 +1118,18 @@ export class FlightChessEngine {
     ring.position.set(x, 0.34, z);
     this.scene.add(ring);
 
+    const bubbleColors = [0xffc2e2, 0xa6f4ff, 0xd9c2ff, 0xffffff];
     const shards: { m: THREE.Mesh; vx: number; vy: number; vz: number }[] = [];
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2;
+    for (let i = 0; i < 14; i++) {
+      const a = (i / 14) * Math.PI * 2;
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xa6f4ff,
+        color: bubbleColors[i % bubbleColors.length],
         transparent: true,
-        opacity: 0.95,
+        opacity: 0.85,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 0), mat);
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.055 + (i % 3) * 0.015, 10, 8), mat);
       m.position.set(x + Math.cos(a) * 0.25, 0.42, z + Math.sin(a) * 0.25);
       this.scene.add(m);
       shards.push({
@@ -1989,7 +2027,7 @@ export class FlightChessEngine {
           this.syncShieldVisuals();
           const cPos = this.posToCell(P, endangered[0].c.plane.pos);
           this.spawnShieldBreak(cPos[0], cPos[1]);
-          this.setMsg(`🛡️ ${P.name} 为棋子开启了护盾！`, P.uiColor);
+          this.setMsg('🫧 香布布~香布布~浑身香香的布布~', P.uiColor);
           this.showItemSplash(P, 'shield');
           this.emitAiEmote(me, 'useShield', 1800);
           this.emitSnapshot();
@@ -2261,8 +2299,13 @@ export class FlightChessEngine {
     if (!inv || inv[type] <= 0) return;
     const def = ITEM_DEFS[type];
 
-    if (def.category !== 'counter' && this.turnUsedAtkDef) {
-      this.setMsg('⚠️ 本回合已使用过 1 张攻击或防护类道具！');
+    if (type === 'shield') {
+      if (this.turnUsedDef) {
+        this.setMsg('🫧 下回合再洗香香~');
+        return;
+      }
+    } else if (this.turnUsedAtkDef) {
+      this.setMsg('🍰 已经吃不下啦~');
       return;
     }
 
@@ -2322,8 +2365,8 @@ export class FlightChessEngine {
       if (choices.length === 0) {
         this.setMsg(
           type === 'shield'
-            ? '🛡️ 场上暂无可套盾的己方棋子（护盾不可叠加）'
-            : '🚀 场上暂无可攻击的敌方棋子（起点与终点除外）',
+            ? '🫧 场上暂无可套泡泡罩的己方小熊（不可叠加）'
+            : '🥧 场上暂无可丢奶油派的敌方小熊（起点与终点除外）',
         );
         return;
       }
@@ -2335,8 +2378,8 @@ export class FlightChessEngine {
       );
       this.setMsg(
         type === 'shield'
-          ? '🛡️ 请点选场上己方棋子为其套上护盾'
-          : '🚀 请点选场上敌方棋子发射导弹',
+          ? '🫧 请点选场上己方小熊套上软绵绵泡泡罩'
+          : '🥧 请点选场上敌方小熊丢出恶作剧奶油派',
       );
       this.emitSnapshot();
     }
@@ -2365,10 +2408,10 @@ export class FlightChessEngine {
     const inv = this.playerItems[this.turn];
 
     if (kind === 'shield') {
-      if (inv.shield <= 0 || this.turnUsedAtkDef) return;
+      if (inv.shield <= 0 || this.turnUsedDef) return;
       inv.shield -= 1;
       match.plane.shielded = true;
-      this.turnUsedAtkDef = true;
+      this.turnUsedDef = true;
       this.pendingItemTarget = null;
       this.targetChoices = [];
       this.clearHL();
@@ -2376,8 +2419,8 @@ export class FlightChessEngine {
       const cPos = this.posToCell(this.players[pid], match.plane.pos);
       this.spawnShieldBreak(cPos[0], cPos[1]);
       beep(740, 0.12, 'triangle', 0.14);
-      this.setMsg(`🛡️ 已为 #${match.plane.idx + 1} 号棋子开启护盾（不可叠加）！`);
-      this.showItemSplash(this.cur(), 'shield', `为 #${match.plane.idx + 1} 号棋子开启护盾`);
+      this.setMsg('🫧 香布布~香布布~浑身香香的布布~');
+      this.showItemSplash(this.cur(), 'shield', `为 #${match.plane.idx + 1} 号小熊套上泡泡罩`);
       this.emitSnapshot();
     } else if (kind === 'missile') {
       if (inv.missile <= 0 || this.turnUsedAtkDef) return;
@@ -2999,8 +3042,8 @@ export class FlightChessEngine {
     this.armedSixDie = false;
     this.armedTwinDice = false;
     this.armedRefuel = false;
-    this.pendingExtraRoll = usedRefuel;
-    this.suppressSixBonusThisRoll = usedSixDie || usedTwinDice || usedRefuel;
+    this.pendingExtraRoll = this.pendingExtraRoll || usedRefuel;
+    this.suppressSixBonusThisRoll = usedSixDie || usedTwinDice;
     this.twinDice = null;
     this.twinDiceUsedForRoll = usedTwinDice;
     this.emitSnapshot();
@@ -3064,6 +3107,21 @@ export class FlightChessEngine {
     await this.onRolled(die, die === 5 || die === 6);
   }
 
+  private consumeExtraRoll(die: number): boolean {
+    const gotSixBonus =
+      !this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3;
+    this.suppressSixBonusThisRoll = false;
+    if (gotSixBonus) {
+      // 投出 6 本身触发免费连投，保留尚未消耗的连投道具次数（不被吞掉）
+      return true;
+    }
+    if (this.pendingExtraRoll) {
+      this.pendingExtraRoll = false;
+      return true;
+    }
+    return false;
+  }
+
   private async onRolled(die: number, allowTakeoff = die === 5 || die === 6): Promise<void> {
     if (this.disposed) return;
     const cands = this.movablePlanes(this.turn, die, allowTakeoff);
@@ -3071,10 +3129,7 @@ export class FlightChessEngine {
       this.setMsg(`🎲 掷出 ${die} 点，暂无可移动飞机`);
       await this.sleep(1000);
       if (!this.disposed) {
-        const willRollAgain =
-          this.pendingExtraRoll || (!this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3);
-        this.pendingExtraRoll = false;
-        this.suppressSixBonusThisRoll = false;
+        const willRollAgain = this.consumeExtraRoll(die);
         this.endTurn(willRollAgain);
       }
       return;
@@ -3410,7 +3465,7 @@ export class FlightChessEngine {
     });
     if (this.disposed) {
       this.scene.remove(fp);
-      this.disposeObject3D(fp);
+      this.disposeGeometryOnly(fp);
       return;
     }
     fp.position.set(bx, 0.42, bz);
@@ -3422,7 +3477,7 @@ export class FlightChessEngine {
     for (let bIdx = 0; bIdx < boardOrder.length; bIdx++) {
       if (this.disposed) {
         this.scene.remove(fp);
-      this.disposeObject3D(fp);
+      this.disposeGeometryOnly(fp);
         return;
       }
       const p = boardOrder[bIdx];
@@ -3510,7 +3565,7 @@ export class FlightChessEngine {
     });
     if (this.disposed) {
       this.scene.remove(fp);
-      this.disposeObject3D(fp);
+      this.disposeGeometryOnly(fp);
       return;
     }
 
@@ -3554,7 +3609,7 @@ export class FlightChessEngine {
       }
     }).then(() => {
       this.scene.remove(fp);
-      this.disposeObject3D(fp);
+      this.disposeGeometryOnly(fp);
     });
 
     await this.tween(260, (k) => {
@@ -3982,10 +4037,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.relayout();
         this.emitSnapshot();
-        const willRollAgainAfter =
-          this.pendingExtraRoll || (!this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3);
-        this.pendingExtraRoll = false;
-        this.suppressSixBonusThisRoll = false;
+        const willRollAgainAfter = this.consumeExtraRoll(die);
         await this.sleep(450);
         if (this.disposed) return;
         if (this.camFollowPlane && this.camMode === 'follow' && !this.camUserInteracting) {
@@ -4050,10 +4102,7 @@ export class FlightChessEngine {
     this.relayout();
     this.emitSnapshot();
 
-    const willRollAgain =
-      this.pendingExtraRoll || (!this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3);
-    this.pendingExtraRoll = false;
-    this.suppressSixBonusThisRoll = false;
+    const willRollAgain = this.consumeExtraRoll(die);
 
     if (this.planesOf(plane.pid).every((p) => p.pos === HOME_END)) {
       if (!this.finishedOrder.includes(plane.pid)) {
@@ -4146,6 +4195,7 @@ export class FlightChessEngine {
     );
     this.sixChain = 0;
     this.turnUsedAtkDef = false;
+    this.turnUsedDef = false;
     this.armedSixDie = false;
     this.armedTwinDice = false;
     this.armedRefuel = false;
@@ -4499,7 +4549,7 @@ export class FlightChessEngine {
     const tick = () => {
       if (this.disposed) return;
       this.stepFrame();
-      this.renderer.render(this.scene, this.camera);
+      if (!this.isContextLost) this.renderer.render(this.scene, this.camera);
       if (this.isSoftwareGl) {
         this.afterDraw(tick);
       } else {
@@ -4508,7 +4558,7 @@ export class FlightChessEngine {
     };
     if (this.isSoftwareGl) {
       this.stepFrame();
-      this.renderer.render(this.scene, this.camera);
+      if (!this.isContextLost) this.renderer.render(this.scene, this.camera);
       this.afterDraw(tick);
     } else {
       this.frameId = requestAnimationFrame(tick);
@@ -4516,8 +4566,37 @@ export class FlightChessEngine {
   }
 
   private stepFrame(): void {
-    const dt = this.clock.getDelta();
+    if (this.isContextLost) {
+      this.clock.getDelta();
+      return;
+    }
+    const dt = Math.min(this.clock.getDelta(), 0.1);
     const t = this.clock.elapsedTime;
+    this.frameCounter++;
+
+    if (!this.isSoftwareGl && !this.renderer.shadowMap.autoUpdate) {
+      if (this.frameCounter % this.shadowInterval === 0) {
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+    }
+
+    // 动态帧率保护：若连续 45 帧平均低于 28fps，自动柔和降一档分辨率与阴影刷新率
+    if (!this.isSoftwareGl && !this.perfDowngraded && dt > 0) {
+      this.perfFrameAccum += dt;
+      this.perfFrameCount++;
+      if (this.perfFrameCount >= 45) {
+        const avgDt = this.perfFrameAccum / this.perfFrameCount;
+        this.perfFrameAccum = 0;
+        this.perfFrameCount = 0;
+        if (avgDt > 1 / 28) {
+          this.perfDowngraded = true;
+          this.renderer.setPixelRatio(1);
+          this.renderer.shadowMap.autoUpdate = false;
+          this.shadowInterval = 4;
+          this.renderer.shadowMap.needsUpdate = true;
+        }
+      }
+    }
 
     if (!this.paused) {
       this.timeMs += dt * 1000;
@@ -4979,7 +5058,12 @@ export class FlightChessEngine {
         w.g.rotation.z = Math.sin(t * 1.2 + w.phase) * 0.06;
         w.g.rotation.x = Math.cos(t * 0.9 + w.phase) * 0.04;
       }
-      for (const p of this.world.petals) {
+      for (let pi = 0; pi < this.world.petals.length; pi++) {
+        if (this.isMobile && pi % 2 === 1) {
+          this.world.petals[pi].m.visible = false;
+          continue;
+        }
+        const p = this.world.petals[pi];
         p.m.position.y -= p.speed * dt;
         p.m.position.x += Math.sin(t * 1.5 + p.sway) * 0.35 * dt;
         p.m.rotation.x += dt * 1.8;
@@ -5190,7 +5274,7 @@ export class FlightChessEngine {
           c.kind !== 'rabbit' || c.state === 'rest' || c.state === 'hop';
         if (c.ttl <= 0 && canDespawn) {
           this.scene.remove(c.g);
-          this.disposeObject3D(c.g);
+          this.disposeGeometryOnly(c.g);
           this.world.critters.splice(i, 1);
           continue;
         }
@@ -5650,7 +5734,7 @@ export class FlightChessEngine {
               const p = c.perchT;
               if (p >= 1) {
                 this.scene.remove(c.g);
-          this.disposeObject3D(c.g);
+          this.disposeGeometryOnly(c.g);
                 this.world.critters.splice(i, 1);
                 continue;
               }
@@ -5673,7 +5757,7 @@ export class FlightChessEngine {
           c.prog += dt / c.dur;
           if (c.prog >= 1) {
             this.scene.remove(c.g);
-          this.disposeObject3D(c.g);
+          this.disposeGeometryOnly(c.g);
             this.world.critters.splice(i, 1);
             continue;
           }
@@ -5785,7 +5869,7 @@ export class FlightChessEngine {
           c.prog += dt / 1.15;
           if (c.prog >= 1) {
             this.scene.remove(c.g);
-          this.disposeObject3D(c.g);
+          this.disposeGeometryOnly(c.g);
             this.world.critters.splice(i, 1);
             continue;
           }
@@ -6114,6 +6198,58 @@ export class FlightChessEngine {
     }
   }
 
+  /** WebGL 上下文从后台丢失恢复后：重建 PMREM 环境光贴图并强制重传全部纹理与阴影 */
+  private restoreGpuResources(): void {
+    if (this.disposed) return;
+    try {
+      this.envRT.dispose();
+    } catch {
+      // ignore
+    }
+    const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+    const roomEnv = new RoomEnvironment();
+    this.envRT = pmremGenerator.fromScene(roomEnv, 0.04);
+    this.scene.environment = this.envRT.texture;
+    roomEnv.dispose();
+    pmremGenerator.dispose();
+
+    const markTex = (tex: THREE.Texture | null | undefined) => {
+      if (tex) tex.needsUpdate = true;
+    };
+
+    this.scene.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.material) {
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          const std = m as THREE.MeshStandardMaterial;
+          markTex(std.map);
+          markTex(std.normalMap);
+          markTex(std.roughnessMap);
+          markTex(std.metalnessMap);
+          markTex(std.emissiveMap);
+          markTex(std.alphaMap);
+          m.needsUpdate = true;
+        }
+      }
+    });
+
+    this.badgeTexCache.forEach((tex) => {
+      tex.needsUpdate = true;
+    });
+    this.renderer.shadowMap.needsUpdate = true;
+    this.clock.getDelta();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  /** 仅释放临时物体的几何体，不误伤 world.ts / pieces.ts 中跨实例共享的材质与贴图 */
+  private disposeGeometryOnly(root: THREE.Object3D): void {
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+    });
+  }
+
   private disposeObject3D(root: THREE.Object3D): void {
     root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
@@ -6145,6 +6281,7 @@ export class FlightChessEngine {
     if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
 
     window.removeEventListener('resize', this.boundResize);
+    document.removeEventListener('visibilitychange', this.boundVisibilityChange);
     this.controls.removeEventListener('start', this.boundControlsStart);
     this.controls.removeEventListener('end', this.boundControlsEnd);
     this.renderer.domElement.removeEventListener('pointerdown', this.boundPointerDown);

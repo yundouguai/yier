@@ -75,6 +75,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   rankings: [],
   gmDie: null,
   turnUsedAtkDef: false,
+  turnUsedDef: false,
   armedSixDie: false,
   armedTwinDice: false,
   armedRefuel: false,

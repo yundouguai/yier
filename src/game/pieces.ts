@@ -685,38 +685,71 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   g.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) o.castShadow = true;
   });
-  // 护盾透明球形光罩 + 绕身金青能量环（默认隐藏，获得护盾后激活）
+  // 软绵绵泡泡罩：珠光肥皂泡 + 漫画高光点 + 环绕迷你副泡泡
   const shieldMesh = new THREE.Group();
   const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(0.45, 24, 18),
+    new THREE.SphereGeometry(0.46, 26, 20),
     new THREE.MeshStandardMaterial({
-      color: 0x6ce5ff,
-      emissive: 0x26b6e8,
-      emissiveIntensity: 0.14,
-      roughness: 0.2,
-      metalness: 0.05,
+      color: 0xe6f8ff,
+      emissive: 0xf0b8ff,
+      emissiveIntensity: 0.18,
+      roughness: 0.06,
+      metalness: 0.12,
       transparent: true,
-      opacity: 0.14,
+      opacity: 0.24,
       depthWrite: false,
     }),
   );
-  dome.position.y = 0.34;
+  dome.position.y = 0.35;
   dome.renderOrder = 4;
   shieldMesh.add(dome);
 
-  const eqRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.455, 0.011, 8, 32),
-    new THREE.MeshStandardMaterial({
-      color: 0x8ef5ff,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 0.22,
-      roughness: 0.28,
-      transparent: true,
-      opacity: 0.45,
-    }),
-  );
-  eqRing.rotation.x = Math.PI / 2 - 0.18;
-  eqRing.position.y = 0.34;
+  // 泡泡表面柔和彩虹外圈与两颗晶莹白色高光
+  const sheenMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  });
+  const hiBig = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), sheenMat);
+  hiBig.scale.set(1.3, 0.65, 0.35);
+  hiBig.position.set(-0.22, 0.61, 0.26);
+  hiBig.rotation.set(0.35, -0.5, 0.55);
+  hiBig.renderOrder = 5;
+  shieldMesh.add(hiBig);
+
+  const hiSmall = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), sheenMat);
+  hiSmall.position.set(-0.31, 0.49, 0.27);
+  hiSmall.renderOrder = 5;
+  shieldMesh.add(hiSmall);
+
+  // 环绕主泡泡漂浮的 4 颗彩虹迷你泡泡（复用 eqRing 旋转驱动）
+  const eqRing = new THREE.Group();
+  eqRing.position.y = 0.35;
+  const miniColors = [0xffc2e2, 0xb8ecff, 0xd9c2ff, 0xffffff];
+  for (let bi = 0; bi < 4; bi++) {
+    const ba = (bi / 4) * Math.PI * 2;
+    const rMini = bi % 2 === 0 ? 0.055 : 0.038;
+    const mb = new THREE.Mesh(
+      new THREE.SphereGeometry(rMini, 12, 10),
+      new THREE.MeshStandardMaterial({
+        color: miniColors[bi],
+        emissive: miniColors[bi],
+        emissiveIntensity: 0.28,
+        roughness: 0.08,
+        transparent: true,
+        opacity: 0.68,
+        depthWrite: false,
+      }),
+    );
+    mb.position.set(
+      Math.cos(ba) * 0.49,
+      (bi % 2 === 0 ? 0.14 : -0.11),
+      Math.sin(ba) * 0.49,
+    );
+    mb.renderOrder = 5;
+    eqRing.add(mb);
+  }
   shieldMesh.add(eqRing);
   shieldMesh.visible = false;
   shieldMesh.userData.eqRing = eqRing;
@@ -932,62 +965,90 @@ export function buildTurnArrow(scene: THREE.Scene): THREE.Mesh {
 }
 
 export function buildToyMissileMesh(accentColor: number): THREE.Group {
+  // 恶作剧奶油派 3D 模型（银色锡纸托盘 + 蓬松奶油堆 + 红樱桃 + 奶油拖尾）
   const g = new THREE.Group();
 
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0xfff8ee,
-    roughness: 0.34,
+  const tinMat = new THREE.MeshStandardMaterial({
+    color: 0xdbe4ee,
+    roughness: 0.28,
+    metalness: 0.55,
+  });
+  const crustMat = new THREE.MeshStandardMaterial({
+    color: 0xe8b574,
+    roughness: 0.65,
+    metalness: 0.02,
+  });
+  const creamMat = new THREE.MeshStandardMaterial({
+    color: 0xfffcf5,
+    emissive: 0xfff3d6,
+    emissiveIntensity: 0.12,
+    roughness: 0.35,
+    metalness: 0.0,
+  });
+  const cherryMat = new THREE.MeshStandardMaterial({
+    color: 0xef4444,
+    emissive: 0xb91c1c,
+    emissiveIntensity: 0.18,
+    roughness: 0.18,
     metalness: 0.08,
   });
-  const redMat = new THREE.MeshStandardMaterial({
-    color: 0xe5484d,
-    roughness: 0.38,
-    metalness: 0.1,
+  const stemMat = new THREE.MeshStandardMaterial({
+    color: 0x5c3a28,
+    roughness: 0.7,
   });
-  const goldMat = new THREE.MeshStandardMaterial({
+  const puffMat = new THREE.MeshStandardMaterial({
     color: accentColor,
-    roughness: 0.32,
-    metalness: 0.25,
-  });
-  const flameMat = new THREE.MeshStandardMaterial({
-    color: 0xffb224,
-    emissive: 0xff6a00,
-    emissiveIntensity: 1.4,
-    roughness: 0.2,
+    emissive: 0xfff5e0,
+    emissiveIntensity: 0.55,
+    transparent: true,
+    opacity: 0.8,
+    roughness: 0.3,
   });
 
-  // 导弹沿着 +Z 方向前进
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.125, 0.46, 20), bodyMat);
-  body.rotation.x = Math.PI / 2;
-  g.add(body);
+  // 银色锡纸派盘（底托）
+  const tin = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.21, 0.095, 22), tinMat);
+  tin.position.y = -0.02;
+  g.add(tin);
 
-  const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.122, 0.122, 0.09, 20), goldMat);
-  stripe.rotation.x = Math.PI / 2;
-  stripe.position.z = 0.04;
-  g.add(stripe);
+  // 烤金黄派边
+  const crust = new THREE.Mesh(new THREE.TorusGeometry(0.265, 0.032, 10, 24), crustMat);
+  crust.rotation.x = Math.PI / 2;
+  crust.position.y = 0.035;
+  g.add(crust);
 
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.118, 0.24, 20), redMat);
-  nose.rotation.x = Math.PI / 2;
-  nose.position.z = 0.35;
-  g.add(nose);
+  // 中心蓬松大奶油堆
+  const creamCore = new THREE.Mesh(new THREE.SphereGeometry(0.23, 20, 14), creamMat);
+  creamCore.scale.set(1.06, 0.72, 1.06);
+  creamCore.position.y = 0.095;
+  g.add(creamCore);
 
-  const tipCap = new THREE.Mesh(new THREE.SphereGeometry(0.036, 12, 10), goldMat);
-  tipCap.position.z = 0.455;
-  g.add(tipCap);
-
-  // 4 片尾翼
-  const finGeo = new THREE.BoxGeometry(0.024, 0.13, 0.14);
-  for (let i = 0; i < 4; i++) {
-    const fin = new THREE.Mesh(finGeo, redMat);
-    const a = (i * Math.PI) / 2 + Math.PI / 4;
-    fin.position.set(Math.cos(a) * 0.12, Math.sin(a) * 0.12, -0.17);
-    fin.rotation.z = a + Math.PI / 2;
-    g.add(fin);
+  // 一圈 8 颗圆滚滚挤花奶油球
+  const puffGeo = new THREE.SphereGeometry(0.082, 12, 10);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const puff = new THREE.Mesh(puffGeo, creamMat);
+    puff.scale.set(1.0, 0.82, 1.0);
+    puff.position.set(Math.cos(a) * 0.19, 0.075, Math.sin(a) * 0.19);
+    g.add(puff);
   }
 
-  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.24, 14), flameMat);
-  flame.rotation.x = -Math.PI / 2;
-  flame.position.z = -0.34;
+  // 顶部奶油尖尖 + 红樱桃 + 樱桃梗
+  const topSwirl = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.14, 16), creamMat);
+  topSwirl.position.y = 0.23;
+  g.add(topSwirl);
+
+  const cherry = new THREE.Mesh(new THREE.SphereGeometry(0.068, 14, 12), cherryMat);
+  cherry.position.y = 0.31;
+  g.add(cherry);
+
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.011, 0.09, 8), stemMat);
+  stem.position.set(0.025, 0.38, 0);
+  stem.rotation.z = -0.45;
+  g.add(stem);
+
+  // 飞行尾部的奶油小光团（兼容原 flame 缩放动画）
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), puffMat);
+  flame.position.set(0, 0.05, -0.32);
   g.add(flame);
   g.userData.flame = flame;
 
@@ -996,4 +1057,3 @@ export function buildToyMissileMesh(accentColor: number): THREE.Group {
   });
   return g;
 }
-
