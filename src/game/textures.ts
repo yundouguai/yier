@@ -1326,3 +1326,77 @@ export function createShopMedallionTexture(
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }
 
+
+export function createFlightTakeoffTexture(P: PlayerConfig, anisotropy = 4): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 256, 256);
+
+  const isYier = P.key === 'yier';
+  const mainCol = isYier ? '#553720' : toColorHex(P.color);
+  const ringCol = '#fdf7ea';
+
+  g.fillStyle = mainCol;
+  g.beginPath();
+  g.arc(128, 128, 120, 0, Math.PI * 2);
+  g.fill();
+
+  g.strokeStyle = ringCol;
+  g.lineWidth = 12;
+  g.beginPath();
+  g.arc(128, 128, 106, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = 'rgba(253, 247, 234, 0.55)';
+  g.lineWidth = 5;
+  g.setLineDash([18, 12]);
+  g.beginPath();
+  g.arc(128, 128, 86, 0, Math.PI * 2);
+  g.stroke();
+  g.setLineDash([]);
+
+  g.save();
+  g.translate(128, 128);
+  g.fillStyle = ringCol;
+  g.shadowColor = 'rgba(28, 16, 8, 0.35)';
+  g.shadowBlur = 6;
+  g.shadowOffsetY = 3;
+
+  g.beginPath();
+  g.moveTo(0, -64);
+  g.quadraticCurveTo(13, -44, 12, -14);
+  g.lineTo(10, 42);
+  g.lineTo(0, 56);
+  g.lineTo(-10, 42);
+  g.lineTo(-12, -14);
+  g.quadraticCurveTo(-13, -44, 0, -64);
+  g.closePath();
+  g.fill();
+
+  g.beginPath();
+  g.moveTo(11, -18);
+  g.lineTo(66, 16);
+  g.lineTo(66, 30);
+  g.lineTo(10, 12);
+  g.lineTo(-10, 12);
+  g.lineTo(-66, 30);
+  g.lineTo(-66, 16);
+  g.lineTo(-11, -18);
+  g.closePath();
+  g.fill();
+
+  g.beginPath();
+  g.moveTo(8, 34);
+  g.lineTo(34, 54);
+  g.lineTo(34, 64);
+  g.lineTo(0, 50);
+  g.lineTo(-34, 64);
+  g.lineTo(-34, 54);
+  g.lineTo(-8, 34);
+  g.closePath();
+  g.fill();
+  g.restore();
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}

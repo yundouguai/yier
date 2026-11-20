@@ -2263,7 +2263,7 @@ export class FlightChessEngine {
     if (plane.pos === HOME_END) return `f${plane.pid}`;
     if (plane.pos >= 51) return `h${plane.pid}-${plane.pos}`;
     if (plane.pos === 0) return `L${plane.pid}`;
-    return `r${this.ringIndexOf(plane)}`;
+    return `r${this.ringIndexOf(plane)}-${plane.pid}`;
   }
 
   private faceTravelDir(plane: PlaneData): number {
@@ -3062,20 +3062,17 @@ export class FlightChessEngine {
     const dirX = (tx - sx) / dist;
     const dirZ = (tz - sz) / dist;
 
-    // 隐藏原格面上的静态飞机（避免同时出现两架飞机）
-    const staticMark = this.world.planeMarks[pid];
-    if (staticMark) {
-      staticMark.visible = false;
-    }
-
     // 飞机停在起飞格前方 0.92 格处，与格面上的叠叠乐小熊清晰错开
     const bx = sx + dirX * 0.92;
     const bz = sz + dirZ * 0.92;
 
     const leadP = this.players[pid];
     const fp = makePilotPlaneModel(leadP, this.anisotropy);
-    fp.position.set(bx, 0.42, bz);
+    const enterStartX = bx - dirX * 2.2;
+    const enterStartZ = bz - dirZ * 2.2;
+    fp.position.set(enterStartX, 3.3, enterStartZ);
     fp.rotation.y = yaw;
+    fp.scale.setScalar(0.22);
     const pilotHead = fp.userData.pilotHead as THREE.Group | undefined;
     if (pilotHead) {
       pilotHead.scale.setScalar(0.001);
@@ -3087,12 +3084,31 @@ export class FlightChessEngine {
       this.camFollowObj = fp;
     }
 
+    // 0) 飞机从空中俯冲滑翔降落至起飞位，彻底消除闪现
+    await this.tween(480, (k) => {
+      const ease = 1 - Math.pow(1 - k, 3);
+      fp.position.x = THREE.MathUtils.lerp(enterStartX, bx, ease);
+      fp.position.z = THREE.MathUtils.lerp(enterStartZ, bz, ease);
+      fp.position.y = THREE.MathUtils.lerp(3.3, 0.42, ease);
+      fp.rotation.x = (1 - ease) * 0.28;
+      fp.scale.setScalar(THREE.MathUtils.lerp(0.22, 1.0, ease));
+      if (fp.userData.propeller) {
+        (fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 16;
+      }
+    });
+    if (this.disposed) {
+      this.scene.remove(fp);
+      return;
+    }
+    fp.position.set(bx, 0.42, bz);
+    fp.rotation.x = 0;
+    fp.scale.setScalar(1);
+
     // 1) 一只一只依次跳进前方座舱
     const boardOrder = [...stack].reverse();
     for (let bIdx = 0; bIdx < boardOrder.length; bIdx++) {
       if (this.disposed) {
         this.scene.remove(fp);
-        if (staticMark) staticMark.visible = true;
         return;
       }
       const p = boardOrder[bIdx];
@@ -3120,20 +3136,44 @@ export class FlightChessEngine {
       pt.leftArm.rotation.set(0, 0, 0);
       pt.rightArm.rotation.set(0, 0, 0);
 
-      await this.tween(130, (k) => {
-        if (bIdx === 0 && pilotHead) {
-          const pop = Math.sin(k * Math.PI * 0.5) * (1 + Math.sin(k * Math.PI) * 0.16);
-          pilotHead.scale.setScalar(Math.max(0.001, pop));
+      beep(420 + bIdx * 85, 0.08, 'sine', 0.1);
+      const restHeadY = 0.25 - bIdx * 0.014;
+      await this.tween(bIdx === 0 ? 190 : 230, (k) => {
+        const bounce = Math.sin(k * Math.PI * 2.4) * Math.exp(-k * 3.6);
+        const dip = Math.sin(k * Math.PI);
+
+        if (pilotHead) {
+          if (bIdx === 0) {
+            const pop = Math.min(1, k * 2.2);
+            const sx = pop * (1 + bounce * 0.26);
+            const sy = pop * (1 - bounce * 0.28);
+            pilotHead.scale.set(Math.max(0.001, sx), Math.max(0.001, sy), Math.max(0.001, sx));
+            pilotHead.position.y = 0.25 - dip * 0.04;
+          } else {
+            const sq = Math.sin(Math.min(1, k * 1.45) * Math.PI);
+            const sx = 1 + sq * 0.32 + bounce * 0.14;
+            const sy = 1 - sq * 0.44 - bounce * 0.16;
+            pilotHead.scale.set(Math.max(0.5, sx), Math.max(0.45, sy), Math.max(0.5, sx));
+            pilotHead.position.y = restHeadY - sq * 0.115;
+          }
         }
-        fp.position.y = 0.42 - Math.sin(k * Math.PI) * 0.055;
+
+        fp.position.y = 0.42 - dip * (0.065 + bIdx * 0.015);
+        fp.scale.set(
+          1 + dip * 0.085 + bounce * 0.04,
+          1 - dip * 0.11 - bounce * 0.05,
+          1 + dip * 0.085 + bounce * 0.04,
+        );
         if (fp.userData.propeller) {
           (fp.userData.propeller as THREE.Group).rotation.z += 0.35;
         }
       });
-      if (bIdx === 0 && pilotHead) {
+      if (pilotHead) {
         pilotHead.scale.setScalar(1);
+        pilotHead.position.y = restHeadY;
       }
       fp.position.y = 0.42;
+      fp.scale.setScalar(1);
       if (bIdx < boardOrder.length - 1) {
         await this.sleep(60);
       }
@@ -3156,7 +3196,6 @@ export class FlightChessEngine {
     });
     if (this.disposed) {
       this.scene.remove(fp);
-      if (staticMark) staticMark.visible = true;
       return;
     }
 
@@ -3181,46 +3220,25 @@ export class FlightChessEngine {
       this.camFollowObj = prevFollowObj;
     }
 
-    // 收起座舱熊头变为「无人驾驶」状态，启动快速盘旋返航
+    // 收起座舱熊头后，飞机优雅拉升飞离棋盘消失在空中
     if (pilotHead) {
       pilotHead.visible = false;
     }
-    const perpX = -dirZ;
-    const perpZ = dirX;
-    const returnCurve = new THREE.CubicBezierCurve3(
-      new THREE.Vector3(tx, 0.42, tz),
-      new THREE.Vector3(tx + dirX * 2.8 + perpX * 3.4, 2.35, tz + dirZ * 2.8 + perpZ * 3.4),
-      new THREE.Vector3(sx - dirX * 3.2 + perpX * 2.5, 1.85, sz - dirZ * 3.2 + perpZ * 2.5),
-      new THREE.Vector3(sx, 0.305, sz),
-    );
-    const ptPos = new THREE.Vector3();
-    const ptTan = new THREE.Vector3();
-
-    const returnAnim = this.tween(920, (k) => {
-      // 前快后稳的返航节奏
-      const u = 1 - Math.pow(1 - k, 1.45);
-      returnCurve.getPoint(u, ptPos);
-      returnCurve.getTangent(u, ptTan);
-      fp.position.copy(ptPos);
-
-      const moveYaw = Math.atan2(ptTan.x, ptTan.z);
+    const returnAnim = this.tween(680, (k) => {
+      const ease = k * k;
+      fp.position.x = THREE.MathUtils.lerp(tx, tx + dirX * 2.8, ease);
+      fp.position.z = THREE.MathUtils.lerp(tz, tz + dirZ * 2.8, ease);
+      fp.position.y = THREE.MathUtils.lerp(0.42, 3.8, ease);
       fp.rotation.order = 'YXZ';
-      fp.rotation.y = moveYaw;
-      fp.rotation.x = -ptTan.y * 0.45;
-      // 盘旋转弯时顺势侧倾机翼，落地前摆平
-      fp.rotation.z = -Math.sin(u * Math.PI) * 0.48;
-
-      // 从飞行尺寸平滑缩回棋盘静态飞机比例，落地严丝合缝
-      const sc = THREE.MathUtils.lerp(1.0, 0.86 / 1.48, u);
-      fp.scale.setScalar(sc);
+      fp.rotation.y = yaw;
+      fp.rotation.x = -ease * 0.42;
+      fp.rotation.z = Math.sin(k * Math.PI) * 0.28;
+      fp.scale.setScalar(Math.max(0.04, 1 - ease * 0.92));
       if (fp.userData.propeller) {
-        (fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 36;
+        (fp.userData.propeller as THREE.Group).rotation.z = k * Math.PI * 28;
       }
     }).then(() => {
       this.scene.remove(fp);
-      if (staticMark && !this.disposed) {
-        staticMark.visible = true;
-      }
     });
 
     await this.tween(260, (k) => {
@@ -3526,6 +3544,7 @@ export class FlightChessEngine {
         curStep += dir;
         setPos(curStep);
         if ((leftStart || leftMixedRing) && i === 0) {
+          stack.forEach((p) => (p.animating = true));
           this.relayout();
         }
         const c = this.posToCell(P, curStep);

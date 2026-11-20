@@ -58,6 +58,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
+  const [questExpanded, setQuestExpanded] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
   const [inspectedPid, setInspectedPid] = useState<number | null>(null);
   const lastHumanPidRef = useRef(0);
@@ -386,7 +387,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </button>
 
                   {bubble && (
-                    <div className="anim-msg-pop pointer-events-none absolute left-full top-1/2 z-20 ml-2.5 -translate-y-1/2 whitespace-nowrap rounded-xl border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-bold text-slate-800 shadow-lg">
+                    <div className="anim-msg-pop pointer-events-none absolute -top-3 right-1 z-30 whitespace-nowrap rounded-full border border-amber-200 bg-white/98 px-2.5 py-0.5 text-[11px] font-extrabold text-slate-800 shadow-md">
                       {bubble}
                     </div>
                   )}
@@ -395,122 +396,86 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             })}
           </div>
 
-          {/* 队友栏右侧：悬赏任务与道具详情 */}
-          <div className="pointer-events-auto w-[152px] md:w-[196px] rounded-[14px] border border-white/85 bg-white/90 p-2 md:p-2.5 shadow-[0_6px_18px_rgba(60,80,110,0.14)] backdrop-blur-sm">
-            <div className="flex items-center justify-between gap-1.5 border-b border-slate-100 pb-1.5">
+          {/* 队友栏右侧：弱化为轻量可折叠悬赏任务胶囊 */}
+          <div className="pointer-events-auto flex flex-col items-start">
+            <button
+              type="button"
+              onClick={() => setQuestExpanded((v) => !v)}
+              title="点击展开/收起悬赏任务与道具"
+              className="flex items-center gap-1.5 rounded-xl border border-white/75 bg-white/75 px-2.5 py-1.5 text-[10px] md:text-[11px] font-bold text-slate-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white/95 cursor-pointer"
+            >
               <span
-                className="truncate max-w-[96px] rounded-md px-2 py-0.5 text-[10px] md:text-[11px] font-extrabold text-white"
+                className="inline-block h-2 w-2 shrink-0 rounded-full"
                 style={{ backgroundColor: questPlayer.uiColor }}
-              >
-                {questPlayer.name}
+              />
+              <span className="tabular-nums">
+                🎲 {Math.min(1, questPlayer.quest?.roll1 ?? 0)}+{Math.min(1, questPlayer.quest?.roll2 ?? 0)}/2
               </span>
-              <span className="shrink-0 text-[9px] md:text-[10px] font-semibold text-slate-400">
-                任务 · 道具
+              <span className="text-slate-300">·</span>
+              <span className="tabular-nums">
+                🛡️ {questPlayer.quest?.stomped ?? 0}/2
               </span>
-            </div>
+              {questTotalCards > 0 && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span className="tabular-nums">🎒{questTotalCards}</span>
+                </>
+              )}
+              <span className="ml-0.5 text-[9px] text-slate-400">
+                {questExpanded ? '▴' : '▾'}
+              </span>
+            </button>
 
-            <div className="mt-1.5 space-y-2">
-              {/* 任务1：点数1和点数2各累计 >=1 次 */}
-              <div className="rounded-xl bg-amber-50/85 px-2 py-1.5 border border-amber-200/70">
-                <div className="flex items-center justify-between text-[10px] md:text-[11px] font-bold text-slate-800">
-                  <span>🎲 一二宝的馈赠</span>
-                  <span className="text-[9px] font-semibold text-amber-700">随机卡×1</span>
-                </div>
-                <div className="mt-1 flex items-center gap-1 text-[10px] font-bold tabular-nums">
+            {questExpanded && (
+              <div className="anim-card-pop mt-1.5 w-[154px] md:w-[184px] rounded-xl border border-white/80 bg-white/88 p-2 shadow-lg backdrop-blur-sm">
+                <div className="flex items-center justify-between gap-1 border-b border-slate-100 pb-1">
                   <span
-                    className={`flex-1 rounded-md px-1.5 py-0.5 text-center ${
-                      (questPlayer.quest?.roll1 ?? 0) >= 1
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white text-slate-600 border border-amber-200/80'
-                    }`}
+                    className="truncate max-w-[96px] rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white"
+                    style={{ backgroundColor: questPlayer.uiColor }}
                   >
-                    1点 ×{questPlayer.quest?.roll1 ?? 0}
+                    {questPlayer.name}
                   </span>
-                  <span
-                    className={`flex-1 rounded-md px-1.5 py-0.5 text-center ${
-                      (questPlayer.quest?.roll2 ?? 0) >= 1
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white text-slate-600 border border-amber-200/80'
-                    }`}
-                  >
-                    2点 ×{questPlayer.quest?.roll2 ?? 0}
-                  </span>
+                  <span className="text-[9px] font-semibold text-slate-400">任务·道具</span>
                 </div>
-                <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
-                  1点与2点均≥1次后各扣1次兑换
-                </div>
-              </div>
 
-              {/* 任务2：被踩每2次得护盾 */}
-              <div className="rounded-xl bg-sky-50/85 px-2 py-1.5 border border-sky-200/70">
-                <div className="flex items-center justify-between text-[10px] md:text-[11px] font-bold text-slate-800">
-                  <span>🛡️ 布布不烦恼</span>
-                  <span className="text-[9px] font-semibold text-sky-700">护盾×1</span>
-                </div>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <div className="flex flex-1 gap-1">
-                    {[0, 1].map((step) => (
-                      <span
-                        key={step}
-                        className={`h-1.5 flex-1 rounded-full ${
-                          step < (questPlayer.quest?.stomped ?? 0)
-                            ? 'bg-sky-500'
-                            : 'bg-sky-200/70'
-                        }`}
-                      />
-                    ))}
+                <div className="mt-1.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-1 rounded-lg bg-amber-50/80 px-2 py-1 text-[10px] border border-amber-200/60">
+                    <span className="font-bold text-slate-700">🎲 1·2点馈赠</span>
+                    <span className="font-extrabold text-amber-700 tabular-nums">
+                      1×{questPlayer.quest?.roll1 ?? 0} · 2×{questPlayer.quest?.roll2 ?? 0}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-extrabold text-sky-700 tabular-nums">
-                    {questPlayer.quest?.stomped ?? 0}/2
-                  </span>
-                </div>
-                <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
-                  被踩2次
-                </div>
-              </div>
 
-              {/* 道具详情 */}
-              <div className="rounded-xl bg-slate-50/90 px-2 py-1.5 border border-slate-200/75">
-                <div className="flex items-center justify-between text-[10px] md:text-[11px] font-bold text-slate-800">
-                  <span>🎒 道具详情</span>
-                  <span className="text-[9px] font-semibold text-slate-500 tabular-nums">
-                    {questTotalCards}张
-                  </span>
-                </div>
-                {questHeldItems.length > 0 ? (
-                  <div className="mt-1.5 space-y-1">
-                    {questHeldItems.map((itemKey) => {
-                      const def = ITEM_DEFS[itemKey];
-                      const cnt = questPlayer.items[itemKey];
-                      return (
-                        <div
-                          key={itemKey}
-                          className="rounded-lg bg-white px-1.5 py-1 border border-slate-200/70"
-                        >
-                          <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-slate-800">
-                            <span className="flex items-center gap-1 truncate">
-                              <span>{def.icon}</span>
-                              <span className="truncate">{def.name}</span>
-                            </span>
-                            <span
-                              className="shrink-0 rounded px-1 py-0 text-[9px] font-extrabold text-white tabular-nums"
-                              style={{ backgroundColor: def.accentColor }}
-                            >
-                              ×{cnt}
-                            </span>
-                          </div>
-                          <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
-                            {def.shortEffect} · {def.limitNote}
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="flex items-center justify-between gap-1 rounded-lg bg-sky-50/80 px-2 py-1 text-[10px] border border-sky-200/60">
+                    <span className="font-bold text-slate-700">🛡️ 被踩护盾</span>
+                    <span className="font-extrabold text-sky-700 tabular-nums">
+                      {questPlayer.quest?.stomped ?? 0}/2
+                    </span>
                   </div>
-                ) : (
-                  <div className="mt-1 text-[9px] text-slate-400">暂无道具卡</div>
-                )}
+
+                  {questHeldItems.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {questHeldItems.map((itemKey) => {
+                        const def = ITEM_DEFS[itemKey];
+                        const cnt = questPlayer.items[itemKey];
+                        return (
+                          <span
+                            key={itemKey}
+                            title={`${def.name}：${def.shortEffect}`}
+                            className="inline-flex items-center gap-0.5 rounded-md border bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-700 tabular-nums"
+                            style={{ borderColor: `${def.accentColor}44` }}
+                          >
+                            <span>{def.icon}</span>
+                            <span>{def.name}</span>
+                            <span style={{ color: def.accentColor }}>×{cnt}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 

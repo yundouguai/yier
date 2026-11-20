@@ -27,6 +27,7 @@ import {
   createMoatTexture,
   createRiverbedTexture,
   createShoreEarthTexture,
+  createFlightTakeoffTexture,
   createLandingPadTexture,
   createShopMedallionTexture,
   createStartPadTexture,
@@ -2707,13 +2708,32 @@ export function buildAncientWorld(
     scene.add(line);
 
     const fyaw = Math.atan2(b[0] - a[0], b[1] - a[1]);
-    const planeMark = makePlaneModel(lineOf(P), P.colorLight, anisotropy, true);
-    planeMark.scale.setScalar(0.86);
-    // 机轮与螺旋桨圆盘底端约在局部 y = -0.198，乘以 0.86 缩放后需抬升至 y = 0.305，确保稳落于格面 (y=0.122) 之上不穿模
-    planeMark.position.set(a[0], 0.305, a[1]);
-    planeMark.rotation.y = fyaw;
-    scene.add(planeMark);
-    planeMarks[pIdx] = planeMark;
+    const takeoffPadGroup = new THREE.Group();
+    const takeoffTop = new THREE.Mesh(
+      new THREE.CircleGeometry(0.225, 32),
+      new THREE.MeshStandardMaterial({
+        map: createFlightTakeoffTexture(P, anisotropy),
+        roughness: 0.48,
+      }),
+    );
+    takeoffTop.rotation.x = -Math.PI / 2;
+    takeoffTop.rotation.z = fyaw + Math.PI;
+    takeoffTop.position.set(a[0], 0.124, a[1]);
+    takeoffTop.receiveShadow = true;
+    takeoffPadGroup.add(takeoffTop);
+
+    const takeoffRim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.228, 0.012, 8, 32),
+      new THREE.MeshStandardMaterial({
+        color: lineOf(P),
+        roughness: 0.42,
+        metalness: 0.15,
+      }),
+    );
+    takeoffRim.rotation.x = -Math.PI / 2;
+    takeoffRim.position.set(a[0], 0.125, a[1]);
+    takeoffPadGroup.add(takeoffRim);
+    scene.add(takeoffPadGroup);
 
     // 飞机航线落点：使用停机坪「P」字圆盘标识替代原先的八面体三角堆
     const pPadTop = new THREE.Mesh(
