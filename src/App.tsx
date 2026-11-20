@@ -17,6 +17,7 @@ import {
   CharKey,
   DEFAULT_SEATS,
   GameHudSnapshot,
+  MAP_ORDER,
   MapId,
   SeatConfig,
 } from './game/constants';
@@ -121,8 +122,12 @@ export default function App() {
   const transitionWaitRef = useRef(false);
 
   const [activeSeats, setActiveSeats] = useState<SeatConfig[]>(initialParsed.current.seats);
-  const [activeMapId, setActiveMapId] = useState<MapId>('ancient_city');
-  const [draftMapId, setDraftMapId] = useState<MapId>('ancient_city');
+  const initialMapId: MapId = (() => {
+    const raw = new URLSearchParams(window.location.search).get('map') as MapId | null;
+    return raw && MAP_ORDER.includes(raw) ? raw : 'ancient_city';
+  })();
+  const [activeMapId, setActiveMapId] = useState<MapId>(initialMapId);
+  const [draftMapId, setDraftMapId] = useState<MapId>(initialMapId);
   const [activeLocalChars, setActiveLocalChars] = useState<CharKey[]>(
     initialLocalChars.length > 0 ? initialLocalChars : ['yier'],
   );
@@ -309,6 +314,7 @@ export default function App() {
 
   const handleResumeFromSetup = useCallback(() => {
     setDraftLocalChars([...activeLocalChars]);
+    setDraftMapId(activeMapId);
     setShowSetup(false);
     engineRef.current?.setPaused(false);
   }, [activeLocalChars]);

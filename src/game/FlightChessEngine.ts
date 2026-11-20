@@ -355,7 +355,6 @@ export class FlightChessEngine {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
-    this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
     this.scene.fog = new THREE.Fog(this.mapConfig.fogHex, this.mapConfig.fogNear, this.mapConfig.fogFar);
 
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
@@ -401,10 +400,19 @@ export class FlightChessEngine {
       this.controls.minDistance = 2;
     }
 
-    // Lighting rig
-    this.scene.add(new THREE.HemisphereLight(0xfff5e4, 0x8ea874, 0.72));
-    const sun = new THREE.DirectionalLight(0xffdfb0, 1.32);
-    sun.position.set(8, 16, 7);
+    // Lighting rig (driven by MapConfig)
+    this.scene.add(
+      new THREE.HemisphereLight(
+        this.mapConfig.hemiSkyHex,
+        this.mapConfig.hemiGroundHex,
+        this.mapConfig.hemiIntensity,
+      ),
+    );
+    const sun = new THREE.DirectionalLight(
+      this.mapConfig.sunColorHex,
+      this.mapConfig.sunIntensity,
+    );
+    sun.position.set(...this.mapConfig.sunPosition);
     sun.castShadow = !this.isSoftwareGl;
     const shadowDim = window.innerWidth < 900 || window.innerHeight < 560 ? 1024 : 2048;
     sun.shadow.mapSize.set(shadowDim, shadowDim);
@@ -415,7 +423,7 @@ export class FlightChessEngine {
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0xd0e2f2, 0.34);
+    const fill = new THREE.DirectionalLight(this.mapConfig.fillColorHex, this.mapConfig.fillIntensity);
     fill.position.set(-9, 8, -6);
     this.scene.add(fill);
 
@@ -534,7 +542,7 @@ export class FlightChessEngine {
     this.scheduleCritter('bird', 4500);
     this.after(7800, () => {
       if (this.disposed) return;
-      this.world.spawnCritter('bird', { species: 'seagull', perch: true });
+      if (this.mapConfig.enableCritterSpawns) this.world.spawnCritter?.('bird', { species: 'seagull', perch: true });
     });
     this.scheduleCritter('fly', 2500);
     this.scheduleCritter('fish', 4500);
@@ -779,7 +787,7 @@ export class FlightChessEngine {
   private scheduleCritter(kind: 'rabbit' | 'bird' | 'fly' | 'fish', delay: number): void {
     this.after(delay, () => {
       if (this.disposed) return;
-      this.world.spawnCritter(kind);
+      if (this.mapConfig.enableCritterSpawns) this.world.spawnCritter?.(kind);
       this.scheduleCritter(kind, rnd(5500, 12000));
     });
   }
@@ -4942,11 +4950,18 @@ export class FlightChessEngine {
       });
 
       const wy = this.world.waterY;
-      this.world.moatTex.offset.x -= dt * 0.068;
-      this.world.moatTex.offset.y += Math.sin(t * 0.6) * dt * 0.008;
-      this.world.waterNormalTex.offset.x -= dt * 0.078;
-      this.world.waterNormalTex.offset.y -= dt * 0.018;
-      this.world.waterUniforms.uTime.value = t;
+      if (this.world.moatTex) {
+        this.world.moatTex.offset.x -= dt * 0.068;
+        this.world.moatTex.offset.y += Math.sin(t * 0.6) * dt * 0.008;
+      }
+      if (this.world.waterNormalTex) {
+        this.world.waterNormalTex.offset.x -= dt * 0.078;
+        this.world.waterNormalTex.offset.y -= dt * 0.018;
+      }
+      if (this.world.waterUniforms) {
+        this.world.waterUniforms.uTime.value = t;
+      }
+      this.world.onUpdate?.(t, dt);
 
       for (const l of this.world.lotusList) {
         l.g.position.y = wy + 0.008 + Math.sin(t * 1.6 + l.phase) * 0.012;
@@ -6133,6 +6148,7 @@ export class FlightChessEngine {
     );
 
     this.clearHL();
+    this.world.onDispose?.();
     this.controls.dispose();
     this.envRT.dispose();
 

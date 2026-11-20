@@ -203,10 +203,10 @@ export interface SpawnBirdOptions {
 }
 
 export interface WorldRefs {
-  waterMesh: THREE.Mesh;
-  moatTex: THREE.CanvasTexture;
-  waterNormalTex: THREE.DataTexture;
-  waterUniforms: { uTime: { value: number } };
+  waterMesh?: THREE.Mesh;
+  moatTex?: THREE.CanvasTexture;
+  waterNormalTex?: THREE.DataTexture;
+  waterUniforms?: { uTime: { value: number } };
   waterY: number;
   rideToys: RideToyAnim[];
   planeMarks: THREE.Group[];
@@ -223,11 +223,21 @@ export interface WorldRefs {
   moatOuterR: (th: number) => number;
   moatChannelR: (th: number, rOff: number, margin?: number) => number;
   hillH: (x: number, z: number) => number;
-  spawnCritter: (
+  spawnCritter?: (
     kind: 'rabbit' | 'bird' | 'fly' | 'fish',
     opts?: SpawnBirdOptions,
   ) => void;
+  /** 新地图可挂载自定义每帧环境动画，无需修改主引擎 */
+  onUpdate?: (t: number, dt: number) => void;
+  /** 新地图可挂载自定义资源销毁逻辑 */
+  onDispose?: () => void;
 }
+
+export type WorldBuilder = (
+  scene: THREE.Scene,
+  players: PlayerConfig[],
+  anisotropy: number,
+) => WorldRefs;
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const moatInnerR = (th: number) =>
@@ -5185,15 +5195,17 @@ export function buildAncientWorld(
   };
 }
 
+/** 多地图场景构建注册表：新增地图时只需在此登记对应 builder */
+export const MAP_WORLD_BUILDERS: Record<MapId, WorldBuilder> = {
+  ancient_city: buildAncientWorld,
+};
+
 export function buildWorldByMapId(
   mapId: MapId,
   scene: THREE.Scene,
   players: PlayerConfig[],
   anisotropy: number,
 ): WorldRefs {
-  switch (mapId) {
-    case 'ancient_city':
-    default:
-      return buildAncientWorld(scene, players, anisotropy);
-  }
+  const builder = MAP_WORLD_BUILDERS[mapId] ?? buildAncientWorld;
+  return builder(scene, players, anisotropy);
 }

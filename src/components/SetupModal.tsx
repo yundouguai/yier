@@ -188,7 +188,7 @@ export const SetupModal: React.FC<SetupModalProps> = ({
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-xs">
-                      🏯
+                      {cfg.icon}
                     </span>
                     <div className="min-w-0">
                       <div className="text-sm font-extrabold text-slate-800">{cfg.name}</div>

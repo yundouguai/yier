@@ -245,11 +245,22 @@ export interface MapConfig {
   id: MapId;
   name: string;
   subtitle: string;
+  icon: string;
   skyBgHex: number;
   fogHex: number;
   fogNear: number;
   fogFar: number;
   themeAccent: string;
+  hemiSkyHex: number;
+  hemiGroundHex: number;
+  hemiIntensity: number;
+  sunColorHex: number;
+  sunIntensity: number;
+  sunPosition: [number, number, number];
+  fillColorHex: number;
+  fillIntensity: number;
+  enablePoemBubbles: boolean;
+  enableCritterSpawns: boolean;
 }
 
 export const MAP_ORDER: MapId[] = ['ancient_city'];
@@ -259,11 +270,22 @@ export const MAPS: Record<MapId, MapConfig> = {
     id: 'ancient_city',
     name: '古城地图',
     subtitle: '护城河 · 熊熊坊 · 江南庭院',
+    icon: '🏯',
     skyBgHex: 0xdbe8df,
     fogHex: 0xdbe8df,
     fogNear: 48,
     fogFar: 108,
     themeAccent: '#2c9a60',
+    hemiSkyHex: 0xfff5e4,
+    hemiGroundHex: 0x8ea874,
+    hemiIntensity: 0.72,
+    sunColorHex: 0xffdfb0,
+    sunIntensity: 1.32,
+    sunPosition: [8, 16, 7],
+    fillColorHex: 0xd0e2f2,
+    fillIntensity: 0.34,
+    enablePoemBubbles: true,
+    enableCritterSpawns: true,
   },
 };
 
