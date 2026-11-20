@@ -58,7 +58,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
-  const [questExpanded, setQuestExpanded] = useState(false);
+  const [questExpanded, setQuestExpanded] = useState(true);
+  const [topBarCollapsed, setTopBarCollapsed] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
   const [inspectedPid, setInspectedPid] = useState<number | null>(null);
   const lastHumanPidRef = useRef(0);
@@ -298,7 +299,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       <div className="pointer-events-none fixed inset-0 z-10">
         {/* Party / Player list + Quest panel on its right */}
         <div className="absolute left-2.5 top-2.5 md:left-3.5 md:top-3.5 flex items-start gap-2 md:gap-2.5">
-          <div className="flex w-[144px] md:w-[196px] flex-col gap-1.5">
+          <div className="flex w-[144px] md:w-[196px] flex-col gap-1.5 origin-top-left scale-90">
             {snap.players.map((pl, i) => {
               const humanNum = snap.players
                 .slice(0, i + 1)
@@ -429,47 +430,31 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             })}
           </div>
 
-          {/* 队友栏右侧：弱化为轻量可折叠悬赏任务胶囊 */}
-          <div className="pointer-events-auto flex flex-col items-start">
-            <button
-              type="button"
-              onClick={() => setQuestExpanded((v) => !v)}
-              title="点击展开/收起悬赏任务与道具"
-              className="flex items-center gap-1.5 rounded-xl border border-white/75 bg-white/75 px-2.5 py-1.5 text-[10px] md:text-[11px] font-bold text-slate-700 shadow-sm backdrop-blur-sm transition-colors hover:bg-white/95 cursor-pointer"
-            >
-              <span
-                className="inline-block h-2 w-2 shrink-0 rounded-full"
-                style={{ backgroundColor: questPlayer.uiColor }}
-              />
-              <span className="tabular-nums">
-                🎲 {Math.min(1, questPlayer.quest?.roll1 ?? 0)}+{Math.min(1, questPlayer.quest?.roll2 ?? 0)}/2
-              </span>
-              <span className="text-slate-300">·</span>
-              <span className="tabular-nums">
-                🛡️ {questPlayer.quest?.stomped ?? 0}/2
-              </span>
-              {questTotalCards > 0 && (
-                <>
-                  <span className="text-slate-300">·</span>
-                  <span className="tabular-nums">🎒{questTotalCards}</span>
-                </>
-              )}
-              <span className="ml-0.5 text-[9px] text-slate-400">
-                {questExpanded ? '▴' : '▾'}
-              </span>
-            </button>
+          {/* 队友栏右侧：点击标题栏即可收起/展开悬赏任务与道具 */}
+          <div className="pointer-events-auto -ml-3 md:-ml-4">
+            <div className="w-[168px] md:w-[196px] rounded-xl border border-white/80 bg-white/90 p-2 shadow-lg backdrop-blur-sm">
+              <button
+                type="button"
+                onClick={() => setQuestExpanded((v) => !v)}
+                title={questExpanded ? '点击收起任务面板' : '点击展开任务面板'}
+                className={`flex w-full items-center justify-between gap-1 text-left cursor-pointer ${
+                  questExpanded ? 'border-b border-slate-100 pb-1.5' : ''
+                }`}
+              >
+                <span
+                  className="truncate max-w-[96px] rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white"
+                  style={{ backgroundColor: questPlayer.uiColor }}
+                >
+                  {questPlayer.name}
+                </span>
+                <span className="flex items-center gap-1 text-[9px] font-semibold text-slate-500 whitespace-nowrap">
+                  <span>任务·道具</span>
+                  <span className="text-[10px] text-slate-400">{questExpanded ? '▴' : '▾'}</span>
+                </span>
+              </button>
 
-            {questExpanded && (
-              <div className="anim-card-pop mt-1.5 w-[168px] md:w-[196px] rounded-xl border border-white/80 bg-white/90 p-2 shadow-lg backdrop-blur-sm">
-                <div className="flex items-center justify-between gap-1 border-b border-slate-100 pb-1">
-                  <span
-                    className="truncate max-w-[96px] rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white"
-                    style={{ backgroundColor: questPlayer.uiColor }}
-                  >
-                    {questPlayer.name}
-                  </span>
-                  <span className="text-[9px] font-semibold text-slate-400">任务·道具</span>
-                </div>
+              {questExpanded && (
+                <div>
 
                 <div className="mt-1.5 space-y-1.5">
                   <div className="rounded-lg bg-amber-50/85 px-2 py-1.5 border border-amber-200/65">
@@ -549,9 +534,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       })}
                     </div>
                   )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -820,53 +806,57 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
         {/* Top-Right Camera View Switcher + Global Mute Switch */}
         <div
-          className="pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-xl bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
+          className="pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 origin-top-right scale-90 flex items-center gap-1 rounded-xl bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
           role="group"
           aria-label="视角与音效"
         >
-          {(
-            [
-              ['follow', '跟随'],
-              ['top', '俯视'],
-              ['free', '自由'],
-            ] as [CameraMode, string][]
-          ).map(([mode, label]) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => onSetCamMode(mode)}
-              title="切换视角（快捷键 V）"
-              className={`rounded-lg px-2.5 md:px-3 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                snap.camMode === mode
-                  ? 'bg-[#2c9a60] text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-          <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
+          {!topBarCollapsed && (
+            <>
+              {(
+                [
+                  ['follow', '跟随'],
+                  ['top', '俯视'],
+                  ['free', '自由'],
+                ] as [CameraMode, string][]
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onSetCamMode(mode)}
+                  title="切换视角（快捷键 V）"
+                  className={`rounded-lg px-2.5 md:px-3 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    snap.camMode === mode
+                      ? 'bg-[#2c9a60] text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={onToggleMute}
+                title={muted ? '开启全局音效' : '关闭全局音效'}
+                aria-label={muted ? '开启音效' : '静音'}
+                className={`rounded-lg px-2 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  muted
+                    ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                {muted ? '🔇 静音' : '🔊 音效'}
+              </button>
+              <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
+            </>
+          )}
           <button
             type="button"
-            onClick={onResetView}
-            title="回正视角（快捷键 R）"
-            className="rounded-lg px-2 py-1.5 text-[11px] md:text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
+            onClick={() => setTopBarCollapsed((v) => !v)}
+            title={topBarCollapsed ? '展开视角与音效' : '收起视角与音效'}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[11px] font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
           >
-            回正
-          </button>
-          <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
-          <button
-            type="button"
-            onClick={onToggleMute}
-            title={muted ? '开启全局音效' : '关闭全局音效'}
-            aria-label={muted ? '开启音效' : '静音'}
-            className={`rounded-lg px-2 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              muted
-                ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-            }`}
-          >
-            {muted ? '🔇 静音' : '🔊 音效'}
+            {topBarCollapsed ? '◂' : '▸'}
           </button>
         </div>
 

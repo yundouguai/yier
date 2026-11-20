@@ -927,7 +927,6 @@ export class FlightChessEngine {
       messageColor: this.messageColor,
       messageKey: this.messageKey,
       latestEmote: this.latestEmote,
-      giftQuestEvent: this.giftQuestEvent,
       splashText: this.splashText,
       splashAvatar: this.splashAvatar,
       splashCharKey: this.splashCharKey,
@@ -957,6 +956,7 @@ export class FlightChessEngine {
       shopOffer: this.shopOffer,
       shopSecondsLeft,
       shopPid: this.shopPid,
+      giftQuestEvent: this.giftQuestEvent,
       players: this.players.map((pl, i) => {
         const rankIdx = this.finishedOrder.indexOf(i);
         return {

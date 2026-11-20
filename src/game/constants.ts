@@ -269,7 +269,6 @@ export interface GameHudSnapshot {
   messageColor: string | null;
   messageKey: number;
   latestEmote: HudEmoteEvent | null;
-  giftQuestEvent: GiftQuestEvent | null;
   splashText: string | null;
   splashAvatar: string;
   splashCharKey: CharKey;
@@ -288,6 +287,7 @@ export interface GameHudSnapshot {
   shopOffer: ItemType[] | null;
   shopSecondsLeft: number | null;
   shopPid: number | null;
+  giftQuestEvent: GiftQuestEvent | null;
   players: HudPlayerSnapshot[];
 }
 

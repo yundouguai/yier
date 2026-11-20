@@ -60,7 +60,6 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   message: null,
   messageColor: null,
   messageKey: 0,
-  giftQuestEvent: null,
   splashText: null,
   splashAvatar: '🐼',
   splashCharKey: 'yier',
@@ -80,6 +79,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   shopSecondsLeft: null,
   shopPid: null,
   latestEmote: null,
+  giftQuestEvent: null,
   players: [],
 };
 
