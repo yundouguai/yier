@@ -967,6 +967,7 @@ export function buildAncientWorld(
         .replace(
           '#include <common>',
           `#include <common>
+          uniform float uTime;
           varying vec2 vMoatUv;
           varying vec3 vWaterWorldPos;
           varying vec3 vRadView;
@@ -976,6 +977,13 @@ export function buildAncientWorld(
           '#include <begin_vertex>',
           `#include <begin_vertex>
           vMoatUv = uv;
+          float angW = atan(transformed.z, transformed.x);
+          float envW = sin(clamp(uv.y, 0.0, 1.0) * 3.14159265);
+          transformed.y += envW * (
+            sin(angW * 10.0 - uTime * 1.9) * 0.009 +
+            sin(angW * 18.0 - uTime * 2.6 + uv.y * 5.0) * 0.005 +
+            cos(transformed.x * 0.55 + transformed.z * 0.45 - uTime * 1.4) * 0.003
+          );
           vec3 wPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
           vWaterWorldPos = wPos;
           vec3 rDir = normalize(vec3(wPos.x, 0.0, wPos.z));

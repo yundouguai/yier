@@ -1,5 +1,6 @@
 let actx: AudioContext | null = null;
 let muted = false;
+let noiseBuf: AudioBuffer | null = null;
 
 export function isAudioMuted(): boolean {
   return muted;
@@ -36,49 +37,104 @@ export function ensureAudio(): void {
   }
 }
 
+function getNoiseBuffer(ctx: AudioContext): AudioBuffer {
+  if (noiseBuf && noiseBuf.sampleRate === ctx.sampleRate) return noiseBuf;
+  const len = Math.floor(ctx.sampleRate * 0.25);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  noiseBuf = buf;
+  return buf;
+}
+
+function playFilteredNoise(
+  dur = 0.06,
+  freq = 1200,
+  q = 2.0,
+  vol = 0.08,
+  filterType: BiquadFilterType = 'bandpass',
+  delay = 0,
+): void {
+  if (muted || !actx) return;
+  try {
+    const start = actx.currentTime + delay;
+    const src = actx.createBufferSource();
+    src.buffer = getNoiseBuffer(actx);
+    const flt = actx.createBiquadFilter();
+    flt.type = filterType;
+    flt.frequency.setValueAtTime(freq, start);
+    flt.Q.setValueAtTime(q, start);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(vol, start);
+    g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+    src.connect(flt).connect(g).connect(actx.destination);
+    src.start(start);
+    src.stop(start + dur);
+  } catch {
+    // Ignore audio scheduling failure
+  }
+}
+
 export function beep(
   freq: number,
   dur = 0.08,
   type: OscillatorType = 'sine',
   vol = 0.15,
+  freqEnd?: number,
+  delay = 0,
 ): void {
   if (muted || !actx) return;
   try {
+    const start = actx.currentTime + delay;
     const o = actx.createOscillator();
     const g = actx.createGain();
     o.type = type;
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(vol, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.frequency.setValueAtTime(freq, start);
+    if (freqEnd !== undefined) {
+      o.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), start + dur);
+    }
+    g.gain.setValueAtTime(vol, start);
+    g.gain.exponentialRampToValueAtTime(0.001, start + dur);
     o.connect(g).connect(actx.destination);
-    o.start();
-    o.stop(actx.currentTime + dur);
+    o.start(start);
+    o.stop(start + dur);
   } catch {
     // Ignore audio scheduling failure
   }
 }
 
 export function sndRoll(): void {
-  beep(220, 0.1, 'triangle', 0.12);
-  window.setTimeout(() => beep(330, 0.1, 'triangle', 0.12), 110);
+  // 木质骰盅清脆连击 + 轻柔落定音
+  playFilteredNoise(0.045, 1650, 3.2, 0.09, 'bandpass', 0);
+  playFilteredNoise(0.045, 1950, 3.4, 0.08, 'bandpass', 0.075);
+  playFilteredNoise(0.055, 1400, 2.8, 0.09, 'bandpass', 0.15);
+  beep(260, 0.09, 'triangle', 0.1, 360, 0.02);
+  beep(380, 0.11, 'triangle', 0.11, 460, 0.16);
 }
 
 export function sndHop(): void {
-  beep(560, 0.05, 'sine', 0.08);
+  // Q弹小熊跳跃音
+  beep(460, 0.065, 'sine', 0.085, 640);
 }
 
 export function sndCap(): void {
-  beep(300, 0.12, 'sawtooth', 0.1);
-  window.setTimeout(() => beep(180, 0.18, 'sawtooth', 0.1), 100);
+  // 踩扁冲击低频闷响 + 飞出哨音
+  playFilteredNoise(0.11, 420, 1.2, 0.14, 'lowpass', 0);
+  beep(220, 0.14, 'triangle', 0.16, 75, 0);
+  beep(520, 0.18, 'sine', 0.08, 920, 0.08);
 }
 
 export function sndWin(): void {
-  [523, 659, 784, 1046].forEach((f, i) =>
-    window.setTimeout(() => beep(f, 0.22, 'triangle', 0.16), i * 140),
-  );
+  // 温暖五声音阶/大三和弦胜利扇形号角
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+    beep(f, 0.24, 'triangle', 0.15, undefined, i * 0.125);
+    beep(f * 0.5, 0.24, 'sine', 0.07, undefined, i * 0.125);
+  });
 }
 
 export function sndYourTurn(): void {
-  beep(523, 0.09, 'sine', 0.11);
-  window.setTimeout(() => beep(659, 0.14, 'sine', 0.12), 85);
+  beep(523.25, 0.09, 'sine', 0.1, undefined, 0);
+  beep(659.25, 0.14, 'triangle', 0.11, undefined, 0.085);
 }

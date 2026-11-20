@@ -397,7 +397,8 @@ export class FlightChessEngine {
     const sun = new THREE.DirectionalLight(0xffdfb0, 1.32);
     sun.position.set(8, 16, 7);
     sun.castShadow = !this.isSoftwareGl;
-    sun.shadow.mapSize.set(2048, 2048);
+    const shadowDim = window.innerWidth < 900 || window.innerHeight < 560 ? 1024 : 2048;
+    sun.shadow.mapSize.set(shadowDim, shadowDim);
     sun.shadow.camera.left = -13;
     sun.shadow.camera.right = 13;
     sun.shadow.camera.top = 13;
@@ -1124,14 +1125,19 @@ export class FlightChessEngine {
     const q = this.playerQuests[pid];
     if (!q) return;
     let touched = false;
-    for (const f of faces) {
-      if (f === 1) {
-        q.roll1 += 1;
-        touched = true;
-      } else if (f === 2) {
-        q.roll2 += 1;
-        touched = true;
-      }
+    const has1 = faces.includes(1);
+    const has2 = faces.includes(2);
+    if (faces.length > 1 && has1 && has2) {
+      // 动力装置双骰同轮最多计入 1 个任务骰面，优先补齐较缺的一侧
+      if (q.roll1 <= q.roll2) q.roll1 += 1;
+      else q.roll2 += 1;
+      touched = true;
+    } else if (has1) {
+      q.roll1 += 1;
+      touched = true;
+    } else if (has2) {
+      q.roll2 += 1;
+      touched = true;
     }
     if (!touched) return;
     while (q.roll1 >= 1 && q.roll2 >= 1) {
@@ -1595,11 +1601,12 @@ export class FlightChessEngine {
       ...this.planes.filter((q) => q.pid !== pid && q.pos < HOME_END).map((q) => q.pos),
     );
 
+    const hasMissileTargets = this.buildTargetChoices('missile', pid).length > 0;
     if (p === 'tactician') {
-      if (enemyLeaderPos >= 34 && offer.includes('missile')) return 'missile';
+      if (hasMissileTargets && enemyLeaderPos >= 34 && offer.includes('missile')) return 'missile';
       if (stuckInBase >= 3 && offer.includes('sixDie')) return 'sixDie';
     }
-    if (p === 'vengeful' && this.getTopThreatPid(pid) >= 0 && offer.includes('missile')) {
+    if (p === 'vengeful' && hasMissileTargets && this.getTopThreatPid(pid) >= 0 && offer.includes('missile')) {
       return 'missile';
     }
     const prio = AI_PERSONALITIES[p].shopPriority;
@@ -2042,7 +2049,38 @@ export class FlightChessEngine {
       }
 
       // 2) 评估加速/进攻卡使用时机（不能刚拿就无脑丢）
+      const twinEval = () => {
+        if (onBoardCount === 0 && hasInBase) {
+          // 双骰起飞率 20/36 (55.6%)，若无 6 数骰可作为起飞备选
+          return { expectedScore: 18, shouldTakeoff: true, highOvershootRisk: false };
+        }
+        const safeCount = activeBoard.filter((p) => p.pos >= 46).length;
+        const highOvershootRisk = activeBoard.length > 0 && safeCount === activeBoard.length;
+        let totalWeighted = 0;
+        const weights = [0, 0, 1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1];
+        for (let sum = 2; sum <= 12; sum++) {
+          let bestSumScore = -999;
+          for (const p of activeBoard) {
+            const L = this.simulateMoveOutcome(p, sum);
+            let sc = sum * 0.9;
+            if (L.fly) sc += 26;
+            else if (L.jump) sc += 14;
+            if (L.pos === HOME_END) sc += 32;
+            if (p.pos >= 51 && L.pos < p.pos) sc -= 24;
+            for (const sp of L.ringStops) {
+              const rIdx = (P.start + 2 + sp) % 52;
+              if (this.planes.some((q) => q.pid !== me && q.pos >= 1 && q.pos <= 50 && this.ringIndexOf(q) === rIdx)) {
+                sc += 24;
+              }
+            }
+            if (sc > bestSumScore) bestSumScore = sc;
+          }
+          totalWeighted += bestSumScore * (weights[sum] / 36);
+        }
+        return { expectedScore: totalWeighted, shouldTakeoff: false, highOvershootRisk };
+      };
       const s6 = sixEval();
+      const stwin = twinEval();
       const sixHeld = turnsHeld('sixDie');
       const twinHeld = turnsHeld('twinDice');
       const refuelHeld = turnsHeld('refuel');
@@ -2068,7 +2106,9 @@ export class FlightChessEngine {
         }
         if (
           inv.twinDice > 0 &&
-          ((twinHeld >= 1 && (escapeNeed || activeBoard.some((p) => p.pos >= 14 && p.pos <= 43))) ||
+          !stwin.highOvershootRisk &&
+          (stwin.shouldTakeoff ||
+            (twinHeld >= 1 && (escapeNeed || stwin.expectedScore >= 16)) ||
             (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 4 && p.pos <= 44)))
         ) {
           await useTwinDice();
@@ -2950,7 +2990,11 @@ export class FlightChessEngine {
       await this.animTwinDice(d1, d2);
       if (this.disposed) return;
 
-      this.sixChain = 0;
+      if (d1 === 6 || d2 === 6) {
+        this.sixChain = this.pendingExtraRoll ? this.sixChain + 1 : 0;
+      } else if (!this.pendingExtraRoll) {
+        this.sixChain = 0;
+      }
       this.recordRollQuest(this.turn, [d1, d2]);
       if (d1 === 6 || d2 === 6) {
         this.setMsg(`⚙️ 动力装置掷出 ${d1} + ${d2} = ${this.die} 点（含 6 无连投）`);
@@ -2975,16 +3019,19 @@ export class FlightChessEngine {
 
     this.recordRollQuest(this.turn, [die]);
 
-    if (die === 6 && !this.suppressSixBonusThisRoll) {
+    if (die === 6) {
       this.sixChain++;
-      if (this.sixChain >= 3) {
+      if (this.suppressSixBonusThisRoll) {
+        this.setMsg(
+          this.sixChain >= 3
+            ? '⚠️ 累计已达 3 个 6！本次可移动，但不再触发连投'
+            : '🎲 掷出 6 点（本回合道具效果，不额外送连投）',
+        );
+      } else if (this.sixChain >= 3) {
         this.setMsg('⚠️ 连续三个 6！本次可移动，但不再掷');
       }
-    } else {
+    } else if (!this.pendingExtraRoll) {
       this.sixChain = 0;
-      if (die === 6 && this.suppressSixBonusThisRoll) {
-        this.setMsg('🎲 掷出 6 点（本回合道具效果，无连投奖励）');
-      }
     }
     this.emitSnapshot();
     await this.onRolled(die, die === 5 || die === 6);
@@ -3198,9 +3245,16 @@ export class FlightChessEngine {
     plane.animating = false;
   }
 
+  private impactRingGeo: THREE.RingGeometry | null = null;
+  private impactOuterRingGeo: THREE.RingGeometry | null = null;
+  private impactSparkGeo: THREE.SphereGeometry | null = null;
+
   private spawnImpact(x: number, z: number): void {
+    if (!this.impactRingGeo) this.impactRingGeo = new THREE.RingGeometry(0.28, 0.58, 32);
+    if (!this.impactOuterRingGeo) this.impactOuterRingGeo = new THREE.RingGeometry(0.22, 0.42, 32);
+    if (!this.impactSparkGeo) this.impactSparkGeo = new THREE.SphereGeometry(0.085, 8, 6);
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.28, 0.58, 32),
+      this.impactRingGeo,
       new THREE.MeshBasicMaterial({
         color: 0xffd54a,
         transparent: true,
@@ -3215,7 +3269,7 @@ export class FlightChessEngine {
     this.scene.add(ring);
 
     const outerRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.22, 0.42, 32),
+      this.impactOuterRingGeo,
       new THREE.MeshBasicMaterial({
         color: 0xff7b54,
         transparent: true,
@@ -3238,7 +3292,7 @@ export class FlightChessEngine {
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.085, 8, 6), m);
+      const s = new THREE.Mesh(this.impactSparkGeo, m);
       s.position.set(x, 0.24, z);
       this.scene.add(s);
       sparks.push({
@@ -3265,14 +3319,11 @@ export class FlightChessEngine {
       }
     }).then(() => {
       this.scene.remove(ring);
-      ring.geometry.dispose();
       ring.material.dispose();
       this.scene.remove(outerRing);
-      outerRing.geometry.dispose();
       outerRing.material.dispose();
       sparks.forEach((sp) => {
         this.scene.remove(sp.m);
-        sp.m.geometry.dispose();
         (sp.m.material as THREE.Material).dispose();
       });
     });
@@ -3534,7 +3585,6 @@ export class FlightChessEngine {
         defendedPids.push(vPid);
         this.spawnShieldBreak(c[0], c[1]);
         this.triggerShake();
-        this.recordStompQuest(vPid, 1);
         this.recordOffense(vPid, plane.pid, 0.5);
         if (this.players[vPid].type === 'ai') {
           this.emitAiEmote(vPid, 'gotStomped', 1800, attackerName, {
@@ -3545,7 +3595,7 @@ export class FlightChessEngine {
         }
       } else {
         toSendHome.push(...grp);
-        this.recordStompQuest(vPid, grp.length);
+        this.recordStompQuest(vPid, 1);
         this.recordOffense(vPid, plane.pid, 1.0);
         if (this.players[plane.pid].type === 'ai') {
           const hadGrudge = (this.offenseScores[plane.pid]?.[vPid] ?? 0) >= 0.95;
@@ -3616,7 +3666,6 @@ export class FlightChessEngine {
       this.triggerShake();
       beep(680, 0.16, 'triangle', 0.15);
       this.setMsg(`🛡️ ${oppPlayer.name} 的护盾成功抵挡了航线击落！`, oppPlayer.uiColor);
-      this.recordStompQuest(oppPid, 1);
       this.recordOffense(oppPid, flyingPid, 0.5);
       if (oppPlayer.type === 'ai') {
         this.emitAiEmote(oppPid, 'gotStomped', 1800, attackerName, {
@@ -3822,7 +3871,7 @@ export class FlightChessEngine {
         );
       }
 
-      const continueAfterDirectShop = async () => {
+      const runSameColorAndFlight = async () => {
         if (this.disposed) return;
         if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
           await this.sleep(320);
@@ -3899,6 +3948,10 @@ export class FlightChessEngine {
             }
           }
         }
+      };
+
+      const continueAfterDirectShop = async () => {
+        await runSameColorAndFlight();
         if (this.disposed) return;
         this.relayout();
         this.emitSnapshot();
@@ -3949,81 +4002,7 @@ export class FlightChessEngine {
         }
       }
 
-      if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
-        await this.sleep(320);
-        if (this.disposed) return;
-        if (plane.pos === FLIGHT_FROM) {
-          this.setMsg('🌀 踏上飞行航线，直飞对面！');
-          sndCap();
-          const cFrom = this.posToCell(P, plane.pos);
-          setPos(plane.pos + FLIGHT_STEP);
-          const cTo = this.posToCell(P, plane.pos);
-          await Promise.all([
-            this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 2200),
-            new Promise<void>((res) =>
-              this.after(980, () => {
-                this.captureFlyCross(plane.pid).then(res);
-              }),
-            ),
-          ]);
-          await this.captureAt(plane);
-          await this.sleep(320);
-          if (this.disposed) return;
-          this.setMsg('⚡ 同色顺风再跳 4 格！');
-          beep(540, 0.12, 'triangle', 0.14);
-          setPos(plane.pos + 4);
-          let jumpCapture3: Promise<number> | null = null;
-          await hopAll(
-            this.posToCell(P, plane.pos),
-            this.faceTravelDir(plane),
-            1.95,
-            920,
-            1,
-            plane.pos,
-            stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
-            () => {
-              jumpCapture3 = this.captureAt(plane);
-            },
-          );
-          if (jumpCapture3) await jumpCapture3;
-        } else {
-          this.setMsg('⚡ 落在己方颜色格，跳跃前进 4 格！');
-          beep(540, 0.12, 'triangle', 0.14);
-          setPos(plane.pos + 4);
-          let jumpCapture4: Promise<number> | null = null;
-          await hopAll(
-            this.posToCell(P, plane.pos),
-            this.faceTravelDir(plane),
-            1.95,
-            920,
-            1,
-            plane.pos,
-            stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
-            () => {
-              jumpCapture4 = this.captureAt(plane);
-            },
-          );
-          if (jumpCapture4) await jumpCapture4;
-          if (plane.pos === FLIGHT_FROM) {
-            await this.sleep(320);
-            if (this.disposed) return;
-            this.setMsg('🌀 连跳触发飞行航线，直飞对面！');
-            sndCap();
-            const cFrom = this.posToCell(P, plane.pos);
-            setPos(plane.pos + FLIGHT_STEP);
-            const cTo = this.posToCell(P, plane.pos);
-            await Promise.all([
-              this.flyAsPlane(stack, cFrom, cTo, lineOf(P), 2200),
-              new Promise<void>((res) =>
-                this.after(980, () => {
-                  this.captureFlyCross(plane.pid).then(res);
-                }),
-              ),
-            ]);
-            await this.captureAt(plane);
-          }
-        }
-      }
+      await runSameColorAndFlight();
     }
 
     if (this.disposed) return;
@@ -4403,7 +4382,7 @@ export class FlightChessEngine {
         }
 
         if (L.fly) s += personality === 'rusher' ? 72 : 48;
-        if (L.jump) s += personality === 'rusher' ? 36 : 20;
+        else if (L.jump) s += personality === 'rusher' ? 36 : 20;
 
         if (np >= 51) {
           // 冲入终点前安全通道
@@ -4427,7 +4406,8 @@ export class FlightChessEngine {
             s += (curThreat - newThreat) * (32 + p.pos * 0.3) * threatMult;
           }
           if (newThreat > 0) {
-            s -= newThreat * (24 + p.pos * 0.45 * stackCount) * threatMult;
+            const myShieldMult = p.shielded ? 0.2 : 1.0;
+            s -= newThreat * (24 + p.pos * 0.45 * stackCount) * threatMult * myShieldMult;
           }
         }
       }
@@ -4957,26 +4937,6 @@ export class FlightChessEngine {
       this.world.waterNormalTex.offset.x -= dt * 0.078;
       this.world.waterNormalTex.offset.y -= dt * 0.018;
       this.world.waterUniforms.uTime.value = t;
-      const wAttr = this.world.waterMesh.geometry.attributes.position as THREE.BufferAttribute;
-      const basePos = this.world.waterMesh.userData.basePos as Float32Array;
-      const stride = 161;
-      for (let i = 0; i < wAttr.count; i++) {
-        const bx = basePos[i * 3];
-        const bz = basePos[i * 3 + 2];
-        const ang = Math.atan2(bz, bx);
-        const u = Math.floor(i / stride) / 20;
-        const env = Math.sin(u * Math.PI);
-        wAttr.setY(
-          i,
-          wy +
-            env *
-              (Math.sin(ang * 10 - t * 1.9) * 0.009 +
-                Math.sin(ang * 18 - t * 2.6 + u * 5.0) * 0.005 +
-                Math.cos(bx * 0.55 + bz * 0.45 - t * 1.4) * 0.003),
-        );
-      }
-      wAttr.needsUpdate = true;
-      this.world.waterMesh.geometry.computeVertexNormals();
 
       for (const l of this.world.lotusList) {
         l.g.position.y = wy + 0.008 + Math.sin(t * 1.6 + l.phase) * 0.012;
