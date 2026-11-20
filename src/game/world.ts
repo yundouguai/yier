@@ -28,6 +28,7 @@ import {
   createRiverbedTexture,
   createShoreEarthTexture,
   createLandingPadTexture,
+  createShopMedallionTexture,
   createStartPadTexture,
   createStoneDeckTexture,
   createWakeTexture,
@@ -190,6 +191,7 @@ export interface CourtFenceHighlight {
   trimMat: THREE.MeshStandardMaterial;
   capMat: THREE.MeshStandardMaterial;
   active: boolean;
+  pulse: boolean;
   accentHex: number;
 }
 
@@ -207,6 +209,7 @@ export interface WorldRefs {
   rideToys: RideToyAnim[];
   planeMarks: THREE.Group[];
   courtFences: CourtFenceHighlight[];
+  shopRingIndices: number[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
   petals: PetalAnim[];
@@ -2392,6 +2395,9 @@ export function buildAncientWorld(
   const tileTopMatCache = new Map<string, THREE.MeshStandardMaterial>();
   const triTopMatCache = new Map<string, THREE.MeshStandardMaterial>();
   const medallionMatCache = new Map<string, THREE.MeshStandardMaterial>();
+  const shopMedallionMatCache = new Map<string, THREE.MeshStandardMaterial>();
+  const shopRingIndices = players.map((P) => (P.start + 40) % 52);
+  const shopRingSet = new Set(shopRingIndices);
 
   const getTileTopMat = (P: PlayerConfig | null | undefined) => {
     const key = P ? P.key : 'neutral';
@@ -2450,6 +2456,25 @@ export function buildAncientWorld(
         polygonOffsetUnits: -1,
       });
       medallionMatCache.set(key, m);
+    }
+    return m;
+  };
+
+  const getShopMedallionMat = (P: PlayerConfig) => {
+    let m = shopMedallionMatCache.get(P.key);
+    if (!m) {
+      const tex = createShopMedallionTexture(ringColor(P), P.key === 'yier', anisotropy);
+      m = new THREE.MeshStandardMaterial({
+        map: tex,
+        transparent: true,
+        roughness: 0.42,
+        metalness: 0.14,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
+      shopMedallionMatCache.set(P.key, m);
     }
     return m;
   };
@@ -2547,9 +2572,33 @@ export function buildAncientWorld(
 
   RING_TILES.forEach((t, i) => {
     const P = slotPlayer(i % 4);
+    const isShopTile = !!P && shopRingSet.has(i);
     if (t.kind === 'rect') {
       rectTile(t.x, t.z, t.w, t.d, P);
-      cellDisc(t.cx, t.cz, P, 0.31);
+      if (isShopTile && P) {
+        const shopDisc = new THREE.Mesh(new THREE.CircleGeometry(0.365, 32), getShopMedallionMat(P));
+        shopDisc.rotation.x = -Math.PI / 2;
+        shopDisc.rotation.z = -Math.floor(i / 13) * (Math.PI / 2);
+        shopDisc.position.set(t.cx, 0.1225, t.cz);
+        shopDisc.receiveShadow = true;
+        scene.add(shopDisc);
+
+        const goldRim = new THREE.Mesh(
+          new THREE.TorusGeometry(0.372, 0.014, 8, 32),
+          new THREE.MeshStandardMaterial({
+            color: 0xf4c44e,
+            emissive: 0xd99b26,
+            emissiveIntensity: 0.25,
+            roughness: 0.32,
+            metalness: 0.55,
+          }),
+        );
+        goldRim.rotation.x = -Math.PI / 2;
+        goldRim.position.set(t.cx, 0.123, t.cz);
+        scene.add(goldRim);
+      } else {
+        cellDisc(t.cx, t.cz, P, 0.31);
+      }
     } else {
       triTile(t.pts, t.cx, t.cz, P);
       cellDisc(t.cx, t.cz, P, 0.245);
@@ -2895,6 +2944,7 @@ export function buildAncientWorld(
       trimMat: fenceTrimWoodMat,
       capMat: fenceCapMat,
       active: false,
+      pulse: false,
       accentHex: 0x56c48c,
     });
     const grass = new THREE.Mesh(new THREE.BoxGeometry(3.92, 0.16, 3.92), [
@@ -3223,6 +3273,7 @@ export function buildAncientWorld(
         bevelSegments: 2,
       });
       takeoffArrowGeo.rotateX(-Math.PI / 2);
+      takeoffArrowGeo.rotateY(Math.PI);
 
       const stepArrow = new THREE.Mesh(
         takeoffArrowGeo,
@@ -5089,6 +5140,7 @@ export function buildAncientWorld(
     rideToys,
     planeMarks,
     courtFences,
+    shopRingIndices,
     lotusList,
     willowDrapeList,
     petals,

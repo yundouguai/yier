@@ -1151,3 +1151,178 @@ export function createLandingPadTexture(P: PlayerConfig, anisotropy = 4): THREE.
 
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }
+
+export function createShopMedallionTexture(
+  accentHex: number,
+  isYier: boolean,
+  anisotropy = 4,
+): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 256, 256);
+
+  const cx = 128;
+  const cy = 128;
+
+  // 柔和奶油金圆盘底纹
+  const grad = g.createRadialGradient(cx - 16, cy - 22, 14, cx, cy, 114);
+  grad.addColorStop(0, '#fffdf5');
+  grad.addColorStop(0.68, '#fef2d6');
+  grad.addColorStop(1, '#f3d48e');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(cx, cy, 112, 0, Math.PI * 2);
+  g.fill();
+
+  // 镶边外环 + 虚线蕾丝圈
+  g.strokeStyle = isYier ? '#7a5230' : toColorHex(accentHex === 0xffffff ? 0xb4532a : accentHex);
+  g.lineWidth = 9;
+  g.beginPath();
+  g.arc(cx, cy, 102, 0, Math.PI * 2);
+  g.stroke();
+
+  g.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+  g.lineWidth = 3.5;
+  g.setLineDash([10, 7]);
+  g.beginPath();
+  g.arc(cx, cy, 88, 0, Math.PI * 2);
+  g.stroke();
+  g.setLineDash([]);
+
+  // 瓷白小餐盘投影与盘底
+  g.fillStyle = 'rgba(130, 82, 38, 0.16)';
+  g.beginPath();
+  g.ellipse(cx, cy + 54, 62, 16, 0, 0, Math.PI * 2);
+  g.fill();
+
+  g.fillStyle = '#ffffff';
+  g.strokeStyle = '#e7d7bf';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.ellipse(cx, cy + 50, 56, 14, 0, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+
+  // 草莓小蛋糕双层松软海绵坯体
+  const cakeLeft = cx - 44;
+  const cakeRight = cx + 44;
+  const cakeTop = cy - 10;
+  const cakeBottom = cy + 44;
+
+  // 蛋糕底座轮廓（圆角梯形切片感）
+  const spongeGrad = g.createLinearGradient(cakeLeft, cakeTop, cakeRight, cakeBottom);
+  spongeGrad.addColorStop(0, '#fbd68d');
+  spongeGrad.addColorStop(1, '#eab15c');
+  g.fillStyle = spongeGrad;
+  g.beginPath();
+  g.moveTo(cakeLeft + 4, cakeTop + 8);
+  g.lineTo(cakeRight - 4, cakeTop + 8);
+  g.quadraticCurveTo(cakeRight, cakeBottom, cakeRight - 6, cakeBottom);
+  g.lineTo(cakeLeft + 6, cakeBottom);
+  g.quadraticCurveTo(cakeLeft, cakeBottom, cakeLeft + 4, cakeTop + 8);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = '#9e5d28';
+  g.lineWidth = 3;
+  g.stroke();
+
+  // 中间草莓酱 + 淡奶油夹心条
+  g.fillStyle = '#fffcf5';
+  g.fillRect(cakeLeft + 5, cy + 12, 78, 12);
+  g.fillStyle = '#f25767';
+  g.fillRect(cakeLeft + 6, cy + 16, 76, 5);
+
+  // 顶部厚实流心奶霜（波浪垂边）
+  g.fillStyle = '#fffef9';
+  g.strokeStyle = '#b9783f';
+  g.lineWidth = 2.6;
+  g.beginPath();
+  g.moveTo(cakeLeft + 2, cakeTop + 10);
+  g.quadraticCurveTo(cx, cakeTop - 16, cakeRight - 2, cakeTop + 10);
+  g.bezierCurveTo(cakeRight + 2, cakeTop + 26, cakeRight - 14, cakeTop + 26, cakeRight - 18, cakeTop + 16);
+  g.bezierCurveTo(cakeRight - 24, cakeTop + 29, cx + 10, cakeTop + 28, cx + 4, cakeTop + 17);
+  g.bezierCurveTo(cx - 2, cakeTop + 30, cakeLeft + 20, cakeTop + 29, cakeLeft + 16, cakeTop + 16);
+  g.bezierCurveTo(cakeLeft + 10, cakeTop + 25, cakeLeft - 2, cakeTop + 24, cakeLeft + 2, cakeTop + 10);
+  g.closePath();
+  g.fill();
+  g.stroke();
+
+  // 顶部挤花奶油团
+  g.fillStyle = '#ffffff';
+  g.strokeStyle = '#cfb08e';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.arc(cx - 14, cy - 16, 13, 0, Math.PI * 2);
+  g.arc(cx + 14, cy - 16, 13, 0, Math.PI * 2);
+  g.arc(cx, cy - 22, 16, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+
+  // C位大颗水润草莓
+  const berryGrad = g.createRadialGradient(cx - 6, cy - 50, 3, cx, cy - 42, 26);
+  berryGrad.addColorStop(0, '#ff6b7a');
+  berryGrad.addColorStop(0.55, '#e82d42');
+  berryGrad.addColorStop(1, '#b51428');
+  g.fillStyle = berryGrad;
+  g.strokeStyle = '#8b1020';
+  g.lineWidth = 2.6;
+  g.beginPath();
+  g.moveTo(cx, cy - 64);
+  g.bezierCurveTo(cx + 22, cy - 64, cx + 22, cy - 34, cx, cy - 24);
+  g.bezierCurveTo(cx - 22, cy - 34, cx - 22, cy - 64, cx, cy - 64);
+  g.closePath();
+  g.fill();
+  g.stroke();
+
+  // 草莓表面金黄色小籽
+  g.fillStyle = '#ffe999';
+  const seedPts: [number, number][] = [
+    [-7, -50],
+    [6, -51],
+    [-10, -40],
+    [0, -43],
+    [9, -41],
+    [-4, -33],
+    [5, -34],
+  ];
+  for (const [sx, sy] of seedPts) {
+    g.beginPath();
+    g.ellipse(cx + sx, cy + sy, 1.5, 2.2, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // 草莓水润高光
+  g.fillStyle = 'rgba(255, 255, 255, 0.72)';
+  g.beginPath();
+  g.ellipse(cx - 7, cy - 53, 3.6, 5.4, -0.35, 0, Math.PI * 2);
+  g.fill();
+
+  // 草莓翠绿小叶蒂
+  g.fillStyle = '#48b856';
+  g.strokeStyle = '#2b7b36';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(cx, cy - 62);
+  g.quadraticCurveTo(cx - 14, cy - 72, cx - 16, cy - 60);
+  g.quadraticCurveTo(cx - 6, cy - 58, cx, cy - 61);
+  g.quadraticCurveTo(cx + 6, cy - 58, cx + 16, cy - 60);
+  g.quadraticCurveTo(cx + 14, cy - 72, cx, cy - 62);
+  g.fill();
+  g.stroke();
+
+  // 两侧点缀小草莓粒与薄荷糖珠
+  g.fillStyle = '#ff576b';
+  g.beginPath();
+  g.arc(cx - 29, cy - 6, 5.5, 0, Math.PI * 2);
+  g.arc(cx + 29, cy - 6, 5.5, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = '#ffd65a';
+  g.beginPath();
+  g.arc(cx - 46, cy - 34, 3.2, 0, Math.PI * 2);
+  g.arc(cx + 46, cy - 34, 3.2, 0, Math.PI * 2);
+  g.fill();
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+

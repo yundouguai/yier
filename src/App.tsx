@@ -10,6 +10,8 @@ import { SetupModal } from './components/SetupModal';
 import { FlightChessEngine } from './game/FlightChessEngine';
 import { isAudioMuted, toggleAudioMuted } from './game/audio';
 import {
+  AI_PERSONALITY_ORDER,
+  AiPersonality,
   CHARS,
   CHAR_KEYS,
   CharKey,
@@ -46,6 +48,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   phase: 'idle',
   turn: 0,
   die: null,
+  twinDice: null,
   hudDieFace: 6,
   hudDieRolling: false,
   hudDiePopKey: 0,
@@ -66,6 +69,16 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   winnerPid: null,
   rankings: [],
   gmDie: null,
+  turnUsedAtkDef: false,
+  armedSixDie: false,
+  armedTwinDice: false,
+  armedRefuel: false,
+  pendingItemTarget: null,
+  targetChoices: [],
+  shopOffer: null,
+  shopSecondsLeft: null,
+  shopPid: null,
+  latestEmote: null,
   players: [],
 };
 
@@ -78,6 +91,21 @@ function pickRandomOpponents(localChars: CharKey[]): CharKey[] {
   return pool.slice(0, Math.max(0, 4 - localChars.length));
 }
 
+function pickRandomPersonalities(count: number): AiPersonality[] {
+  if (count <= 0) return [];
+  const others = AI_PERSONALITY_ORDER.filter((p) => p !== 'tactician');
+  for (let i = others.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [others[i], others[j]] = [others[j], others[i]];
+  }
+  const picked: AiPersonality[] = ['tactician', ...others.slice(0, count - 1)];
+  for (let i = picked.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [picked[i], picked[j]] = [picked[j], picked[i]];
+  }
+  return picked;
+}
+
 export default function App() {
   const initialParsed = useRef(parseUrlSeats());
   const initialLocalChars: CharKey[] = initialParsed.current.hasParam
@@ -87,6 +115,7 @@ export default function App() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<FlightChessEngine | null>(null);
   const matchTimersRef = useRef<number[]>([]);
+  const transitionWaitRef = useRef(false);
 
   const [activeSeats, setActiveSeats] = useState<SeatConfig[]>(initialParsed.current.seats);
   const [activeLocalChars, setActiveLocalChars] = useState<CharKey[]>(
@@ -128,6 +157,19 @@ export default function App() {
       autoStart,
       (nextSnap) => setSnap(nextSnap),
       (lost) => setContextLost(lost),
+      () => {
+        if (!transitionWaitRef.current) return;
+        transitionWaitRef.current = false;
+        const revealTid = window.setTimeout(() => {
+          setMatchmaking((prev) => (prev ? { ...prev, closing: true } : null));
+          engineRef.current?.startMatch();
+          const doneTid = window.setTimeout(() => {
+            setMatchmaking(null);
+          }, 360);
+          matchTimersRef.current.push(doneTid);
+        }, 120);
+        matchTimersRef.current.push(revealTid);
+      },
     );
     engineRef.current = engine;
 
@@ -139,21 +181,48 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  const launchMatchWithSeats = useCallback((locals: CharKey[], opps: CharKey[]) => {
-    setAllHumansPrompt(false);
-    setAllHumansDismissed(false);
-    const nextSeats: SeatConfig[] = [
-      ...locals.map((char) => ({ on: true, char, type: 'human' as const })),
-      ...opps.map((char) => ({ on: true, char, type: 'ai' as const })),
-    ];
-    setActiveLocalChars([...locals]);
-    setActiveSeats(nextSeats);
-    setShowSetup(false);
-    setMatchmaking(null);
-    setAutoStart(true);
-    setSnap((prev) => ({ ...prev, paused: false }));
-    setSessionId((id) => id + 1);
-  }, []);
+  const launchMatchWithSeats = useCallback(
+    (
+      locals: CharKey[],
+      opps: CharKey[],
+      viaMatchmaking: boolean,
+      oppPersonalities?: AiPersonality[],
+    ) => {
+      clearMatchTimers();
+      setAllHumansPrompt(false);
+      setAllHumansDismissed(false);
+      const personalities = oppPersonalities ?? pickRandomPersonalities(opps.length);
+      const nextSeats: SeatConfig[] = [
+        ...locals.map((char) => ({ on: true, char, type: 'human' as const })),
+        ...opps.map((char, idx) => ({
+          on: true,
+          char,
+          type: 'ai' as const,
+          personality: personalities[idx],
+        })),
+      ];
+      setActiveLocalChars([...locals]);
+      setActiveSeats(nextSeats);
+      setShowSetup(false);
+      setSnap((prev) => ({ ...prev, paused: false }));
+
+      if (viaMatchmaking) {
+        setAutoStart(false);
+        transitionWaitRef.current = true;
+        // 保持匹配弹窗不关闭，直到后台新场景加载并渲染完首帧后再自然淡出
+        const buildTid = window.setTimeout(() => {
+          setSessionId((id) => id + 1);
+        }, 30);
+        matchTimersRef.current.push(buildTid);
+      } else {
+        transitionWaitRef.current = false;
+        setMatchmaking(null);
+        setAutoStart(true);
+        setSessionId((id) => id + 1);
+      }
+    },
+    [clearMatchTimers],
+  );
 
   const handleStartGame = useCallback(() => {
     if (draftLocalChars.length < 1 || draftLocalChars.length > 4) return;
@@ -162,11 +231,12 @@ export default function App() {
     setSnap((prev) => ({ ...prev, paused: false }));
 
     if (draftLocalChars.length === 4) {
-      launchMatchWithSeats(draftLocalChars, []);
+      launchMatchWithSeats(draftLocalChars, [], false);
       return;
     }
 
     const matchedChars = pickRandomOpponents(draftLocalChars);
+    const matchedPersonalities = pickRandomPersonalities(matchedChars.length);
     const needCount = matchedChars.length;
     const totalWaitMs = 2200 + Math.floor(Math.random() * 2600); // 2.2s ~ 4.8s
 
@@ -174,7 +244,10 @@ export default function App() {
     setMatchmaking({
       localChars: [...draftLocalChars],
       matchedChars,
+      matchedPersonalities,
       joinedCount: 0,
+      launching: false,
+      closing: false,
     });
 
     for (let k = 1; k <= needCount; k++) {
@@ -186,13 +259,17 @@ export default function App() {
     }
 
     const doneTid = window.setTimeout(() => {
-      launchMatchWithSeats(draftLocalChars, matchedChars);
+      setMatchmaking((prev) =>
+        prev ? { ...prev, joinedCount: needCount, launching: true } : null,
+      );
+      launchMatchWithSeats(draftLocalChars, matchedChars, true, matchedPersonalities);
     }, totalWaitMs);
     matchTimersRef.current.push(doneTid);
   }, [clearMatchTimers, draftLocalChars, launchMatchWithSeats]);
 
   const handleCancelMatchmaking = useCallback(() => {
     clearMatchTimers();
+    transitionWaitRef.current = false;
     setMatchmaking(null);
     setShowSetup(true);
   }, [clearMatchTimers]);
@@ -203,11 +280,14 @@ export default function App() {
       engineRef.current?.setPaused(true);
       setShowSetup(true);
     } else {
+      clearMatchTimers();
+      transitionWaitRef.current = false;
+      setMatchmaking(null);
       setShowSetup(true);
       setAutoStart(false);
       setSessionId((id) => id + 1);
     }
-  }, [activeLocalChars, snap.phase, snap.winnerPid]);
+  }, [activeLocalChars, clearMatchTimers, snap.phase, snap.winnerPid]);
 
   const handleResumeFromSetup = useCallback(() => {
     setDraftLocalChars([...activeLocalChars]);
@@ -216,6 +296,8 @@ export default function App() {
   }, [activeLocalChars]);
 
   const handlePlayAgain = useCallback(() => {
+    clearMatchTimers();
+    transitionWaitRef.current = false;
     setAllHumansPrompt(false);
     setAllHumansDismissed(false);
     setShowSetup(false);
@@ -223,7 +305,7 @@ export default function App() {
     setAutoStart(true);
     setSnap((prev) => ({ ...prev, paused: false }));
     setSessionId((id) => id + 1);
-  }, []);
+  }, [clearMatchTimers]);
 
   const handleToggleMute = useCallback(() => {
     setMuted(toggleAudioMuted());
@@ -248,6 +330,11 @@ export default function App() {
       }
       if (snap.paused || snap.winnerPid !== null) return;
 
+      if (e.key === 'Escape' && snap.pendingItemTarget !== null) {
+        engineRef.current?.cancelItemTarget();
+        return;
+      }
+
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
         engineRef.current?.triggerActionPod();
@@ -261,7 +348,7 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showSetup, matchmaking, snap.paused, snap.winnerPid, snap.phase]);
+  }, [showSetup, matchmaking, snap.paused, snap.winnerPid, snap.phase, snap.pendingItemTarget]);
 
   const humanPlayers = snap.players.filter((p) => p.type === 'human');
   const allHumansFinished =
@@ -296,12 +383,12 @@ export default function App() {
     el.classList.add('anim-shake');
   }, [snap.shakeKey]);
 
-  const hideHud = showSetup || matchmaking !== null;
+  const hideHud = showSetup || (matchmaking !== null && !matchmaking.closing);
 
   return (
     <div
       ref={wrapperRef}
-      className="relative h-screen w-screen overflow-hidden bg-[#e6d6bc]"
+      className="relative h-screen w-screen overflow-hidden bg-[#dbe8df]"
     >
       {/* Dedicated WebGL canvas mount outside React HUD re-renders */}
       <div ref={mountRef} className="fixed inset-0" />
@@ -314,10 +401,15 @@ export default function App() {
           onToggleMute={handleToggleMute}
           onSetGmDie={(val) => engineRef.current?.setGmDie(val)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
+          onUseItem={(item) => engineRef.current?.useItem(item)}
+          onPickItemTarget={(pid, idx) => engineRef.current?.pickItemTarget(pid, idx)}
+          onCancelItemTarget={() => engineRef.current?.cancelItemTarget()}
+          onPickShopItem={(item) => engineRef.current?.pickShopItem(item)}
           onSetCamMode={(mode) => engineRef.current?.setCamMode(mode)}
           onResetView={() => engineRef.current?.resetView()}
           onReturnSetup={handleReturnSetup}
           onTogglePause={() => engineRef.current?.togglePause()}
+          onHumanEmote={(pid) => engineRef.current?.reactToHumanEmote(pid)}
         />
       )}
 

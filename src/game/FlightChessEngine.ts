@@ -11,6 +11,9 @@ import {
   sndYourTurn,
 } from './audio';
 import {
+  AI_PERSONALITIES,
+  AI_PERSONALITY_ORDER,
+  AiPersonality,
   CHARS,
   CharKey,
   CameraMode,
@@ -19,13 +22,18 @@ import {
   GameHudSnapshot,
   GamePhase,
   HOME_END,
+  HudEmoteEvent,
+  ITEM_DEFS,
+  ITEM_ORDER,
+  ItemTargetChoice,
+  ItemType,
   ORIENT,
   PlayerConfig,
+  PlayerQuestState,
   Point2D,
   RING,
   SEAT_ORDER,
   SLOTS,
-  STACK_OFF,
   SeatConfig,
   lineOf,
   toColorHex,
@@ -38,6 +46,7 @@ import {
   buildDiceRig,
   buildPickHints,
   buildPlaneMesh,
+  buildToyMissileMesh,
   buildTurnArrow,
   makePilotPlaneModel,
   makePlaneModel,
@@ -145,6 +154,8 @@ export class FlightChessEngine {
   private phase: GamePhase = 'idle';
   private turn = 0;
   private die: number | null = null;
+  private twinDice: [number, number] | null = null;
+  private twinDiceUsedForRoll = false;
   private hudDieFace = 6;
   private hudDieRolling = false;
   private hudDiePopKey = 0;
@@ -164,6 +175,34 @@ export class FlightChessEngine {
   private finishedOrder: number[] = [];
   private gmNextDie: number | null = null;
   private lastSec = -1;
+
+  // 道具与任务系统状态
+  private shopRingSet = new Set<number>();
+  private playerItems: Record<ItemType, number>[] = [];
+  private playerQuests: PlayerQuestState[] = [];
+  private turnUsedAtkDef = false;
+  private armedSixDie = false;
+  private armedTwinDice = false;
+  private armedRefuel = false;
+  private pendingExtraRoll = false;
+  private suppressSixBonusThisRoll = false;
+  private pendingItemTarget: 'shield' | 'missile' | null = null;
+  private targetChoices: { plane: PlaneData; stackCount: number }[] = [];
+  private shopOffer: ItemType[] | null = null;
+  private shopDeadline: number | null = null;
+  private shopPid: number | null = null;
+  private shopPendingAgain = false;
+  private lastShopSec = -1;
+  private itemBusy = false;
+
+  // AI 性格、威胁/记仇系数与拟人化发言状态
+  private offenseScores: number[][] = [];
+  private playerTurnCount: number[] = [];
+  private itemLastGainedTurn: Record<ItemType, number>[] = [];
+  private latestEmote: HudEmoteEvent | null = null;
+  private emoteKeySeq = 0;
+  private lastAiEmoteAt: number[] = [];
+  private turnSeq = 0;
 
   private message: string | null = null;
   private messageColor: string | null = null;
@@ -217,6 +256,7 @@ export class FlightChessEngine {
     autoStart: boolean,
     onSnapshot: (snap: GameHudSnapshot) => void,
     onContextLost?: (lost: boolean) => void,
+    onReady?: () => void,
   ) {
     this.container = container;
     this.onSnapshot = onSnapshot;
@@ -232,11 +272,55 @@ export class FlightChessEngine {
           ];
 
     const slotIndices = SEAT_ORDER[chosen.length];
+    const aiSeatsCount = chosen.filter((c) => c.type === 'ai').length;
+    const hasExplicitTactician = chosen.some(
+      (c) => c.type === 'ai' && c.personality === 'tactician',
+    );
+    const otherPersonalities = AI_PERSONALITY_ORDER.filter((p) => p !== 'tactician');
+    for (let i = otherPersonalities.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [otherPersonalities[i], otherPersonalities[j]] = [
+        otherPersonalities[j],
+        otherPersonalities[i],
+      ];
+    }
+    const fallbackPersonalities: AiPersonality[] =
+      aiSeatsCount > 0 && !hasExplicitTactician
+        ? (['tactician', ...otherPersonalities.slice(0, Math.max(0, aiSeatsCount - 1))] as AiPersonality[])
+        : ([...otherPersonalities, 'tactician'] as AiPersonality[]).slice(0, Math.max(1, aiSeatsCount));
+    for (let i = fallbackPersonalities.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [fallbackPersonalities[i], fallbackPersonalities[j]] = [
+        fallbackPersonalities[j],
+        fallbackPersonalities[i],
+      ];
+    }
+
+    let aiSlotCounter = 0;
     this.players = chosen.map((c, i) => ({
       ...CHARS[c.char],
       type: c.type,
+      personality:
+        c.type === 'ai'
+          ? (c.personality ?? fallbackPersonalities[aiSlotCounter++ % fallbackPersonalities.length])
+          : undefined,
       ...this.getSlot(slotIndices[i]),
     }));
+    // 兜底保证至少 1 位 AI 为精算型
+    const aiPlayers = this.players.filter((pl) => pl.type === 'ai');
+    if (aiPlayers.length > 0 && !aiPlayers.some((pl) => pl.personality === 'tactician')) {
+      aiPlayers[Math.floor(Math.random() * aiPlayers.length)].personality = 'tactician';
+    }
+    this.offenseScores = this.players.map(() => this.players.map(() => 0));
+    this.playerTurnCount = this.players.map(() => 0);
+    this.itemLastGainedTurn = this.players.map(() => ({
+      sixDie: -99,
+      twinDice: -99,
+      refuel: -99,
+      shield: -99,
+      missile: -99,
+    }));
+    this.lastAiEmoteAt = this.players.map(() => -9999);
 
     this.isSoftwareGl = detectSoftwareGl();
     this.renderer = new THREE.WebGLRenderer({
@@ -322,6 +406,19 @@ export class FlightChessEngine {
 
     // World & Pieces
     this.world = buildAncientWorld(this.scene, this.players, this.anisotropy);
+    this.shopRingSet = new Set(this.world.shopRingIndices);
+    this.playerItems = this.players.map(() => ({
+      sixDie: 0,
+      twinDice: 0,
+      refuel: 0,
+      shield: 0,
+      missile: 0,
+    }));
+    this.playerQuests = this.players.map(() => ({
+      roll1: 0,
+      roll2: 0,
+      stomped: 0,
+    }));
     this.diceRig = buildDiceRig(this.scene, this.anisotropy);
     this.pickHints = buildPickHints(this.scene, this.anisotropy);
     this.turnArrow = buildTurnArrow(this.scene);
@@ -407,6 +504,8 @@ export class FlightChessEngine {
           pos: -1,
           animating: false,
           phase: pid * 1.3 + i * 0.95,
+          shielded: false,
+          shieldMesh: mesh.userData.shieldMesh as THREE.Group | undefined,
           mesh,
         };
         mesh.userData.plane = data;
@@ -444,7 +543,7 @@ export class FlightChessEngine {
       const now = performance.now();
       if (now - this.lastHoverRaycast < 40) return;
       this.lastHoverRaycast = now;
-      if (this.paused) {
+      if (this.paused || this.itemBusy) {
         this.renderer.domElement.style.cursor = 'default';
         this.diceHovered = false;
         return;
@@ -454,7 +553,11 @@ export class FlightChessEngine {
       this.ray.setFromCamera(this.ptr, this.camera);
       let hit = false;
       this.diceHovered = false;
-      if (this.phase === 'awaitRoll' && !this.isAI()) {
+      if (this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget !== null) {
+        hit = this.targetChoices.some(
+          (c) => this.ray.intersectObject(c.plane.mesh, true).length > 0,
+        );
+      } else if (this.phase === 'awaitRoll' && !this.isAI()) {
         this.diceHovered = this.ray.intersectObject(this.diceRig.diceHitMesh).length > 0;
         hit = this.diceHovered;
       } else if (this.phase === 'awaitMove') {
@@ -468,10 +571,33 @@ export class FlightChessEngine {
       if (!this.downXY) return;
       const moved = Math.hypot(e.clientX - this.downXY[0], e.clientY - this.downXY[1]);
       this.downXY = null;
-      if (moved > 6 || this.paused) return;
+      if (moved > 6 || this.paused || this.itemBusy) return;
       this.ptr.x = (e.clientX / window.innerWidth) * 2 - 1;
       this.ptr.y = -(e.clientY / window.innerHeight) * 2 + 1;
       this.ray.setFromCamera(this.ptr, this.camera);
+
+      if (this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget !== null) {
+        const hits = this.ray.intersectObjects(
+          this.planes.map((p) => p.mesh),
+          true,
+        );
+        if (hits.length) {
+          let o: THREE.Object3D | null = hits[0].object;
+          while (o && !o.userData.plane) o = o.parent;
+          if (o) {
+            const clicked = o.userData.plane as PlaneData;
+            const resolved = this.resolveBottomOfStack(clicked);
+            if (this.targetChoices.some((c) => c.plane === resolved || c.plane === clicked)) {
+              const target = this.targetChoices.some((c) => c.plane === resolved)
+                ? resolved
+                : clicked;
+              this.pickItemTarget(target.pid, target.idx);
+              return;
+            }
+          }
+        }
+        return;
+      }
 
       if (
         this.phase === 'awaitRoll' &&
@@ -489,8 +615,14 @@ export class FlightChessEngine {
         if (hits.length) {
           let o: THREE.Object3D | null = hits[0].object;
           while (o && !o.userData.plane) o = o.parent;
-          if (o && this.movable.some((c) => c.plane === o!.userData.plane)) {
-            this.performMove(o.userData.plane as PlaneData, this.die!);
+          if (o) {
+            const clicked = o.userData.plane as PlaneData;
+            const resolved = this.resolveBottomOfStack(clicked);
+            if (this.movable.some((c) => c.plane === resolved)) {
+              this.performMove(resolved, this.die!);
+            } else if (this.movable.some((c) => c.plane === clicked)) {
+              this.performMove(clicked, this.die!);
+            }
           }
         }
       }
@@ -529,7 +661,18 @@ export class FlightChessEngine {
     if (autoStart) {
       this.beginRollPhase(false);
     }
+    this.renderer.render(this.scene, this.camera);
     this.startLoop();
+    if (onReady) {
+      requestAnimationFrame(() => {
+        if (!this.disposed) onReady();
+      });
+    }
+  }
+
+  public startMatch(): void {
+    if (this.disposed || this.phase !== 'idle') return;
+    this.beginRollPhase(false);
   }
 
   private getSlot(slotId: number) {
@@ -696,12 +839,18 @@ export class FlightChessEngine {
     const secondsLeft = showTimer
       ? Math.max(0, Math.ceil((this.deadline! - this.timeMs) / 1000))
       : null;
+    const shopSecondsLeft =
+      this.phase === 'shopChoice' && this.shopDeadline !== null && !this.paused
+        ? Math.max(0, Math.ceil((this.shopDeadline - this.timeMs) / 1000))
+        : null;
 
-    this.diceRig.diceHint.visible = this.phase === 'awaitRoll' && !this.isAI();
+    this.diceRig.diceHint.visible =
+      this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget === null && !this.itemBusy;
     this.world.courtFences.forEach((cf, j) => {
       const pl = this.slotPlayer(j);
       const on = !!pl && this.turn === this.players.indexOf(pl) && this.phase !== 'over';
       cf.active = on;
+      cf.pulse = on && pl?.type === 'human';
       if (on && pl) {
         const accentMap: Record<string, number> = {
           yier: 0x16c77a,
@@ -734,6 +883,7 @@ export class FlightChessEngine {
       phase: this.phase,
       turn: this.turn,
       die: this.die,
+      twinDice: this.twinDice,
       hudDieFace: this.hudDieFace,
       hudDieRolling: this.hudDieRolling,
       hudDiePopKey: this.hudDiePopKey,
@@ -745,6 +895,7 @@ export class FlightChessEngine {
       message: this.message,
       messageColor: this.messageColor,
       messageKey: this.messageKey,
+      latestEmote: this.latestEmote,
       splashText: this.splashText,
       splashAvatar: this.splashAvatar,
       splashCharKey: this.splashCharKey,
@@ -754,6 +905,26 @@ export class FlightChessEngine {
       winnerPid: this.winnerPid,
       rankings: this.getRankings(),
       gmDie: this.gmNextDie,
+      turnUsedAtkDef: this.turnUsedAtkDef,
+      armedSixDie: this.armedSixDie,
+      armedTwinDice: this.armedTwinDice,
+      armedRefuel: this.armedRefuel,
+      pendingItemTarget: this.pendingItemTarget,
+      targetChoices: this.targetChoices.map((tc): ItemTargetChoice => {
+        const owner = this.players[tc.plane.pid];
+        return {
+          pid: tc.plane.pid,
+          idx: tc.plane.idx,
+          ownerName: owner.name,
+          ownerColor: owner.uiColor,
+          pos: tc.plane.pos,
+          shielded: tc.plane.shielded,
+          stackCount: tc.stackCount,
+        };
+      }),
+      shopOffer: this.shopOffer,
+      shopSecondsLeft,
+      shopPid: this.shopPid,
       players: this.players.map((pl, i) => {
         const rankIdx = this.finishedOrder.indexOf(i);
         return {
@@ -766,16 +937,1092 @@ export class FlightChessEngine {
           doneCount: this.planesOf(i).filter((p) => p.pos === HOME_END).length,
           finishRank: rankIdx >= 0 ? rankIdx + 1 : null,
           active: this.turn === i && this.phase !== 'over' && P !== undefined,
+          items: { ...this.playerItems[i] },
+          quest: { ...this.playerQuests[i] },
         };
       }),
     });
   }
 
+  /* ================= Item & Quest Helpers ================= */
+  private resolveBottomOfStack(plane: PlaneData): PlaneData {
+    if (plane.pos < 1 || plane.pos >= HOME_END) return plane;
+    const sameStack = this.planes
+      .filter((p) => p.pid === plane.pid && p.pos === plane.pos)
+      .sort((a, b) => a.idx - b.idx);
+    return sameStack[0] ?? plane;
+  }
+
+  private syncShieldVisuals(): void {
+    for (const p of this.planes) {
+      if (p.shieldMesh) {
+        p.shieldMesh.visible = p.shielded && p.pos >= 0 && p.pos < HOME_END;
+      }
+    }
+  }
+
+  private spawnShieldBreak(x: number, z: number): void {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.28, 0.56, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x5be3ff,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 0.34, z);
+    this.scene.add(ring);
+
+    const shards: { m: THREE.Mesh; vx: number; vy: number; vz: number }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xa6f4ff,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 0), mat);
+      m.position.set(x + Math.cos(a) * 0.25, 0.42, z + Math.sin(a) * 0.25);
+      this.scene.add(m);
+      shards.push({
+        m,
+        vx: Math.cos(a) * (0.9 + Math.random() * 0.5),
+        vy: 0.6 + Math.random() * 0.6,
+        vz: Math.sin(a) * (0.9 + Math.random() * 0.5),
+      });
+    }
+    this.tween(580, (k) => {
+      const e = 1 - Math.pow(1 - k, 2);
+      ring.scale.setScalar(1 + e * 2.1);
+      ring.material.opacity = 0.95 * (1 - k);
+      for (const sh of shards) {
+        sh.m.position.x = x + sh.vx * e;
+        sh.m.position.y = 0.42 + sh.vy * Math.sin(k * Math.PI * 0.7);
+        sh.m.position.z = z + sh.vz * e;
+        sh.m.rotation.x += 0.25;
+        sh.m.rotation.y += 0.25;
+        (sh.m.material as THREE.MeshBasicMaterial).opacity = 1 - k;
+        sh.m.scale.setScalar(1 - k * 0.5);
+      }
+    }).then(() => {
+      this.scene.remove(ring);
+      ring.geometry.dispose();
+      ring.material.dispose();
+      for (const sh of shards) {
+        this.scene.remove(sh.m);
+        sh.m.geometry.dispose();
+        (sh.m.material as THREE.Material).dispose();
+      }
+    });
+  }
+
+  private pickUniqueShopOffer(): ItemType[] {
+    const pool = [...ITEM_ORDER];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 3);
+  }
+
+  private grantItem(pid: number, item: ItemType): void {
+    this.playerItems[pid][item] += 1;
+    if (this.itemLastGainedTurn[pid]) {
+      this.itemLastGainedTurn[pid][item] = this.playerTurnCount[pid] ?? 0;
+    }
+  }
+
+  private grantRandomItem(pid: number): ItemType {
+    const item = ITEM_ORDER[Math.floor(Math.random() * ITEM_ORDER.length)];
+    this.grantItem(pid, item);
+    return item;
+  }
+
+  private recordRollQuest(pid: number, faces: number[]): void {
+    const q = this.playerQuests[pid];
+    if (!q) return;
+    let touched = false;
+    for (const f of faces) {
+      if (f === 1) {
+        q.roll1 += 1;
+        touched = true;
+      } else if (f === 2) {
+        q.roll2 += 1;
+        touched = true;
+      }
+    }
+    if (!touched) return;
+    while (q.roll1 >= 1 && q.roll2 >= 1) {
+      q.roll1 -= 1;
+      q.roll2 -= 1;
+      const got = this.grantRandomItem(pid);
+      const def = ITEM_DEFS[got];
+      const pl = this.players[pid];
+      beep(820, 0.12, 'triangle', 0.14);
+      this.setMsg(`🎯 ${pl.name} 完成「一二宝的馈赠」，获得 ${def.icon} ${def.name}！`, pl.uiColor);
+    }
+    this.emitSnapshot();
+  }
+
+  private recordStompQuest(victimPid: number, count = 1): void {
+    const q = this.playerQuests[victimPid];
+    if (!q) return;
+    q.stomped += count;
+    while (q.stomped >= 2) {
+      q.stomped -= 2;
+      this.grantItem(victimPid, 'shield');
+      const pl = this.players[victimPid];
+      beep(720, 0.12, 'triangle', 0.14);
+      this.setMsg(`🛡️ ${pl.name} 触发「布布不烦恼」，任务奖励：护盾 ×1！`, pl.uiColor);
+    }
+    this.emitSnapshot();
+  }
+
+  private buildTargetChoices(kind: 'shield' | 'missile', actorPid: number): { plane: PlaneData; stackCount: number }[] {
+    const seen = new Set<string>();
+    const result: { plane: PlaneData; stackCount: number }[] = [];
+
+    if (kind === 'shield') {
+      const myPlanes = this.planesOf(actorPid)
+        .filter((p) => p.pos >= 0 && p.pos < HOME_END)
+        .sort((a, b) => a.idx - b.idx);
+      for (const p of myPlanes) {
+        if (p.pos === 0) {
+          if (p.shielded) continue;
+          result.push({ plane: p, stackCount: 1 });
+        } else {
+          const key = `${p.pid}-${p.pos}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const stack = myPlanes.filter((q) => q.pos === p.pos);
+          if (stack.some((q) => q.shielded)) continue;
+          result.push({ plane: stack[0], stackCount: stack.length });
+        }
+      }
+    } else {
+      const enemies = this.planes
+        .filter((p) => p.pid !== actorPid && p.pos >= 1 && p.pos <= 55)
+        .sort((a, b) => a.pid - b.pid || a.idx - b.idx);
+      for (const p of enemies) {
+        const key = `${p.pid}-${p.pos}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const stack = enemies.filter((q) => q.pid === p.pid && q.pos === p.pos);
+        result.push({ plane: stack[0], stackCount: stack.length });
+      }
+    }
+    return result;
+  }
+
+  /* ================= AI Personality, Threat Coeff & Chat ================= */
+  // 计算敌方当前在棋盘上对我方的实时踩踏/打击威胁度 B ∈ [0, 1]
+  private computeEnemyBoardThreat(me: number, enemyPid: number): number {
+    if (me === enemyPid) return 0;
+    const myPlanes = this.planesOf(me).filter((p) => p.pos >= 1 && p.pos < HOME_END && !p.shielded);
+    const enemyPlanes = this.planesOf(enemyPid);
+    const enemyP = this.players[enemyPid];
+    const enemyInv = this.playerItems[enemyPid];
+    if (!myPlanes.length || !enemyP) return 0;
+
+    let raw = 0;
+    for (const mp of myPlanes) {
+      const weight = mp.pos === 54 ? 1.25 : 0.45 + (mp.pos / 50) * 0.85;
+      if (mp.pos >= 1 && mp.pos <= 50) {
+        const myRing = this.ringIndexOf(mp);
+        for (const ep of enemyPlanes) {
+          if (ep.pos >= 1 && ep.pos <= 50) {
+            const d = (myRing - this.ringIndexOf(ep) + 52) % 52;
+            if (d >= 1 && d <= 6) {
+              raw += 0.34 * weight;
+            } else if (d >= 7 && d <= 10) {
+              const midPos = ep.pos + (d - 4);
+              if (midPos >= 1 && midPos <= 49 && midPos % 4 === 2) {
+                raw += 0.18 * weight;
+              }
+            }
+          } else if (ep.pos === 0) {
+            const startRing = (enemyP.start + 2) % 52;
+            const d = (myRing - startRing + 52) % 52;
+            if (d >= 1 && d <= 6) raw += 0.22 * weight;
+          }
+        }
+      } else if (mp.pos === 54 && (this.players[me].slotId + 2) % 4 === enemyP.slotId) {
+        if (enemyPlanes.some((ep) => ep.pos >= 8 && ep.pos <= 17)) raw += 0.36;
+      }
+    }
+    if (enemyInv) {
+      if (enemyInv.missile > 0) raw += 0.16;
+      if (enemyInv.sixDie > 0 || enemyInv.twinDice > 0) raw += 0.12;
+    }
+    return Math.min(1, raw);
+  }
+
+  // 完整威胁系数公式：
+  // 累计冒犯值 O ∈ [0, 2.5]（被踩 1 次 +1.0，被踩 2 次达上限强度 G = min(1, O / 2.0) = 1.0）
+  // 综合威胁系数 T(me, enemy) = 1.0 + W_p * (0.78 * G + 0.22 * B)
+  // 成功报复后按比例与定额双重衰减 O，使威胁系数明显回落
+  private computeThreatCoeff(me: number, enemyPid: number): number {
+    if (me === enemyPid) return 1.0;
+    const p: AiPersonality = this.players[me]?.personality ?? 'tactician';
+    const offense = this.offenseScores[me]?.[enemyPid] ?? 0;
+    const gSeverity = Math.min(1.0, offense / 2.0);
+    const boardThreat = this.computeEnemyBoardThreat(me, enemyPid);
+    const sensitivity =
+      p === 'vengeful' ? 2.2 : p === 'tactician' ? 1.25 : p === 'rusher' ? 0.75 : 0.35;
+    return 1.0 + sensitivity * (0.78 * gSeverity + 0.22 * boardThreat);
+  }
+
+  private getTopThreatPid(pid: number): number {
+    let bestPid = -1;
+    let bestCoeff = 1.45;
+    for (let j = 0; j < this.players.length; j++) {
+      if (j === pid) continue;
+      const coeff = this.computeThreatCoeff(pid, j);
+      if (coeff > bestCoeff) {
+        bestCoeff = coeff;
+        bestPid = j;
+      }
+    }
+    return bestPid;
+  }
+
+  private recordOffense(victimPid: number, attackerPid: number, amount: number): void {
+    if (victimPid === attackerPid) return;
+    if (!this.offenseScores[victimPid]) return;
+    const prev = this.offenseScores[victimPid][attackerPid] ?? 0;
+    this.offenseScores[victimPid][attackerPid] = Math.min(2.5, prev + amount);
+  }
+
+  private onRetaliationSuccess(me: number, enemyPid: number, method: 'stomp' | 'missile'): void {
+    if (!this.offenseScores[me]) return;
+    const cur = this.offenseScores[me][enemyPid] ?? 0;
+    if (method === 'stomp') {
+      this.offenseScores[me][enemyPid] = Math.max(0, cur * 0.35 - 0.55);
+    } else {
+      this.offenseScores[me][enemyPid] = Math.max(0, cur * 0.45 - 0.45);
+    }
+  }
+
+  private fireAiEmoteNow(
+    pid: number,
+    text: string,
+    cooldownMs = 2200,
+    ignoreCooldown = false,
+  ): boolean {
+    if (this.disposed) return false;
+    const pl = this.players[pid];
+    if (!pl || pl.type !== 'ai') return false;
+    if (!ignoreCooldown && this.timeMs - (this.lastAiEmoteAt[pid] ?? -9999) < cooldownMs) {
+      return false;
+    }
+    this.lastAiEmoteAt[pid] = this.timeMs;
+    this.latestEmote = { pid, text, key: ++this.emoteKeySeq };
+    this.emitSnapshot();
+    return true;
+  }
+
+  private emitAiEmote(
+    pid: number,
+    kind:
+      | 'gotStomped'
+      | 'gotMissiled'
+      | 'stompedEnemy'
+      | 'stompRevenge'
+      | 'fireMissile'
+      | 'useSpeedItem'
+      | 'useShield'
+      | 'shopPick'
+      | 'goal'
+      | 'reply'
+      | 'preRoll'
+      | 'preMove'
+      | 'watchHuman'
+      | 'bystander',
+    cooldownMs = 2600,
+    targetName?: string,
+    opts?: {
+      probMult?: number;
+      delayMinMs?: number;
+      delayMaxMs?: number;
+      requireTurnSeq?: number;
+      allowFollowUp?: boolean;
+      allowBystander?: boolean;
+    },
+  ): void {
+    if (this.disposed) return;
+    const pl = this.players[pid];
+    if (!pl || pl.type !== 'ai') return;
+
+    const p: AiPersonality = pl.personality ?? 'tactician';
+    const profile: Record<
+      AiPersonality,
+      {
+        talkRate: number;
+        followUpRate: number;
+        delayRange: [number, number];
+        replyRate: number;
+        ambientRate: number;
+      }
+    > = {
+      vengeful: {
+        talkRate: 0.72,
+        followUpRate: 0.36,
+        delayRange: [900, 3300],
+        replyRate: 0.56,
+        ambientRate: 0.28,
+      },
+      chill: {
+        talkRate: 0.42,
+        followUpRate: 0.24,
+        delayRange: [1700, 4600],
+        replyRate: 0.62,
+        ambientRate: 0.20,
+      },
+      rusher: {
+        talkRate: 0.80,
+        followUpRate: 0.40,
+        delayRange: [600, 2400],
+        replyRate: 0.50,
+        ambientRate: 0.42,
+      },
+      tactician: {
+        talkRate: 0.54,
+        followUpRate: 0.22,
+        delayRange: [1100, 3600],
+        replyRate: 0.46,
+        ambientRate: 0.24,
+      },
+    };
+
+    const cfg = profile[p];
+    const baseRate =
+      kind === 'reply'
+        ? cfg.replyRate
+        : kind === 'preRoll' || kind === 'preMove' || kind === 'watchHuman' || kind === 'bystander'
+          ? cfg.ambientRate
+          : cfg.talkRate;
+    const prob = Math.min(0.96, baseRate * (opts?.probMult ?? 1));
+    if (Math.random() > prob) return;
+
+    const pools: Record<AiPersonality, Record<typeof kind, string[]>> = {
+      vengeful: {
+        gotStomped: [
+          `😠 ${targetName ?? '你'}，我记小本本上了！`,
+          '💢 敢踩我？走着瞧！',
+          '📝 这笔账先记下，待会儿算！',
+        ],
+        gotMissiled: [
+          `🚀 好啊 ${targetName ?? ''}，导弹我也记下了！`,
+          '😠 炸我一次，后面别让我逮到！',
+        ],
+        stompedEnemy: ['😏 别挡我的道！', '💥 让你尝尝被踩的滋味'],
+        stompRevenge: [
+          `🎯 ${targetName ?? ''}，还记得刚才的账吗！`,
+          '😈 君子报仇，十步不晚！',
+        ],
+        fireMissile: [
+          `🚀 ${targetName ?? ''}，吃我一记导弹！`,
+          '💢 新仇旧恨一起算！',
+        ],
+        useSpeedItem: ['🔥 全速追上去算账！', '😠 别想跑太远！'],
+        useShield: ['🛡️ 先套个盾，免得被偷袭'],
+        shopPick: ['🏪 这张卡正好用得上~', '😏 准备好了，谁惹我试试'],
+        goal: ['🏁 先下一城，账照样算！', '🔥 顺利进站！'],
+        reply: ['👀 别笑，我小本本可记着呢', '💢 好好飞，别惹我！', '😤 看我待会儿怎么追'],
+        preRoll: ['😠 这把骰子给点力，我要追人', '👀 让我看看谁跑最前面...', '🔥 来个大点数！'],
+        preMove: ['😏 嘿嘿，前面那位小心点', '💥 刚好够着，准备踩人咯'],
+        watchHuman: ['👀 你可别踩到我前面啊', '💢 走快点，我盯着你呢', '📝 我记性好着呢，别乱炸我'],
+        bystander: ['😈 哈哈，有人要记仇咯', '👀 幸好没波及到我', '🔥 场面越来越热闹了'],
+      },
+      chill: {
+        gotStomped: [
+          '🍵 没事没事，回基地泡壶茶~',
+          '🌸 缘分呐，让你先走',
+          '😌 佛系不生气，重在参与~',
+        ],
+        gotMissiled: ['🍵 哎呀后退几步正好看看风景~', '🌿 随缘啦，不急着到终点'],
+        stompedEnemy: ['🙏 哎呀不好意思撞到了~', '😅 纯属巧合，手下留情'],
+        stompRevenge: ['🙏 缘分又撞一起啦~', '😅 抱歉抱歉~'],
+        fireMissile: ['🙏 跑太快啦，稍微拦一下下~', '🍵 抱歉借过，小小减速一下'],
+        useSpeedItem: ['🌿 顺风散步去咯~', '✨ 随缘加速，慢慢晃悠'],
+        useShield: ['🛡️ 戴个平安符，安稳过日子', '🍵 安全第一，慢慢来~'],
+        shopPick: ['🍰 顺路逛个蛋糕店真惬意~', '🌸 随便挑张顺眼的'],
+        goal: ['🏁 慢慢晃也到家啦~', '🍵 一架到站，真悠闲~'],
+        reply: ['🍵 哈哈开心就好~', '🌸 慢慢飞，不着急~', '✨ 快乐飞行棋第一名~'],
+        preRoll: ['🍵 随便掷个几都行~', '🌸 佛系摇骰，重在开心', '😌 来个不紧不慢的点数吧'],
+        preMove: ['🌿 慢慢走，安全最要紧', '🍵 晃悠晃悠往前挪几步~'],
+        watchHuman: ['🍵 慢慢想不着急，先喝口茶~', '🌸 局势挺平和的嘛', '😌 开心玩，赢不赢随缘~'],
+        bystander: ['🍵 哈哈好热闹呀~', '🌸 大家飞得都挺欢乐嘛', '😌 和气生财，和气生财~'],
+      },
+      rusher: {
+        gotStomped: [
+          '😤 别想拖慢我的速度！',
+          '⚡ 可恶！马上冲回来！',
+        ],
+        gotMissiled: ['💢 居然拖我节奏！加倍追回去！', '⚡ 拦不住我的！'],
+        stompedEnemy: ['💥 挡路者通通回基地！', '⚡ 借过借过，我要冲第一！'],
+        stompRevenge: ['💥 顺手清场！继续冲刺！', '⚡ 挡我速通？下去吧！'],
+        fireMissile: ['🚀 领跑的给我慢下来！', '⚡ 第一名必须是我的！'],
+        useSpeedItem: ['⚡ 全速冲刺！速战速决！', '🔥 加速拉满，直奔终点！'],
+        useShield: ['🛡️ 护住主力继续猛冲！'],
+        shopPick: ['🏪 好卡到手，继续抢跑！', '⚡ 提速卡真香！'],
+        goal: ['🏁 又进一架！光速冲线！', '⚡ 距离夺冠更近一步！'],
+        reply: ['⚡ 少聊两句，看我速通！', '🔥 我只想最快结束这局！', '💨 冲就完事了！'],
+        preRoll: ['⚡ 来个6！直接起飞！', '🔥 快快快，给我出大点数！', '💨 这回合直接甩开你们'],
+        preMove: ['⚡ 让开让开，我冲过来了！', '🔥 飞过去！节奏起飞！'],
+        watchHuman: ['⚡ 快点投呀兄弟，急死我了！', '🔥 别纠结啦，冲鸭！', '💨 我下一把直接起飞'],
+        bystander: ['🔥 打起来打起来！', '⚡ 好机会！趁乱往前冲！', '💨 你们互炸，我偷跑咯'],
+      },
+      tactician: {
+        gotStomped: ['🧠 有意思，重新算一下最优解', '📊 小小失误，问题不大'],
+        gotMissiled: ['🧠 被针对了？说明我领先太多', '📊 调整节奏，稳住局面'],
+        stompedEnemy: ['🎯 精准算步，顺路清障！', '🧠 这一步收益拉满'],
+        stompRevenge: ['🎯 精准反制', '🧠 正好顺路送你回基地'],
+        fireMissile: ['🚀 精准打击领跑位！', '🎯 这一发导弹性价比很高'],
+        useSpeedItem: ['🧠 算准格子，直接拿下！', '📊 节奏把控中~'],
+        useShield: ['🛡️ 关键位置先上双保险'],
+        shopPick: ['🧠 补一张关键功能卡', '📊 这张卡最契合当前局势'],
+        goal: ['🏁 按计划稳步收官！', '🧠 一架稳稳落袋'],
+        reply: ['🧠 一切都在计算之中', '📊 小心走位哦~', '🎯 看看谁的节奏更稳'],
+        preRoll: ['🧠 算下概率，出 4 以上最舒服', '📊 稳扎稳打，看这步怎么落子', '🎯 希望骰子配合一下计算'],
+        preMove: ['🧠 这一步落点最合理', '🎯 刚好踩点，收益不错'],
+        watchHuman: ['🧠 这步挺关键的，好好选', '📊 后面有追兵，注意防踩哦', '🧠 道具留着后面用收益更大'],
+        bystander: ['📊 这波博弈有点意思', '🧠 局势瞬间反转了', '🎯 关键道具都交得挺准'],
+      },
+    };
+
+    const followUpPools: Record<AiPersonality, string[]> = {
+      vengeful: ['💢 给我等着！', '📝 小本本又多一笔', '😠 下轮见！', '🔥 别以为结束了'],
+      chill: ['🍵 开心最重要啦~', '🌸 慢慢飞~', '😌 问题不大哈哈', '✨ 喝口水继续'],
+      rusher: ['⚡ 冲冲冲！', '🔥 别墨迹！', '💨 第一名预定！', '⚡ 速度拉满！'],
+      tactician: ['📊 节奏很关键', '🧠 稳住能赢', '🎯 继续观察局势', '✨ 算好下一手'],
+    };
+
+    const list = pools[p][kind];
+    if (!list || list.length === 0) return;
+    const text = list[Math.floor(Math.random() * list.length)];
+
+    const [dMin, dMax] = [
+      opts?.delayMinMs ?? cfg.delayRange[0],
+      opts?.delayMaxMs ?? cfg.delayRange[1],
+    ];
+    const delayMs = Math.round(dMin + Math.random() * Math.max(80, dMax - dMin));
+    const capturedTurnSeq = opts?.requireTurnSeq;
+
+    this.after(delayMs, () => {
+      if (this.disposed) return;
+      if (capturedTurnSeq !== undefined && capturedTurnSeq !== this.turnSeq) return;
+      const sent = this.fireAiEmoteNow(pid, text, cooldownMs);
+      if (!sent) return;
+
+      // 有概率在几秒后再补发第二句话（更像真人连发）
+      const canFollow = opts?.allowFollowUp ?? (kind !== 'bystander' && kind !== 'useShield');
+      if (canFollow && Math.random() < cfg.followUpRate) {
+        const fuPool = followUpPools[p];
+        const fuText = fuPool[Math.floor(Math.random() * fuPool.length)];
+        const fuDelay = Math.round(1700 + Math.random() * 1900);
+        this.after(fuDelay, () => {
+          if (this.disposed) return;
+          if (capturedTurnSeq !== undefined && capturedTurnSeq !== this.turnSeq) return;
+          this.fireAiEmoteNow(pid, fuText, 0, true);
+        });
+      }
+
+      // 关键场面（被踩/被炸/进终点）偶发引来另一位旁观 AI 延时接茬
+      if (
+        opts?.allowBystander &&
+        (kind === 'gotStomped' || kind === 'gotMissiled' || kind === 'goal')
+      ) {
+        const others = this.players
+          .map((q, idx) => ({ q, idx }))
+          .filter((x) => x.q.type === 'ai' && x.idx !== pid);
+        if (others.length > 0 && Math.random() < 0.35) {
+          const other = others[Math.floor(Math.random() * others.length)];
+          this.emitAiEmote(other.idx, 'bystander', 3200, undefined, {
+            probMult: 1.5,
+            delayMinMs: 1100,
+            delayMaxMs: 2900,
+            allowFollowUp: false,
+          });
+        }
+      }
+    });
+  }
+
+  public reactToHumanEmote(senderPid: number): void {
+    if (this.disposed) return;
+    const aiPids = this.players
+      .map((pl, idx) => ({ pl, idx }))
+      .filter((x) => x.pl.type === 'ai' && x.idx !== senderPid)
+      .map((x) => x.idx);
+    if (aiPids.length === 0) return;
+
+    // 每次人类发消息，每位 AI 独立按自身性格概率、不同延迟决定是否接话（可能 0、1 或 2 个回应）
+    const shuffled = [...aiPids].sort(() => Math.random() - 0.5);
+    let repliesScheduled = 0;
+    for (const aiPid of shuffled) {
+      if (repliesScheduled >= 2) break;
+      const baseDelay = 950 + repliesScheduled * 1400;
+      this.emitAiEmote(aiPid, 'reply', 2000, undefined, {
+        probMult: repliesScheduled === 0 ? 1.05 : 0.45,
+        delayMinMs: baseDelay,
+        delayMaxMs: baseDelay + 2300,
+        allowFollowUp: repliesScheduled === 0,
+      });
+      repliesScheduled++;
+    }
+  }
+
+  private aiChooseShopItem(offer: ItemType[], pid: number): ItemType {
+    const P = this.players[pid];
+    const p: AiPersonality = P.personality ?? 'tactician';
+    const myPlanes = this.planesOf(pid);
+    const stuckInBase = myPlanes.filter((q) => q.pos === -1).length;
+    const enemyLeaderPos = Math.max(
+      0,
+      ...this.planes.filter((q) => q.pid !== pid && q.pos < HOME_END).map((q) => q.pos),
+    );
+
+    if (p === 'tactician') {
+      if (enemyLeaderPos >= 34 && offer.includes('missile')) return 'missile';
+      if (stuckInBase >= 3 && offer.includes('sixDie')) return 'sixDie';
+    }
+    if (p === 'vengeful' && this.getTopThreatPid(pid) >= 0 && offer.includes('missile')) {
+      return 'missile';
+    }
+    const prio = AI_PERSONALITIES[p].shopPriority;
+    return prio.find((it) => offer.includes(it)) ?? offer[0];
+  }
+
+  private async fireMissile(attackerPid: number, rawTarget: PlaneData): Promise<void> {
+    const target = this.resolveBottomOfStack(rawTarget);
+    const P = this.players[attackerPid];
+    const T = this.players[target.pid];
+    const targetStack = this.planesOf(target.pid).filter(
+      (p) => p.pos === target.pos && p.pos >= 1 && p.pos <= 55,
+    );
+    if (!targetStack.length) return;
+
+    this.itemBusy = true;
+    this.pendingItemTarget = null;
+    this.targetChoices = [];
+    this.clearHL();
+    this.emitSnapshot();
+
+    const rocket = buildToyMissileMesh(lineOf(P));
+    const startVec = new THREE.Vector3(P.court[0] * 0.55, 1.4, P.court[1] * 0.55);
+    const tc = this.posToCell(T, target.pos);
+    const endVec = new THREE.Vector3(tc[0], 0.45, tc[1]);
+    const midVec = startVec.clone().lerp(endVec, 0.5);
+    midVec.y = Math.max(startVec.y, endVec.y) + 3.4;
+
+    const curve = new THREE.QuadraticBezierCurve3(startVec, midVec, endVec);
+    rocket.position.copy(startVec);
+    this.scene.add(rocket);
+
+    this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了道具导弹！`, P.uiColor);
+    if (P.type === 'ai') {
+      const hadGrudge = (this.offenseScores[attackerPid]?.[target.pid] ?? 0) >= 0.95;
+      this.emitAiEmote(
+        attackerPid,
+        hadGrudge && P.personality === 'vengeful' ? 'stompRevenge' : 'fireMissile',
+        1800,
+        T.name,
+        { probMult: 1.15, delayMinMs: 450, delayMaxMs: 2100 },
+      );
+    }
+    beep(460, 0.16, 'sawtooth', 0.12);
+
+    const tmpPos = new THREE.Vector3();
+    const tmpNext = new THREE.Vector3();
+    const flame = rocket.userData.flame as THREE.Mesh | undefined;
+    await this.tween(920, (k) => {
+      curve.getPoint(k, tmpPos);
+      curve.getPoint(Math.min(1, k + 0.02), tmpNext);
+      rocket.position.copy(tmpPos);
+      rocket.lookAt(tmpNext);
+      if (flame) {
+        const flick = 0.85 + Math.sin(k * 45) * 0.28;
+        flame.scale.set(1, flick, 1);
+      }
+    });
+
+    this.scene.remove(rocket);
+    rocket.traverse((obj) => {
+      const m = obj as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+      if (m.material) {
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        mats.forEach((mat) => mat.dispose());
+      }
+    });
+    if (this.disposed) {
+      this.itemBusy = false;
+      return;
+    }
+
+    const shieldedCarrier = targetStack.find((p) => p.shielded);
+    if (shieldedCarrier) {
+      shieldedCarrier.shielded = false;
+      this.syncShieldVisuals();
+      this.spawnShieldBreak(tc[0], tc[1]);
+      this.triggerShake();
+      beep(640, 0.16, 'triangle', 0.15);
+      this.setMsg(`🛡️ ${T.name} 的护盾成功抵挡了导弹攻击！`, T.uiColor);
+      this.recordOffense(target.pid, attackerPid, 0.4);
+      if (T.type === 'ai') {
+        this.emitAiEmote(target.pid, 'gotMissiled', 1800, P.name, {
+          probMult: 1.1,
+          delayMinMs: 950,
+          delayMaxMs: 3400,
+        });
+      }
+      await this.sleep(450);
+    } else {
+      sndCap();
+      this.spawnImpact(tc[0], tc[1]);
+      this.triggerShake();
+      this.recordOffense(target.pid, attackerPid, 0.85);
+      if (T.type === 'ai') {
+        this.emitAiEmote(target.pid, 'gotMissiled', 1600, P.name, {
+          probMult: 1.3,
+          delayMinMs: 1100,
+          delayMaxMs: 3900,
+          allowBystander: true,
+        });
+      }
+      const fromPos = target.pos;
+      const stepsBack = Math.min(6, Math.max(0, fromPos - 1));
+      if (stepsBack > 0) {
+        this.setMsg(`💥 命中！${T.name} 的棋子后退 ${stepsBack} 格（不触发大跳与飞机）`, P.uiColor);
+        let curPos = fromPos;
+        for (let s = 0; s < stepsBack; s++) {
+          curPos = Math.max(1, curPos - 1);
+          targetStack.forEach((p) => (p.pos = curPos));
+          if (s === 0) {
+            this.relayout();
+          }
+          const c = this.posToCell(T, curPos);
+          const yaw = this.faceTravelDir(target);
+          const baseCount = this.planes.filter(
+            (q) => !targetStack.includes(q) && q.pid === target.pid && q.pos === curPos,
+          ).length;
+          sndHop();
+          await Promise.all(
+            targetStack.map((p, i) =>
+              this.hopTo(
+                p,
+                c[0],
+                c[1],
+                yaw,
+                0.42,
+                210,
+                s % 2 === 0 ? 1 : -1,
+                0.12 + (baseCount + i) * STACK_STEP_Y,
+              ),
+            ),
+          );
+          if (this.disposed) {
+            this.itemBusy = false;
+            return;
+          }
+        }
+      } else {
+        this.setMsg(`💥 导弹命中 ${T.name}（已在第 1 格，无法继续后退）`, P.uiColor);
+      }
+      this.onRetaliationSuccess(attackerPid, target.pid, 'missile');
+    }
+
+    this.relayout();
+    this.syncShieldVisuals();
+    this.itemBusy = false;
+    this.emitSnapshot();
+  }
+
+  private evaluatePlaneStompRisk(plane: PlaneData): {
+    rawProb: number;
+    valueRisk: number;
+    pursuerPids: number[];
+  } {
+    if (plane.pos < 1 || plane.pos >= HOME_END) {
+      return { rawProb: 0, valueRisk: 0, pursuerPids: [] };
+    }
+    const me = plane.pid;
+    const myPlanes = this.planesOf(me);
+    const stackCount = myPlanes.filter((q) => q.pos === plane.pos).length;
+    if (plane.pos >= 51 && plane.pos !== 54) {
+      return { rawProb: 0, valueRisk: 0, pursuerPids: [] };
+    }
+
+    let rawProb = 0;
+    const pursuerSet = new Set<number>();
+
+    if (plane.pos === 54) {
+      const ct = this.oppCrossFlyThreat(me);
+      if (ct.oppPid >= 0) {
+        const oppInv = this.playerItems[ct.oppPid];
+        if (ct.immediate) {
+          rawProb += 0.30 + (oppInv?.sixDie || oppInv?.twinDice ? 0.14 : 0);
+          pursuerSet.add(ct.oppPid);
+        } else if (ct.near) {
+          rawProb += 0.10;
+        }
+      }
+    } else {
+      const myRing = this.ringIndexOf(plane);
+      for (const q of this.planes) {
+        if (q.pid === me) continue;
+        const oppP = this.players[q.pid];
+        const oppInv = this.playerItems[q.pid];
+        const oppPersonality: AiPersonality = oppP?.personality ?? 'tactician';
+        const aggroMult =
+          oppPersonality === 'rusher' || oppPersonality === 'vengeful' ? 1.15 : 0.95;
+
+        if (q.pos >= 1 && q.pos <= 50) {
+          const d = (myRing - this.ringIndexOf(q) + 52) % 52;
+          if (d >= 1 && d <= 6) {
+            let pHit = (1 / 6) * aggroMult;
+            if (d === 6 && (oppInv?.sixDie ?? 0) > 0) pHit += 0.16;
+            if ((oppInv?.twinDice ?? 0) > 0 || (oppInv?.refuel ?? 0) > 0) pHit += 0.08;
+            rawProb += pHit;
+            pursuerSet.add(q.pid);
+          } else if (d >= 7 && d <= 10) {
+            const midPos = q.pos + (d - 4);
+            if (midPos >= 1 && midPos <= 49 && midPos % 4 === 2) {
+              rawProb += 0.14 * aggroMult;
+              pursuerSet.add(q.pid);
+            }
+          }
+        } else if (q.pos === 0 && oppP) {
+          const startRing = (oppP.start + 2) % 52;
+          const d = (myRing - startRing + 52) % 52;
+          if (d >= 1 && d <= 6) {
+            rawProb += 0.15 * aggroMult + (d === 6 && (oppInv?.sixDie ?? 0) > 0 ? 0.12 : 0);
+            pursuerSet.add(q.pid);
+          }
+        }
+      }
+      // 高进度或叠机也面临对手导弹打击风险
+      const enemyHasMissile = this.players.some(
+        (_, pid) => pid !== me && (this.playerItems[pid]?.missile ?? 0) > 0,
+      );
+      if (enemyHasMissile && (plane.pos >= 22 || stackCount >= 2)) {
+        rawProb += stackCount >= 2 ? 0.18 : 0.10;
+      }
+    }
+
+    const progressFactor = plane.pos === 54 ? 1.55 : 0.45 + (plane.pos / 50) * 1.15;
+    const stackMult = 1 + (stackCount - 1) * 0.75;
+    const valueRisk = rawProb * 100 * progressFactor * stackMult;
+    return { rawProb, valueRisk, pursuerPids: Array.from(pursuerSet) };
+  }
+
+  private async aiTryUseItems(): Promise<void> {
+    if (this.disposed || this.phase !== 'aiWait' || !this.isAI()) return;
+    const me = this.turn;
+    const inv = this.playerItems[me];
+    const P = this.players[me];
+    const personality: AiPersonality = P.personality ?? 'tactician';
+    const myTurnNow = this.playerTurnCount[me] ?? 0;
+    const turnsHeld = (item: ItemType) =>
+      myTurnNow - (this.itemLastGainedTurn[me]?.[item] ?? -99);
+
+    const myPlanes = this.planesOf(me);
+    const activeBoard = myPlanes.filter((p) => p.pos >= 0 && p.pos < HOME_END);
+    const boardRisks = activeBoard
+      .filter((p) => !p.shielded)
+      .map((p) => ({ plane: p, ...this.evaluatePlaneStompRisk(p) }))
+      .sort((a, b) => b.valueRisk - a.valueRisk);
+    const maxUnshieldedRisk = boardRisks[0]?.valueRisk ?? 0;
+    const pursuerPidSet = new Set<number>(boardRisks.flatMap((r) => r.pursuerPids));
+
+    // 1) 环境反制导弹：获得后先观望，结合性格、威胁系数与追兵被踩风险决定是否发射
+    if (inv.missile > 0) {
+      const held = turnsHeld('missile');
+      const targets = this.buildTargetChoices('missile', me);
+      if (targets.length > 0) {
+        const scored = targets
+          .map((t) => {
+            const enemyPid = t.plane.pid;
+            const enemyDone = this.planesOf(enemyPid).filter((q) => q.pos === HOME_END).length;
+            const threatCoeff = this.computeThreatCoeff(me, enemyPid);
+            const isStompPursuer = pursuerPidSet.has(enemyPid) && maxUnshieldedRisk >= 20;
+            const shieldPenalty = t.plane.shielded ? 0.35 : 1;
+            const leadPart = t.plane.pos * 0.9 + enemyDone * 10;
+            let score =
+              (leadPart * (personality === 'vengeful' ? 0.45 : 0.9) +
+                t.stackCount * 8 +
+                (threatCoeff - 1.0) * (personality === 'vengeful' ? 52 : 34) +
+                (isStompPursuer ? 26 : 0)) *
+              shieldPenalty;
+            if (personality === 'rusher') score += enemyDone * 12;
+            if (personality === 'tactician' && t.stackCount >= 2) score += 20;
+            return { t, score, threatCoeff, enemyDone, isStompPursuer };
+          })
+          .sort((a, b) => b.score - a.score);
+
+        const best = scored[0];
+        const emergency =
+          best.t.plane.pos >= 44 ||
+          (best.threatCoeff >= 2.2 && !best.t.plane.shielded && best.t.plane.pos >= 22);
+        const canFireThisTurn = held >= 2 || (held >= 1 && (emergency || best.isStompPursuer)) || emergency;
+
+        const shouldFire =
+          canFireThisTurn &&
+          (personality === 'vengeful'
+            ? (best.threatCoeff >= 1.8 && best.t.plane.pos >= 10) ||
+              best.t.plane.pos >= 28 ||
+              best.isStompPursuer
+            : personality === 'chill'
+              ? !best.t.plane.shielded &&
+                (best.t.plane.pos >= 40 || best.enemyDone >= 3 || (best.isStompPursuer && maxUnshieldedRisk >= 34))
+              : personality === 'rusher'
+                ? (!best.t.plane.shielded && best.t.plane.pos >= 20) || best.t.plane.pos >= 32
+                : !best.t.plane.shielded &&
+                  (best.t.plane.pos >= 26 || best.t.stackCount >= 2 || best.isStompPursuer || best.threatCoeff >= 1.85));
+
+        if (shouldFire) {
+          inv.missile -= 1;
+          await this.fireMissile(me, best.t.plane);
+          if (this.disposed) return;
+          await this.sleep(360);
+        }
+      }
+    }
+
+    // 2) 每回合最多 1 张攻击/防御类道具（需评估被踩风险 + 持有回合 + 性格策略）
+    if (!this.turnUsedAtkDef) {
+      const hasInBase = myPlanes.some((p) => p.pos === -1);
+      const onBoardCount = activeBoard.length;
+      const tryShield = async (minRisk: number): Promise<boolean> => {
+        if (inv.shield <= 0) return false;
+        const shieldCands = this.buildTargetChoices('shield', me);
+        const endangered = shieldCands
+          .map((c) => {
+            const r = this.evaluatePlaneStompRisk(c.plane);
+            return { c, valueRisk: r.valueRisk, rawProb: r.rawProb };
+          })
+          .sort((a, b) => b.valueRisk - a.valueRisk);
+
+        if (endangered.length > 0 && endangered[0].rawProb > 0 && endangered[0].valueRisk >= minRisk) {
+          inv.shield -= 1;
+          endangered[0].c.plane.shielded = true;
+          this.turnUsedAtkDef = true;
+          this.syncShieldVisuals();
+          const cPos = this.posToCell(P, endangered[0].c.plane.pos);
+          this.spawnShieldBreak(cPos[0], cPos[1]);
+          this.setMsg(`🛡️ ${P.name} 为棋子开启了护盾！`, P.uiColor);
+          this.emitAiEmote(me, 'useShield', 1800);
+          this.emitSnapshot();
+          await this.sleep(650);
+          return true;
+        }
+        return false;
+      };
+
+      const sixEval = () => {
+        let exactGoal = false;
+        let flyOrThreatStomp = false;
+        for (const p of activeBoard) {
+          if (p.pos === HOME_END - 6) exactGoal = true;
+          if (p.pos === 0 || (p.pos >= 1 && p.pos <= 44)) {
+            const L = this.simulateMoveOutcome(p, 6);
+            if (L.fly) flyOrThreatStomp = true;
+            for (const sp of L.ringStops) {
+              const rIdx = (P.start + 2 + sp) % 52;
+              for (const q of this.planes) {
+                if (q.pid !== me && q.pos >= 1 && q.pos <= 50 && this.ringIndexOf(q) === rIdx) {
+                  if (this.computeThreatCoeff(me, q.pid) >= 1.5 || q.pos >= 20 || personality === 'rusher') {
+                    flyOrThreatStomp = true;
+                  }
+                }
+              }
+            }
+          }
+        }
+        return { exactGoal, flyOrThreatStomp };
+      };
+
+      const useSixDie = async () => {
+        inv.sixDie -= 1;
+        this.armedSixDie = true;
+        this.turnUsedAtkDef = true;
+        this.setMsg(`🎲 ${P.name} 使用了「6数骰」！`, P.uiColor);
+        this.emitAiEmote(me, 'useSpeedItem', 1800);
+        this.emitSnapshot();
+        await this.sleep(500);
+      };
+
+      const useRefuel = async () => {
+        inv.refuel -= 1;
+        this.armedRefuel = true;
+        this.turnUsedAtkDef = true;
+        this.setMsg(`⛽ ${P.name} 使用了「空中加油机」！`, P.uiColor);
+        this.emitAiEmote(me, 'useSpeedItem', 1800);
+        this.emitSnapshot();
+        await this.sleep(500);
+      };
+
+      const useTwinDice = async () => {
+        inv.twinDice -= 1;
+        this.armedTwinDice = true;
+        this.turnUsedAtkDef = true;
+        this.setMsg(`⚙️ ${P.name} 启动了「动力装置」！`, P.uiColor);
+        this.emitAiEmote(me, 'useSpeedItem', 1800);
+        this.emitSnapshot();
+        await this.sleep(500);
+      };
+
+      // 刚在本回合（例如连投前）或才拿到还没隔一轮时，谨慎持有，除非遇到极高风险/绝杀
+      const shieldUrgent = maxUnshieldedRisk >= 44;
+      const shieldFloor =
+        personality === 'chill'
+          ? 18
+          : personality === 'vengeful'
+            ? 22
+            : personality === 'tactician'
+              ? 24
+              : 34;
+
+      // 1) 先根据性格与被踩风险决定是否交护盾
+      if (
+        (personality === 'chill' || personality === 'tactician' || personality === 'vengeful') &&
+        (turnsHeld('shield') >= 1 || shieldUrgent) &&
+        (await tryShield(shieldFloor))
+      ) {
+        return;
+      }
+
+      // 2) 评估加速/进攻卡使用时机（不能刚拿就无脑丢）
+      const s6 = sixEval();
+      const sixHeld = turnsHeld('sixDie');
+      const twinHeld = turnsHeld('twinDice');
+      const refuelHeld = turnsHeld('refuel');
+      const escapeNeed = maxUnshieldedRisk >= 28;
+
+      if (personality === 'rusher') {
+        if (
+          inv.sixDie > 0 &&
+          (s6.exactGoal ||
+            (sixHeld >= 1 && (s6.flyOrThreatStomp || onBoardCount === 0)) ||
+            (sixHeld >= 2 && hasInBase && onBoardCount <= 2))
+        ) {
+          await useSixDie();
+          return;
+        }
+        if (
+          inv.refuel > 0 &&
+          ((refuelHeld >= 1 && (escapeNeed || activeBoard.some((p) => p.pos >= 10))) ||
+            (refuelHeld >= 2 && activeBoard.length > 0))
+        ) {
+          await useRefuel();
+          return;
+        }
+        if (
+          inv.twinDice > 0 &&
+          ((twinHeld >= 1 && (escapeNeed || activeBoard.some((p) => p.pos >= 14 && p.pos <= 43))) ||
+            (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 4 && p.pos <= 44)))
+        ) {
+          await useTwinDice();
+          return;
+        }
+        if ((turnsHeld('shield') >= 1 || shieldUrgent) && (await tryShield(shieldFloor))) return;
+      } else if (personality === 'chill') {
+        if (
+          inv.sixDie > 0 &&
+          (s6.exactGoal || (sixHeld >= 2 && hasInBase && onBoardCount === 0))
+        ) {
+          await useSixDie();
+          return;
+        }
+        if (
+          inv.refuel > 0 &&
+          ((refuelHeld >= 1 && escapeNeed) ||
+            (refuelHeld >= 2 && activeBoard.some((p) => p.pos >= 18) && Math.random() < 0.7))
+        ) {
+          await useRefuel();
+          return;
+        }
+        if (
+          inv.twinDice > 0 &&
+          ((twinHeld >= 1 && escapeNeed) ||
+            (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 16 && p.pos <= 38) && Math.random() < 0.65))
+        ) {
+          await useTwinDice();
+          return;
+        }
+      } else if (personality === 'vengeful') {
+        const hasHotThreat = this.getTopThreatPid(me) >= 0;
+        if (
+          inv.sixDie > 0 &&
+          (s6.exactGoal ||
+            (sixHeld >= 1 && (s6.flyOrThreatStomp || onBoardCount === 0)) ||
+            (sixHeld >= 2 && hasInBase && hasHotThreat))
+        ) {
+          await useSixDie();
+          return;
+        }
+        if (
+          inv.twinDice > 0 &&
+          ((twinHeld >= 1 && (escapeNeed || (hasHotThreat && activeBoard.some((p) => p.pos >= 6 && p.pos <= 42)))) ||
+            (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 8 && p.pos <= 42)))
+        ) {
+          await useTwinDice();
+          return;
+        }
+        if (
+          inv.refuel > 0 &&
+          ((refuelHeld >= 1 && (escapeNeed || hasHotThreat)) ||
+            (refuelHeld >= 2 && activeBoard.some((p) => p.pos >= 8)))
+        ) {
+          await useRefuel();
+          return;
+        }
+      } else {
+        // 精算稳健型：先评估收益与风险，绝不盲目交卡
+        if (
+          inv.sixDie > 0 &&
+          (s6.exactGoal ||
+            (sixHeld >= 1 && (s6.flyOrThreatStomp || (onBoardCount === 0 && hasInBase))) ||
+            (sixHeld >= 2 && hasInBase && onBoardCount <= 1))
+        ) {
+          await useSixDie();
+          return;
+        }
+        if (
+          inv.refuel > 0 &&
+          ((refuelHeld >= 1 && escapeNeed) ||
+            (refuelHeld >= 2 && activeBoard.some((p) => p.pos >= 14 && p.pos <= 46)))
+        ) {
+          await useRefuel();
+          return;
+        }
+        if (
+          inv.twinDice > 0 &&
+          ((twinHeld >= 1 && escapeNeed && activeBoard.some((p) => p.pos <= 43)) ||
+            (twinHeld >= 2 && activeBoard.some((p) => p.pos >= 16 && p.pos <= 40)))
+        ) {
+          await useTwinDice();
+          return;
+        }
+      }
+    }
+  }
+
   /* ================= Public User Actions ================= */
   public triggerActionPod(): void {
-    if (this.paused || this.disposed) return;
+    if (this.paused || this.disposed || this.itemBusy) return;
     ensureAudio();
     if (this.phase === 'awaitRoll' && !this.isAI()) {
+      if (this.pendingItemTarget !== null) {
+        this.cancelItemTarget();
+      }
       this.doRoll();
     } else if (
       this.phase === 'awaitMove' &&
@@ -788,7 +2035,7 @@ export class FlightChessEngine {
   }
 
   public pickMovableIndex(idx: number): void {
-    if (this.paused || this.disposed) return;
+    if (this.paused || this.disposed || this.itemBusy) return;
     if (this.phase === 'awaitMove' && !this.isAI() && this.die !== null) {
       const target = this.movable.find((m) => m.plane.idx === idx) ?? this.movable[idx];
       if (target) {
@@ -796,6 +2043,154 @@ export class FlightChessEngine {
         this.performMove(target.plane, this.die);
       }
     }
+  }
+
+  public useItem(type: ItemType): void {
+    if (this.paused || this.disposed || this.itemBusy) return;
+    if (this.phase !== 'awaitRoll' || this.isAI()) return;
+    const inv = this.playerItems[this.turn];
+    if (!inv || inv[type] <= 0) return;
+    const def = ITEM_DEFS[type];
+
+    if (def.category !== 'counter' && this.turnUsedAtkDef) {
+      this.setMsg('⚠️ 本回合已使用过 1 张攻击或防护类道具！');
+      return;
+    }
+
+    ensureAudio();
+
+    if (type === 'sixDie') {
+      if (this.armedSixDie) return;
+      inv.sixDie -= 1;
+      this.armedSixDie = true;
+      this.turnUsedAtkDef = true;
+      this.pendingItemTarget = null;
+      this.targetChoices = [];
+      this.clearHL();
+      beep(660, 0.1, 'triangle', 0.14);
+      this.setMsg('🎲 已激活「6数骰」，下次掷骰必出 6 点（无连投）！');
+      this.emitSnapshot();
+      return;
+    }
+
+    if (type === 'twinDice') {
+      if (this.armedTwinDice) return;
+      inv.twinDice -= 1;
+      this.armedTwinDice = true;
+      this.turnUsedAtkDef = true;
+      this.pendingItemTarget = null;
+      this.targetChoices = [];
+      this.clearHL();
+      beep(620, 0.1, 'triangle', 0.14);
+      this.setMsg('⚙️ 已激活「动力装置」，下次同时掷两颗骰子！');
+      this.emitSnapshot();
+      return;
+    }
+
+    if (type === 'refuel') {
+      if (this.armedRefuel) return;
+      inv.refuel -= 1;
+      this.armedRefuel = true;
+      this.turnUsedAtkDef = true;
+      this.pendingItemTarget = null;
+      this.targetChoices = [];
+      this.clearHL();
+      beep(700, 0.1, 'triangle', 0.14);
+      this.setMsg('⛽ 已激活「空中加油机」，本次移动后将多一次投骰！');
+      this.emitSnapshot();
+      return;
+    }
+
+    if (type === 'shield' || type === 'missile') {
+      if (this.pendingItemTarget === type) {
+        this.cancelItemTarget();
+        return;
+      }
+      const choices = this.buildTargetChoices(type, this.turn);
+      if (choices.length === 0) {
+        this.setMsg(
+          type === 'shield'
+            ? '🛡️ 场上暂无可套盾的己方棋子（护盾不可叠加）'
+            : '🚀 场上暂无可攻击的敌方棋子（起点与终点除外）',
+        );
+        return;
+      }
+      this.pendingItemTarget = type;
+      this.targetChoices = choices;
+      this.highlight(
+        choices.map((c) => ({ plane: c.plane })),
+        type === 'shield' ? 0x2b8bd4 : 0x8b5cf6,
+      );
+      this.setMsg(
+        type === 'shield'
+          ? '🛡️ 请点选场上己方棋子为其套上护盾'
+          : '🚀 请点选场上敌方棋子发射导弹',
+      );
+      this.emitSnapshot();
+    }
+  }
+
+  public cancelItemTarget(): void {
+    if (this.pendingItemTarget === null) return;
+    this.pendingItemTarget = null;
+    this.targetChoices = [];
+    this.clearHL();
+    this.message = null;
+    if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
+    this.emitSnapshot();
+  }
+
+  public pickItemTarget(pid: number, idx: number): void {
+    if (this.paused || this.disposed || this.itemBusy) return;
+    if (this.phase !== 'awaitRoll' || this.isAI() || !this.pendingItemTarget) return;
+    const match = this.targetChoices.find(
+      (c) => c.plane.pid === pid && c.plane.idx === idx,
+    );
+    if (!match) return;
+
+    ensureAudio();
+    const kind = this.pendingItemTarget;
+    const inv = this.playerItems[this.turn];
+
+    if (kind === 'shield') {
+      if (inv.shield <= 0 || this.turnUsedAtkDef) return;
+      inv.shield -= 1;
+      match.plane.shielded = true;
+      this.turnUsedAtkDef = true;
+      this.pendingItemTarget = null;
+      this.targetChoices = [];
+      this.clearHL();
+      this.syncShieldVisuals();
+      const cPos = this.posToCell(this.players[pid], match.plane.pos);
+      this.spawnShieldBreak(cPos[0], cPos[1]);
+      beep(740, 0.12, 'triangle', 0.14);
+      this.setMsg(`🛡️ 已为 #${match.plane.idx + 1} 号棋子开启护盾（不可叠加）！`);
+      this.emitSnapshot();
+    } else if (kind === 'missile') {
+      if (inv.missile <= 0) return;
+      inv.missile -= 1;
+      void this.fireMissile(this.turn, match.plane);
+    }
+  }
+
+  public pickShopItem(item: ItemType): void {
+    if (this.disposed || this.phase !== 'shopChoice' || this.shopPid === null) return;
+    if (this.shopOffer && !this.shopOffer.includes(item)) return;
+    ensureAudio();
+    const pid = this.shopPid;
+    const pl = this.players[pid];
+    const again = this.shopPendingAgain;
+    this.grantItem(pid, item);
+    this.shopOffer = null;
+    this.shopDeadline = null;
+    this.shopPid = null;
+    this.shopPendingAgain = false;
+    this.lastShopSec = -1;
+    const def = ITEM_DEFS[item];
+    beep(784, 0.14, 'triangle', 0.15);
+    this.setMsg(`🎁 ${pl.name} 在商店获得了 ${def.icon} ${def.name}！`, pl.uiColor);
+    this.emitSnapshot();
+    this.endTurn(again);
   }
 
   public togglePause(): void {
@@ -808,8 +2203,9 @@ export class FlightChessEngine {
     if (val !== null && (val < 1 || val > 6)) return;
     this.gmNextDie = val;
     this.emitSnapshot();
-    if (val !== null && this.phase === 'awaitRoll' && !this.isAI() && !this.paused && !this.disposed) {
+    if (val !== null && this.phase === 'awaitRoll' && !this.isAI() && !this.paused && !this.disposed && !this.itemBusy) {
       ensureAudio();
+      if (this.pendingItemTarget !== null) this.cancelItemTarget();
       this.doRoll();
     }
   }
@@ -895,12 +2291,21 @@ export class FlightChessEngine {
         { lx: 0, lz: -0.215 },
       ];
     }
-    return [
-      { lx: -0.198, lz: 0.178 },
-      { lx: 0.198, lz: 0.178 },
-      { lx: -0.198, lz: -0.178 },
-      { lx: 0.198, lz: -0.178 },
-    ];
+    if (total === 4) {
+      return [
+        { lx: -0.198, lz: 0.178 },
+        { lx: 0.198, lz: 0.178 },
+        { lx: -0.198, lz: -0.178 },
+        { lx: 0.198, lz: -0.178 },
+      ];
+    }
+    const pts: { lx: number; lz: number }[] = [];
+    const r = 0.255;
+    for (let k = 0; k < total; k++) {
+      const a = (k / total) * Math.PI * 2;
+      pts.push({ lx: Math.cos(a) * r, lz: Math.sin(a) * r });
+    }
+    return pts;
   }
 
   private getStartHuddlePose(
@@ -1050,6 +2455,12 @@ export class FlightChessEngine {
     for (const k in groups) {
       const grp = groups[k];
       const total = grp.length;
+      const distinctPids = new Set(grp.map((g) => g.pid)).size;
+      const isMixedRingHuddle = k.startsWith('r') && distinctPids >= 2;
+      if (!isMixedRingHuddle) {
+        grp.sort((a, b) => a.idx - b.idx);
+      }
+
       grp.forEach((p, i) => {
         let x: number;
         let y = 0.12;
@@ -1063,10 +2474,10 @@ export class FlightChessEngine {
           x = b[0];
           z = b[1];
           yaw = Math.atan2(-x, -z + 2);
-        } else if (p.pos === 0) {
-          // START 区域：真实软体接触面压平，实现图2般紧贴「脸挤脸」且零穿模
+        } else if (p.pos === 0 || isMixedRingHuddle) {
+          // START 区域或护盾挡踩共格：采用真实软体接触面压平，实现「脸挤脸」并排站立
           const c = this.posToCell(this.players[p.pid], p.pos);
-          const baseYaw = this.faceTravelDir(p);
+          const baseYaw = isMixedRingHuddle ? this.faceTravelDir(grp[0]) : this.faceTravelDir(p);
           const huddle = this.getStartHuddlePose(i, total, baseYaw);
           x = c[0] + huddle.dx;
           z = c[1] + huddle.dz;
@@ -1084,18 +2495,15 @@ export class FlightChessEngine {
             for (let j = 0; j < huddle.pts.length; j++) {
               if (j === i) continue;
               const nb = huddle.pts[j];
-              // 世界平面从我指向邻居的向量
               const dlx = nb.lx - me.lx;
               const dlz = nb.lz - me.lz;
               const wdx = dlx * cosY + dlz * sinY;
               const wdz = -dlx * sinY + dlz * cosY;
               const dist = Math.hypot(wdx, wdz) || 1;
-              // 转回当前角色自身 yaw 局部坐标
               const cYaw = Math.cos(yaw);
               const sYaw = Math.sin(yaw);
               const lnx = (wdx * cYaw - wdz * sYaw) / dist;
               const lnz = (wdx * sYaw + wdz * cYaw) / dist;
-              // 接触中线距（换算到 0.92 缩放前的模型局部坐标）
               const maxProj = (dist * 0.5) / 0.92;
               contacts.push({ nx: lnx, nz: lnz, maxProj });
             }
@@ -1104,7 +2512,7 @@ export class FlightChessEngine {
             this.applyCheekSquishDeform(p, []);
           }
         } else {
-          // 棋盘上重叠时采用垂直「叠叠乐」堆叠
+          // 同阵营棋盘重叠时采用垂直「叠叠乐」堆叠（idx 最小在最底）
           const c = this.posToCell(this.players[p.pid], p.pos);
           x = c[0];
           z = c[1];
@@ -1121,7 +2529,7 @@ export class FlightChessEngine {
         p.mesh.userData.stackBaseYaw = yaw;
         p.mesh.userData.stackIdx = stackIdx;
         p.mesh.userData.stackTotal = stackTotal;
-        if (p.pos !== 0) {
+        if (p.pos !== 0 && !isMixedRingHuddle) {
           this.applyCheekSquishDeform(p, []);
           p.mesh.userData.huddleTotal = 1;
           p.mesh.userData.huddleRoll = 0;
@@ -1129,6 +2537,7 @@ export class FlightChessEngine {
         }
       });
     }
+    this.syncShieldVisuals();
   }
 
   /* ================= Highlighting ================= */
@@ -1141,7 +2550,7 @@ export class FlightChessEngine {
     return tex;
   }
 
-  private highlight(list: { plane: PlaneData }[]): void {
+  private highlight(list: { plane: PlaneData }[], ringHex = 0x3aa66b): void {
     this.clearHL();
     const seenRingCells = new Set<string>();
     const hintGroups = new Map<string, PlaneData[]>();
@@ -1153,14 +2562,14 @@ export class FlightChessEngine {
         seenRingCells.add(cellKey);
         const ring = new THREE.Mesh(
           new THREE.TorusGeometry(0.5, 0.06, 8, 28),
-          new THREE.MeshBasicMaterial({ color: 0x3aa66b }),
+          new THREE.MeshBasicMaterial({ color: ringHex }),
         );
         ring.rotation.x = -Math.PI / 2;
         c.plane.mesh.add(ring);
         ring.position.set(0, -0.02, 0);
         this.hlRings.push(ring);
       }
-      const groupKey = c.plane.pos <= 0 ? `single_${c.plane.idx}` : cellKey;
+      const groupKey = c.plane.pos <= 0 ? `single_${c.plane.idx}` : `${c.plane.pid}_${cellKey}`;
       const arr = hintGroups.get(groupKey) ?? [];
       arr.push(c.plane);
       hintGroups.set(groupKey, arr);
@@ -1176,6 +2585,12 @@ export class FlightChessEngine {
         cur.mesh.position.y > best.mesh.position.y ? cur : best,
       );
       const hintY = Math.max(1.55, topPlane.mesh.position.y + 1.15);
+      const cone = hint.children[0] as THREE.Mesh | undefined;
+      if (cone && (cone.material as THREE.MeshStandardMaterial).color) {
+        const cm = cone.material as THREE.MeshStandardMaterial;
+        cm.color.setHex(ringHex);
+        cm.emissive.setHex(ringHex);
+      }
       const badge = hint.children[1] as THREE.Sprite | undefined;
       if (badge) {
         const tex = this.getBadgeTexture(label);
@@ -1206,18 +2621,38 @@ export class FlightChessEngine {
   }
 
   /* ================= Dice & Turn Flow ================= */
-  private movablePlanes(pid: number, die: number): { plane: PlaneData }[] {
-    return this.planesOf(pid)
+  private movablePlanes(
+    pid: number,
+    die: number,
+    allowTakeoff = die === 5 || die === 6,
+  ): { plane: PlaneData }[] {
+    const active = this.planesOf(pid)
       .filter((p) => {
         if (p.pos === HOME_END) return false;
-        if (p.pos === -1) return die === 5 || die === 6;
+        if (p.pos === -1) return allowTakeoff;
         return true;
       })
-      .map((plane) => ({ plane }));
+      .sort((a, b) => a.idx - b.idx);
+    // 棋盘上同格叠叠乐只控制最底下那只
+    const seenStack = new Set<string>();
+    const result: { plane: PlaneData }[] = [];
+    for (const p of active) {
+      if (p.pos >= 1) {
+        const key = `${p.pid}-${p.pos}`;
+        if (seenStack.has(key)) continue;
+        seenStack.add(key);
+      }
+      result.push({ plane: p });
+    }
+    return result;
   }
 
   private async animDice(die: number): Promise<void> {
     sndRoll();
+    this.diceRig.dice2.visible = false;
+    this.diceRig.dice2Shadow.visible = false;
+    this.diceRig.dice.position.x = 0;
+    this.diceRig.diceShadow.position.x = 0;
     this.hudDieRolling = true;
     this.emitSnapshot();
     const sx = this.diceRig.dice.rotation.x;
@@ -1253,20 +2688,125 @@ export class FlightChessEngine {
     await this.sleep(150);
   }
 
+  private async animTwinDice(d1: number, d2: number): Promise<void> {
+    sndRoll();
+    const { dice, dice2, diceShadow, dice2Shadow } = this.diceRig;
+    dice2.visible = true;
+    dice2Shadow.visible = true;
+    dice.scale.setScalar(0.47);
+    dice2.scale.setScalar(0.47);
+    this.hudDieRolling = true;
+    this.emitSnapshot();
+
+    const sx1 = dice.rotation.x;
+    const sy1 = dice.rotation.y;
+    const sz1 = dice.rotation.z;
+    const sx2 = dice2.rotation.x;
+    const sy2 = dice2.rotation.y;
+    const sz2 = dice2.rotation.z;
+    const [tx1, ty1, tz1] = ORIENT[d1];
+    const [tx2, ty2, tz2] = ORIENT[d2];
+    const dir = () => (Math.random() < 0.5 ? 1 : -1);
+    const tX1 = (5 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dir();
+    const tY1 = (4 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dir();
+    const tZ1 = (4 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dir();
+    const tX2 = (5 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dir();
+    const tY2 = (4 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dir();
+    const tZ2 = (4 + Math.floor(Math.random() * 2)) * Math.PI * 2 * dir();
+    const startX = dice.position.x;
+
+    let lastHudTick = 0;
+    await this.tween(1700, (t) => {
+      const ease = 1 - Math.pow(1 - t, 3);
+      dice.position.x = THREE.MathUtils.lerp(startX, -0.28, Math.min(1, t * 2));
+      dice2.position.x = THREE.MathUtils.lerp(0, 0.28, Math.min(1, t * 2));
+      diceShadow.position.x = dice.position.x;
+      dice2Shadow.position.x = dice2.position.x;
+      dice.position.y = DICE_REST_Y + Math.sin(t * Math.PI) * 1.48;
+      dice2.position.y = DICE_REST_Y + Math.sin(Math.min(1, t * 1.05) * Math.PI) * 1.38;
+      dice.rotation.set(
+        THREE.MathUtils.lerp(sx1, tx1 + tX1, ease),
+        THREE.MathUtils.lerp(sy1, ty1 + tY1, ease),
+        THREE.MathUtils.lerp(sz1, tz1 + tZ1, ease),
+      );
+      dice2.rotation.set(
+        THREE.MathUtils.lerp(sx2, tx2 + tX2, ease),
+        THREE.MathUtils.lerp(sy2, ty2 + tY2, ease),
+        THREE.MathUtils.lerp(sz2, tz2 + tZ2, ease),
+      );
+      if (t < 0.9 && t - lastHudTick > 0.1) {
+        lastHudTick = t;
+        this.hudDieFace = 1 + Math.floor(Math.random() * 6);
+        this.emitSnapshot();
+      }
+    });
+    if (this.disposed) return;
+    this.hudDieRolling = false;
+    dice.position.set(-0.28, DICE_REST_Y, 0);
+    dice2.position.set(0.28, DICE_REST_Y, 0);
+    diceShadow.position.x = -0.28;
+    dice2Shadow.position.x = 0.28;
+    dice.rotation.set(...ORIENT[d1]);
+    dice2.rotation.set(...ORIENT[d2]);
+    this.hudDieFace = d1;
+    this.hudDiePopKey++;
+    this.emitSnapshot();
+    await this.sleep(160);
+  }
+
   private async doRoll(): Promise<void> {
     if (this.phase !== 'awaitRoll' && this.phase !== 'aiWait') return;
     this.phase = 'rolling';
     this.deadline = null;
+    this.pendingItemTarget = null;
+    this.targetChoices = [];
     this.message = null;
     if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
     this.splashVisible = false;
     cancelAnimationFrame(this.splashRaf);
     if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
     this.clearHL();
+
+    const usedSixDie = this.armedSixDie;
+    const usedTwinDice = this.armedTwinDice;
+    const usedRefuel = this.armedRefuel;
+    this.armedSixDie = false;
+    this.armedTwinDice = false;
+    this.armedRefuel = false;
+    this.pendingExtraRoll = usedRefuel;
+    this.suppressSixBonusThisRoll = usedSixDie || usedTwinDice || usedRefuel;
+    this.twinDice = null;
+    this.twinDiceUsedForRoll = usedTwinDice;
     this.emitSnapshot();
 
+    if (usedTwinDice) {
+      let d1 = 1 + Math.floor(Math.random() * 6);
+      const d2 = 1 + Math.floor(Math.random() * 6);
+      if (this.gmNextDie !== null && this.gmNextDie >= 1 && this.gmNextDie <= 6) {
+        d1 = this.gmNextDie;
+        this.gmNextDie = null;
+      }
+      this.twinDice = [d1, d2];
+      this.die = d1 + d2;
+      await this.animTwinDice(d1, d2);
+      if (this.disposed) return;
+
+      this.sixChain = 0;
+      this.recordRollQuest(this.turn, [d1, d2]);
+      if (d1 === 6 || d2 === 6) {
+        this.setMsg(`⚙️ 动力装置掷出 ${d1} + ${d2} = ${this.die} 点（含 6 无连投）`);
+      } else {
+        this.setMsg(`⚙️ 动力装置掷出 ${d1} + ${d2} = ${this.die} 点`);
+      }
+      this.emitSnapshot();
+      await this.onRolled(this.die, d1 >= 5 || d2 >= 5);
+      return;
+    }
+
     let die = 1 + Math.floor(Math.random() * 6);
-    if (this.gmNextDie !== null && this.gmNextDie >= 1 && this.gmNextDie <= 6) {
+    if (usedSixDie) {
+      die = 6;
+    } else if (this.gmNextDie !== null && this.gmNextDie >= 1 && this.gmNextDie <= 6) {
       die = this.gmNextDie;
       this.gmNextDie = null;
     }
@@ -1274,31 +2814,51 @@ export class FlightChessEngine {
     await this.animDice(die);
     if (this.disposed) return;
 
-    if (die === 6) {
+    this.recordRollQuest(this.turn, [die]);
+
+    if (die === 6 && !this.suppressSixBonusThisRoll) {
       this.sixChain++;
       if (this.sixChain >= 3) {
         this.setMsg('⚠️ 连续三个 6！本次可移动，但不再掷');
       }
     } else {
       this.sixChain = 0;
+      if (die === 6 && this.suppressSixBonusThisRoll) {
+        this.setMsg('🎲 掷出 6 点（本回合道具效果，无连投奖励）');
+      }
     }
     this.emitSnapshot();
-    await this.onRolled(die);
+    await this.onRolled(die, die === 5 || die === 6);
   }
 
-  private async onRolled(die: number): Promise<void> {
+  private async onRolled(die: number, allowTakeoff = die === 5 || die === 6): Promise<void> {
     if (this.disposed) return;
-    const cands = this.movablePlanes(this.turn, die);
+    const cands = this.movablePlanes(this.turn, die, allowTakeoff);
     if (cands.length === 0) {
       this.setMsg(`🎲 掷出 ${die} 点，暂无可移动飞机`);
       await this.sleep(1000);
-      if (!this.disposed) this.endTurn(die === 6);
+      if (!this.disposed) {
+        const willRollAgain =
+          this.pendingExtraRoll || (!this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3);
+        this.pendingExtraRoll = false;
+        this.suppressSixBonusThisRoll = false;
+        this.endTurn(willRollAgain);
+      }
       return;
     }
     if (this.isAI()) {
       this.emitSnapshot();
+      const picked = this.aiPick(cands);
+      // 落子前有概率提前说一句（如准备踩人/冲刺）
+      this.emitAiEmote(this.turn, 'preMove', 2600, undefined, {
+        probMult: 1.0,
+        delayMinMs: 250,
+        delayMaxMs: 850,
+        requireTurnSeq: this.turnSeq,
+        allowFollowUp: false,
+      });
       await this.sleep(1350);
-      if (!this.disposed) await this.performMove(this.aiPick(cands).plane, die);
+      if (!this.disposed) await this.performMove(picked.plane, die);
     } else {
       this.phase = 'awaitMove';
       this.movable = cands;
@@ -1696,19 +3256,91 @@ export class FlightChessEngine {
         q.pid !== plane.pid && q.pos >= 1 && q.pos <= 50 && this.ringIndexOf(q) === r,
     );
     if (!victims.length) return 0;
-    sndCap();
-    this.setMsg(`💥 撞掉 ${victims.length} 架敌机，送回基地！`);
+
+    // 按阵营分组判断护盾防御
+    const byPid = new Map<number, PlaneData[]>();
+    for (const v of victims) {
+      const arr = byPid.get(v.pid) ?? [];
+      arr.push(v);
+      byPid.set(v.pid, arr);
+    }
+
+    const toSendHome: PlaneData[] = [];
+    const defendedPids: number[] = [];
     const c = this.posToCell(this.players[plane.pid], plane.pos);
-    this.spawnImpact(c[0], c[1]);
-    this.triggerShake();
-    await Promise.all(
-      victims.map((v) => {
-        v.pos = -1;
-        const b = this.players[v.pid].base[v.idx];
-        return this.sendHome(v, b[0], b[1]);
-      }),
-    );
-    return victims.length;
+
+    const attackerName = this.players[plane.pid].name;
+    for (const [vPid, grp] of byPid.entries()) {
+      const shieldedUnit = grp.find((v) => v.shielded);
+      if (shieldedUnit) {
+        shieldedUnit.shielded = false;
+        this.syncShieldVisuals();
+        defendedPids.push(vPid);
+        this.spawnShieldBreak(c[0], c[1]);
+        this.triggerShake();
+        this.recordStompQuest(vPid, 1);
+        this.recordOffense(vPid, plane.pid, 0.5);
+        if (this.players[vPid].type === 'ai') {
+          this.emitAiEmote(vPid, 'gotStomped', 1800, attackerName, {
+            probMult: 1.0,
+            delayMinMs: 1100,
+            delayMaxMs: 3600,
+          });
+        }
+      } else {
+        toSendHome.push(...grp);
+        this.recordStompQuest(vPid, grp.length);
+        this.recordOffense(vPid, plane.pid, 1.0);
+        if (this.players[plane.pid].type === 'ai') {
+          const hadGrudge = (this.offenseScores[plane.pid]?.[vPid] ?? 0) >= 0.95;
+          this.emitAiEmote(
+            plane.pid,
+            hadGrudge ? 'stompRevenge' : 'stompedEnemy',
+            1800,
+            this.players[vPid].name,
+            { probMult: hadGrudge ? 1.25 : 1.0, delayMinMs: 700, delayMaxMs: 2800 },
+          );
+          this.onRetaliationSuccess(plane.pid, vPid, 'stomp');
+        }
+        if (this.players[vPid].type === 'ai') {
+          this.emitAiEmote(vPid, 'gotStomped', 1600, attackerName, {
+            probMult: 1.3,
+            delayMinMs: 1200,
+            delayMaxMs: 4100,
+            allowBystander: true,
+          });
+        }
+      }
+    }
+
+    if (defendedPids.length > 0 && toSendHome.length === 0) {
+      beep(680, 0.16, 'triangle', 0.15);
+      const names = defendedPids.map((id) => this.players[id].name).join('、');
+      this.setMsg(`🛡️ ${names} 的护盾挡下踩踏！大家挤脸站在同一格~`);
+      await this.sleep(360);
+      return 0;
+    }
+
+    if (toSendHome.length > 0) {
+      sndCap();
+      if (defendedPids.length > 0) {
+        this.setMsg(`💥 撞掉 ${toSendHome.length} 架敌机，另有护盾成功格挡并同格挤脸！`);
+      } else {
+        this.setMsg(`💥 撞掉 ${toSendHome.length} 架敌机，送回基地！`);
+      }
+      this.spawnImpact(c[0], c[1]);
+      this.triggerShake();
+      await Promise.all(
+        toSendHome.map((v) => {
+          v.pos = -1;
+          v.shielded = false;
+          const b = this.players[v.pid].base[v.idx];
+          return this.sendHome(v, b[0], b[1]);
+        }),
+      );
+      this.syncShieldVisuals();
+    }
+    return toSendHome.length;
   }
 
   private async captureFlyCross(flyingPid: number): Promise<void> {
@@ -1717,21 +3349,67 @@ export class FlightChessEngine {
     const oppPid = this.players.indexOf(oppPlayer);
     const victims = this.planes.filter((q) => q.pid === oppPid && q.pos === 54);
     if (!victims.length) return;
+    const c = this.posToCell(oppPlayer, 54);
+    const attackerName = this.players[flyingPid].name;
+
+    const shieldedUnit = victims.find((v) => v.shielded);
+    if (shieldedUnit) {
+      shieldedUnit.shielded = false;
+      this.syncShieldVisuals();
+      this.spawnShieldBreak(c[0], c[1]);
+      this.triggerShake();
+      beep(680, 0.16, 'triangle', 0.15);
+      this.setMsg(`🛡️ ${oppPlayer.name} 的护盾成功抵挡了航线击落！`, oppPlayer.uiColor);
+      this.recordStompQuest(oppPid, 1);
+      this.recordOffense(oppPid, flyingPid, 0.5);
+      if (oppPlayer.type === 'ai') {
+        this.emitAiEmote(oppPid, 'gotStomped', 1800, attackerName, {
+          probMult: 1.0,
+          delayMinMs: 1100,
+          delayMaxMs: 3600,
+        });
+      }
+      return;
+    }
+
     sndCap();
     this.setMsg(`💥 飞越航线，击落 ${oppPlayer.name} 航道敌机！`);
-    const c = this.posToCell(oppPlayer, 54);
     this.spawnImpact(c[0], c[1]);
     this.triggerShake();
+    this.recordStompQuest(oppPid, victims.length);
+    this.recordOffense(oppPid, flyingPid, 1.0);
+    if (this.players[flyingPid].type === 'ai') {
+      const hadGrudge = (this.offenseScores[flyingPid]?.[oppPid] ?? 0) >= 0.95;
+      this.emitAiEmote(
+        flyingPid,
+        hadGrudge ? 'stompRevenge' : 'stompedEnemy',
+        1800,
+        oppPlayer.name,
+        { probMult: hadGrudge ? 1.25 : 1.0, delayMinMs: 700, delayMaxMs: 2800 },
+      );
+      this.onRetaliationSuccess(flyingPid, oppPid, 'stomp');
+    }
+    if (oppPlayer.type === 'ai') {
+      this.emitAiEmote(oppPid, 'gotStomped', 1600, attackerName, {
+        probMult: 1.3,
+        delayMinMs: 1200,
+        delayMaxMs: 4100,
+        allowBystander: true,
+      });
+    }
     await Promise.all(
       victims.map((v) => {
         v.pos = -1;
+        v.shielded = false;
         const b = this.players[v.pid].base[v.idx];
         return this.sendHome(v, b[0], b[1]);
       }),
     );
+    this.syncShieldVisuals();
   }
 
-  private async performMove(plane: PlaneData, die: number): Promise<void> {
+  private async performMove(rawPlane: PlaneData, die: number): Promise<void> {
+    const plane = this.resolveBottomOfStack(rawPlane);
     this.phase = 'moving';
     this.deadline = null;
     this.clearHL();
@@ -1743,9 +3421,9 @@ export class FlightChessEngine {
     const stack =
       plane.pos === -1 || plane.pos === 0
         ? [plane]
-        : this.planesOf(plane.pid).filter(
-            (p) => p.pos === plane.pos && p.pos !== HOME_END,
-          );
+        : this.planesOf(plane.pid)
+            .filter((p) => p.pos === plane.pos && p.pos !== HOME_END)
+            .sort((a, b) => a.idx - b.idx);
     const sync = (fn: (p: PlaneData, idx: number) => Promise<void>) =>
       Promise.all(stack.map((p, i) => fn(p, i)));
     const setPos = (v: number) => stack.forEach((p) => (p.pos = v));
@@ -1827,19 +3505,27 @@ export class FlightChessEngine {
         ),
         ...shiftTasks,
       ]);
-      // 落地零延迟贴脸
       this.relayout();
       await this.sleep(320);
     } else {
       const leftStart = plane.pos === 0;
+      const leftMixedRing =
+        plane.pos >= 1 &&
+        plane.pos <= 50 &&
+        this.planes.some(
+          (q) =>
+            q.pid !== plane.pid &&
+            q.pos >= 1 &&
+            q.pos <= 50 &&
+            this.ringIndexOf(q) === this.ringIndexOf(plane),
+        );
       let curStep = plane.pos;
       let dir = 1;
       for (let i = 0; i < die; i++) {
         if (curStep === HOME_END) dir = -1;
         curStep += dir;
         setPos(curStep);
-        if (leftStart && i === 0) {
-          // 离开 START 台时，剩余同伴立刻恢复圆脸或重新布局
+        if ((leftStart || leftMixedRing) && i === 0) {
           this.relayout();
         }
         const c = this.posToCell(P, curStep);
@@ -1928,12 +3614,27 @@ export class FlightChessEngine {
 
     if (this.disposed) return;
     if (plane.pos === HOME_END) {
+      stack.forEach((p) => (p.shielded = false));
       beep(784, 0.2, 'triangle', 0.16);
       this.setMsg('🏁 一架飞机到达终点！');
+      if (P.type === 'ai') {
+        this.emitAiEmote(plane.pid, 'goal', 1800, undefined, {
+          probMult: 1.25,
+          delayMinMs: 750,
+          delayMaxMs: 2800,
+          allowBystander: true,
+        });
+      }
       await Promise.all(stack.map((p) => this.celebrateGoal(p)));
     }
     this.relayout();
     this.emitSnapshot();
+
+    const willRollAgain =
+      this.pendingExtraRoll || (!this.suppressSixBonusThisRoll && die === 6 && this.sixChain < 3);
+    this.pendingExtraRoll = false;
+    this.suppressSixBonusThisRoll = false;
+
     if (this.planesOf(plane.pid).every((p) => p.pos === HOME_END)) {
       if (!this.finishedOrder.includes(plane.pid)) {
         this.finishedOrder.push(plane.pid);
@@ -1957,7 +3658,8 @@ export class FlightChessEngine {
       this.endTurn(false);
       return;
     }
-    await this.sleep(500);
+
+    await this.sleep(450);
     if (this.disposed) return;
     if (this.camFollowPlane && this.camMode === 'follow' && !this.camUserInteracting) {
       const home = this.getHomeCameraPose();
@@ -1974,12 +3676,41 @@ export class FlightChessEngine {
     }
     this.camFollowPlane = null;
     this.camFollowObj = null;
-    this.endTurn(die === 6);
+
+    // 踩中商店格子：15 秒内从 3 张不重复随机道具卡中选择 1 张
+    if (plane.pos >= 1 && plane.pos <= 50 && this.shopRingSet.has(this.ringIndexOf(plane))) {
+      const offer = this.pickUniqueShopOffer();
+      if (this.isAI()) {
+        const chosen = this.aiChooseShopItem(offer, plane.pid);
+        this.grantItem(plane.pid, chosen);
+        const def = ITEM_DEFS[chosen];
+        beep(740, 0.12, 'triangle', 0.14);
+        this.setMsg(`🏪 ${P.name} 踏入商店，选择了 ${def.icon} ${def.name}！`, P.uiColor);
+        this.emitAiEmote(plane.pid, 'shopPick', 1400);
+        this.emitSnapshot();
+        await this.sleep(750);
+        if (!this.disposed) this.endTurn(willRollAgain);
+        return;
+      } else {
+        this.shopOffer = offer;
+        this.shopPid = plane.pid;
+        this.shopPendingAgain = willRollAgain;
+        this.shopDeadline = this.timeMs + 15000;
+        this.lastShopSec = 15;
+        this.phase = 'shopChoice';
+        beep(840, 0.14, 'triangle', 0.15);
+        this.setMsg(`🏪 ${P.name} 踏入道具商店，请于 15 秒内挑选 1 张道具卡！`, P.uiColor);
+        this.emitSnapshot();
+        return;
+      }
+    }
+
+    this.endTurn(willRollAgain);
   }
 
   private endTurn(again: boolean): void {
     if (this.phase === 'over' || this.disposed) return;
-    if (again && this.sixChain < 3) {
+    if (again) {
       this.setMsg('🎲 奖励再掷一次！');
       this.beginRollPhase(true);
       return;
@@ -1993,6 +3724,16 @@ export class FlightChessEngine {
       this.finishedOrder.includes(this.turn)
     );
     this.sixChain = 0;
+    this.turnUsedAtkDef = false;
+    this.armedSixDie = false;
+    this.armedTwinDice = false;
+    this.armedRefuel = false;
+    this.pendingExtraRoll = false;
+    this.suppressSixBonusThisRoll = false;
+    this.pendingItemTarget = null;
+    this.targetChoices = [];
+    this.twinDice = null;
+    this.twinDiceUsedForRoll = false;
     this.beginRollPhase(false);
   }
 
@@ -2024,17 +3765,48 @@ export class FlightChessEngine {
   }
 
   private beginRollPhase(isBonus = false): void {
+    const curTurnSeq = ++this.turnSeq;
+    if (!isBonus && this.playerTurnCount[this.turn] !== undefined) {
+      this.playerTurnCount[this.turn] += 1;
+    }
     this.focusTurn();
     if (this.isAI()) {
       this.phase = 'aiWait';
       this.deadline = null;
       this.emitSnapshot();
-      this.after(2000, () => this.doRoll());
+      // 轮到 AI 时，有性格概率提前说一句（掷骰前）
+      this.emitAiEmote(this.turn, 'preRoll', 2800, undefined, {
+        probMult: isBonus ? 1.2 : 1.0,
+        delayMinMs: 220,
+        delayMaxMs: 800,
+        requireTurnSeq: curTurnSeq,
+        allowFollowUp: false,
+      });
+      this.after(950, () => {
+        void this.aiTryUseItems().then(() => {
+          if (this.disposed || this.phase !== 'aiWait') return;
+          this.after(950, () => this.doRoll());
+        });
+      });
     } else {
       this.phase = 'awaitRoll';
       this.deadline = this.timeMs + TIMEOUT;
       sndYourTurn();
       this.showTurnSplash(this.cur(), isBonus);
+      // 玩家思考期间，旁观 AI 按性格概率延后或分批闲聊/催促
+      const aiWatchers = this.players
+        .map((pl, idx) => ({ pl, idx }))
+        .filter((x) => x.pl.type === 'ai');
+      if (aiWatchers.length > 0) {
+        const watcher = aiWatchers[Math.floor(Math.random() * aiWatchers.length)];
+        this.emitAiEmote(watcher.idx, 'watchHuman', 3400, undefined, {
+          probMult: 0.9,
+          delayMinMs: 2600,
+          delayMaxMs: 7400,
+          requireTurnSeq: curTurnSeq,
+          allowFollowUp: true,
+        });
+      }
     }
   }
 
@@ -2110,9 +3882,21 @@ export class FlightChessEngine {
   private aiPick(cands: { plane: PlaneData }[]) {
     const me = this.turn;
     const die = this.die ?? 1;
+    const P = this.players[me];
+    const personality: AiPersonality = P?.type === 'ai' ? (P.personality ?? 'tactician') : 'tactician';
     const myPlanes = this.planesOf(me);
     const activeCount = myPlanes.filter((q) => q.pos >= 0 && q.pos < HOME_END).length;
     const crossThreat = this.oppCrossFlyThreat(me);
+    const myTotalItems = Object.values(this.playerItems[me] ?? {}).reduce((a, b) => a + b, 0);
+
+    const progressMult =
+      personality === 'rusher' ? 1.55 : personality === 'chill' ? 0.85 : personality === 'tactician' ? 1.1 : 1.0;
+    const threatMult =
+      personality === 'rusher' ? 0.45 : personality === 'chill' ? 1.75 : personality === 'vengeful' ? 0.85 : 1.05;
+    const stompBase =
+      personality === 'rusher' ? 118 : personality === 'chill' ? 22 : personality === 'vengeful' ? 75 : 92;
+    const flyKillBonus =
+      personality === 'rusher' ? 138 : personality === 'chill' ? 45 : personality === 'vengeful' ? 105 : 125;
 
     let best = cands[0];
     let bs = -1e9;
@@ -2129,7 +3913,7 @@ export class FlightChessEngine {
 
       if (np === HOME_END) {
         // 骰子刚好到达终点，最高优先级
-        s = 320 + stackCount * 35;
+        s = (personality === 'rusher' ? 380 : 320) + stackCount * 35;
       } else if (p.pos >= 51) {
         // 已在终点前安全小路上：没危险时尽量不浪费步数去反复回弹，留给其他棋子扩大优势
         const inDanger = p.pos === 54 && crossThreat.immediate;
@@ -2143,21 +3927,53 @@ export class FlightChessEngine {
             np * 0.5;
         }
       } else if (p.pos === -1) {
-        // 掷出 5 或 6 点可从基地起飞，优先增加场上可战棋子数
-        s = 78 - activeCount * 10;
+        // 掷出 5 或 6 点可从基地起飞
+        const baseLaunch = personality === 'rusher' ? 92 : personality === 'chill' ? 68 : 78;
+        s = baseLaunch - activeCount * 10;
       } else {
-        // 外圈或起点台棋子：综合评估进度、吃子、跨航线击落、进安全道与脱险/避险
-        s = p.pos === 0 ? 18 : 10 + p.pos * 0.45 + Math.max(0, np - p.pos) * 0.55;
+        // 外圈或起点台棋子：结合性格评估进度、踩人、航线、商店与避险
+        s =
+          p.pos === 0
+            ? 18 * progressMult
+            : 10 + (p.pos * 0.45 + Math.max(0, np - p.pos) * 0.55) * progressMult;
 
-        // 统计沿途各停靠环格可撞回家的敌机
+        // 统计沿途各停靠环格可撞回家的敌机：
+        // 目标价值公式 = 基础踩踏分 + 领先分×领先权重 + (威胁系数 - 1)×威胁权重 + 实时威胁分×28
+        // 记仇型领先权重极低而威胁权重极高，在多目标可选时优先踩对自己威胁最大的玩家而非第一名
+        const leadWeight =
+          personality === 'vengeful'
+            ? 0.22
+            : personality === 'chill'
+              ? 0.35
+              : personality === 'tactician'
+                ? 0.68
+                : 0.85;
+        const threatWeight =
+          personality === 'vengeful'
+            ? 128
+            : personality === 'tactician'
+              ? 95
+              : personality === 'rusher'
+                ? 65
+                : 40;
         const capturedSet = new Set<PlaneData>();
         for (const stopPos of L.ringStops) {
-          const rIdx = (this.players[me].start + 2 + stopPos) % 52;
+          const rIdx = (P.start + 2 + stopPos) % 52;
           for (const q of this.planes) {
             if (q.pid === me || q.pos < 1 || q.pos > 50) continue;
             if (this.ringIndexOf(q) === rIdx && !capturedSet.has(q)) {
               capturedSet.add(q);
-              s += 85 + q.pos * 0.7;
+              const enemyDone = this.planesOf(q.pid).filter((x) => x.pos === HOME_END).length;
+              const leadScore = q.pos * 0.52 + enemyDone * 14;
+              const threatCoeff = this.computeThreatCoeff(me, q.pid);
+              const boardThreat = this.computeEnemyBoardThreat(me, q.pid);
+              const shieldFactor = q.shielded ? 0.36 : 1.0;
+              s +=
+                (stompBase +
+                  leadScore * leadWeight +
+                  (threatCoeff - 1.0) * threatWeight +
+                  boardThreat * 28) *
+                shieldFactor;
             }
           }
         }
@@ -2165,32 +3981,38 @@ export class FlightChessEngine {
         // 飞越对面航线击落敌方停在终点前第 4 格（pos 54）的棋子
         if (L.fly && crossThreat.oppPid >= 0) {
           const flyVictims = this.planesOf(crossThreat.oppPid).filter((q) => q.pos === 54).length;
-          s += flyVictims * 115;
+          const threatCoeff = this.computeThreatCoeff(me, crossThreat.oppPid);
+          const oppDone = this.planesOf(crossThreat.oppPid).filter((x) => x.pos === HOME_END).length;
+          const flyThreatBonus = (threatCoeff - 1.0) * threatWeight + oppDone * 12 * leadWeight;
+          s += flyVictims * (flyKillBonus + flyThreatBonus);
         }
 
-        if (L.fly) s += 48;
-        if (L.jump) s += 20;
+        if (L.fly) s += personality === 'rusher' ? 72 : 48;
+        if (L.jump) s += personality === 'rusher' ? 36 : 20;
 
         if (np >= 51) {
           // 冲入终点前安全通道
           s += 78 + (np - 50) * 3;
           if (np === 54) {
-            if (crossThreat.immediate) s -= 42;
-            else if (crossThreat.near) s -= 14;
+            if (crossThreat.immediate) s -= 42 * threatMult;
+            else if (crossThreat.near) s -= 14 * threatMult;
           }
         } else if (np >= 1 && np <= 50) {
-          const newRingIdx = (this.players[me].start + 2 + np) % 52;
+          const newRingIdx = (P.start + 2 + np) % 52;
+          if (this.shopRingSet.has(newRingIdx) && myTotalItems < 2) {
+            s += personality === 'tactician' ? 30 : personality === 'chill' ? 14 : 18;
+          }
           if (myPlanes.some((q) => q !== p && q.pos === np)) {
-            s += 12; // 同格叠机协同推进
+            s += personality === 'tactician' ? 24 : 12; // 同格叠机协同推进
           }
           const curThreat =
             p.pos >= 1 && p.pos <= 50 ? this.ringThreatScore(this.ringIndexOf(p), me) : 0;
           const newThreat = this.ringThreatScore(newRingIdx, me);
           if (curThreat > 0 && newThreat < curThreat) {
-            s += (curThreat - newThreat) * (32 + p.pos * 0.3);
+            s += (curThreat - newThreat) * (32 + p.pos * 0.3) * threatMult;
           }
           if (newThreat > 0) {
-            s -= newThreat * (24 + p.pos * 0.45 * stackCount);
+            s -= newThreat * (24 + p.pos * 0.45 * stackCount) * threatMult;
           }
         }
       }
@@ -2277,15 +4099,23 @@ export class FlightChessEngine {
 
     if (!this.paused) {
       this.timeMs += dt * 1000;
-      if (this.deadline !== null && this.timeMs >= this.deadline) {
+      if (this.deadline !== null && this.timeMs >= this.deadline && !this.itemBusy) {
         this.deadline = null;
         if (this.phase === 'awaitRoll' && !this.isAI()) {
+          if (this.pendingItemTarget !== null) {
+            this.cancelItemTarget();
+          }
           this.doRoll();
           this.setMsg('⏱️ 超时未操作，自动掷骰');
         } else if (this.phase === 'awaitMove' && this.movable.length && this.die !== null) {
           this.performMove(this.aiPick(this.movable).plane, this.die);
           this.setMsg('⏱️ 超时未操作，自动移动');
         }
+      }
+      if (this.phase === 'shopChoice' && this.shopDeadline !== null && this.timeMs >= this.shopDeadline) {
+        this.shopDeadline = null;
+        const autoItem = this.shopOffer?.[0] ?? 'shield';
+        this.pickShopItem(autoItem);
       }
 
       for (let i = this.pending.length - 1; i >= 0; i--) {
@@ -2446,9 +4276,22 @@ export class FlightChessEngine {
       }
 
       const movableSet =
-        this.phase === 'awaitMove' ? new Set(this.movable.map((m) => m.plane)) : null;
+        this.phase === 'awaitMove'
+          ? new Set(this.movable.map((m) => m.plane))
+          : this.phase === 'awaitRoll' && this.pendingItemTarget !== null
+            ? new Set(this.targetChoices.map((c) => c.plane))
+            : null;
 
       this.planes.forEach((p) => {
+        if (p.shieldMesh && p.shieldMesh.visible) {
+          const eqRing = p.shieldMesh.userData.eqRing as THREE.Mesh | undefined;
+          if (eqRing) {
+            eqRing.rotation.z = t * 1.45 + p.phase;
+            eqRing.position.y = 0.34 + Math.sin(t * 3.1 + p.phase) * 0.02;
+          }
+          p.shieldMesh.scale.setScalar(1 + Math.sin(t * 2.6 + p.phase) * 0.025);
+        }
+
         const baseScale = p.pos === -1 ? 1.12 : 0.92;
         const pt = p.mesh.userData.parts as PlaneParts;
         if (p.animating) return;
@@ -2535,7 +4378,7 @@ export class FlightChessEngine {
           return;
         }
 
-        // 非棋盘叠叠乐状态（单个棋子或 START 区域并排站立）
+        // 非棋盘叠叠乐状态（单个棋子、START 区域并排站立或护盾挡踩挤脸）
         if (baseX !== undefined && baseY !== undefined && baseZ !== undefined && baseYaw !== undefined) {
           p.mesh.position.set(baseX, baseY, baseZ);
           p.mesh.rotation.set(0, baseYaw, 0);
@@ -2564,7 +4407,6 @@ export class FlightChessEngine {
           let halo = p.mesh.userData.dizzyHalo as THREE.Group | undefined;
 
           if (p.pos === -1 && this.timeMs < dizzyUntil) {
-            // 被踩回家眩晕动画：头顶金色小星星绕圈旋转 + 晕头转向摇晃
             if (!halo) {
               halo = new THREE.Group();
               const starMat = new THREE.MeshStandardMaterial({
@@ -2608,14 +4450,13 @@ export class FlightChessEngine {
             const hRoll = (p.mesh.userData.huddleRoll as number) || 0;
             const hPitch = (p.mesh.userData.huddlePitch as number) || 0;
 
-            if (p.pos === 0 && huddleTotal >= 2) {
-              // START 区域多熊「真实碰撞贴脸挤压」动画：软糯横向微扁、向内轻贴但保持碰撞边界不穿模
+            if ((p.pos === 0 || (p.pos >= 1 && stackTotal <= 1)) && huddleTotal >= 2) {
+              // START 区域或同格挤脸状态：软糯横向微扁、贴脸轻贴
               const huddleSeed = p.pid * 2.1;
               const nuzzle = Math.sin(t * 2.2 + huddleSeed);
               p.mesh.scale.setScalar(baseScale);
               pt.animRoot.position.y = 0;
               pt.animRoot.rotation.set(hPitch, 0, hRoll * 0.5);
-              // 取消横向缩水，保持接触面零缝隙贴紧，仅做纵向微弹性呼吸
               pt.animRoot.scale.set(1, 1.02 + nuzzle * 0.012, 1.025);
               pt.headPivot.rotation.set(
                 hPitch * 0.4 + nuzzle * 0.02,
@@ -2793,10 +4634,24 @@ export class FlightChessEngine {
         }
       });
 
-      const targetDiceScale =
-        this.phase === 'awaitRoll' && !this.isAI() && this.diceHovered ? 0.58 : 0.52;
+      const showingTwin = this.twinDice !== null || (this.phase === 'rolling' && this.twinDiceUsedForRoll);
+      const targetDiceScale = showingTwin
+        ? 0.47
+        : this.phase === 'awaitRoll' && !this.isAI() && this.diceHovered
+          ? 0.58
+          : 0.52;
       _scratchDiceScale.set(targetDiceScale, targetDiceScale, targetDiceScale);
       this.diceRig.dice.scale.lerp(_scratchDiceScale, Math.min(1, dt * 12));
+      if (!showingTwin && this.phase !== 'rolling') {
+        this.diceRig.dice2.visible = false;
+        this.diceRig.dice2Shadow.visible = false;
+        this.diceRig.dice.position.x = THREE.MathUtils.lerp(
+          this.diceRig.dice.position.x,
+          0,
+          Math.min(1, dt * 10),
+        );
+        this.diceRig.diceShadow.position.x = this.diceRig.dice.position.x;
+      }
 
       if (this.diceRig.diceHint.visible) {
         const pulse = 0.5 + 0.5 * Math.sin(t * 2.8);
@@ -2837,9 +4692,15 @@ export class FlightChessEngine {
       const fencePulse = 0.5 + 0.5 * Math.sin(t * 5.2);
       this.world.courtFences.forEach((cf) => {
         if (cf.active) {
-          cf.woodMat.emissiveIntensity = 0.08 + fencePulse * 0.92;
-          cf.trimMat.emissiveIntensity = 0.15 + fencePulse * 1.35;
-          cf.capMat.emissiveIntensity = 0.35 + fencePulse * 2.15;
+          if (cf.pulse) {
+            cf.woodMat.emissiveIntensity = 0.08 + fencePulse * 0.92;
+            cf.trimMat.emissiveIntensity = 0.15 + fencePulse * 1.35;
+            cf.capMat.emissiveIntensity = 0.35 + fencePulse * 2.15;
+          } else {
+            cf.woodMat.emissiveIntensity = 0.42;
+            cf.trimMat.emissiveIntensity = 0.65;
+            cf.capMat.emissiveIntensity = 1.05;
+          }
         }
       });
 
@@ -2849,6 +4710,14 @@ export class FlightChessEngine {
         0.28 - 0.12 * hd,
       );
       this.diceRig.diceShadow.scale.setScalar(1 + 0.15 * hd);
+      if (this.diceRig.dice2.visible) {
+        const hd2 = this.diceRig.dice2.position.y - DICE_REST_Y;
+        (this.diceRig.dice2Shadow.material as THREE.MeshBasicMaterial).opacity = Math.max(
+          0.06,
+          0.26 - 0.12 * hd2,
+        );
+        this.diceRig.dice2Shadow.scale.setScalar(1 + 0.15 * hd2);
+      }
 
       for (let i = this.world.critters.length - 1; i >= 0; i--) {
         const c = this.world.critters[i];
@@ -3660,8 +5529,13 @@ export class FlightChessEngine {
     const sec = showTimer
       ? Math.max(0, Math.ceil((this.deadline! - this.timeMs) / 1000))
       : -1;
-    if (sec !== this.lastSec) {
+    const shopSec =
+      this.phase === 'shopChoice' && this.shopDeadline !== null && !this.paused
+        ? Math.max(0, Math.ceil((this.shopDeadline - this.timeMs) / 1000))
+        : -1;
+    if (sec !== this.lastSec || shopSec !== this.lastShopSec) {
       this.lastSec = sec;
+      this.lastShopSec = shopSec;
       this.emitSnapshot();
     }
 

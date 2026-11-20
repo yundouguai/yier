@@ -1,11 +1,19 @@
 import React from 'react';
-import { CHARS, CharKey, HudPlayerSnapshot } from '../game/constants';
+import {
+  AiPersonality,
+  CHARS,
+  CharKey,
+  HudPlayerSnapshot,
+} from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
 
 export interface MatchmakingState {
   localChars: CharKey[];
   matchedChars: CharKey[];
+  matchedPersonalities?: AiPersonality[];
   joinedCount: number;
+  launching?: boolean;
+  closing?: boolean;
 }
 
 interface OverlaysProps {
@@ -48,17 +56,40 @@ export const Overlays: React.FC<OverlaysProps> = ({
     return `对手${oNum}`;
   };
 
+  const isLaunching = Boolean(matchmaking?.launching);
+  const isClosing = Boolean(matchmaking?.closing);
+
   return (
     <>
       {matchmaking && (
-        <div className="fixed inset-0 z-35 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm">
-          <div className="anim-card-pop w-full max-w-[400px] rounded-[24px] bg-white px-6 py-7 text-center shadow-2xl">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-2xl">
-              <span className="inline-block animate-spin">🌐</span>
+        <div
+          className={`fixed inset-0 z-35 flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm transition-opacity duration-300 ease-out ${
+            isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+        >
+          <div
+            className={`anim-card-pop w-full max-w-[400px] rounded-[24px] bg-white px-6 py-7 text-center shadow-2xl transition-all duration-300 ease-out ${
+              isClosing ? 'scale-95 opacity-0' : 'scale-100 opacity-100'
+            }`}
+          >
+            <div
+              className={`mx-auto flex h-12 w-12 items-center justify-center rounded-2xl text-2xl transition-colors duration-300 ${
+                isLaunching ? 'bg-emerald-100' : 'bg-emerald-50'
+              }`}
+            >
+              {isLaunching ? (
+                <span>✨</span>
+              ) : (
+                <span className="inline-block animate-spin">🌐</span>
+              )}
             </div>
-            <h2 className="mt-3 text-xl font-bold text-slate-900">正在在线匹配对手…</h2>
+            <h2 className="mt-3 text-xl font-bold text-slate-900">
+              {isLaunching ? '匹配完成，正在加载棋盘…' : '正在在线匹配对手…'}
+            </h2>
             <p className="mt-1 text-xs text-slate-500">
-              已就位 {Math.min(4, matchmaking.localChars.length + matchmaking.joinedCount)}/4 位玩家，即将进入古城棋盘
+              {isLaunching
+                ? '4 位玩家已就位，场景加载完成后自动进入'
+                : `已就位 ${Math.min(4, matchmaking.localChars.length + matchmaking.joinedCount)}/4 位玩家，即将进入古城棋盘`}
             </p>
 
             <div className="mt-5 grid grid-cols-4 gap-2">
@@ -106,13 +137,20 @@ export const Overlays: React.FC<OverlaysProps> = ({
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={onCancelMatchmaking}
-              className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 cursor-pointer"
-            >
-              取消匹配
-            </button>
+            {isLaunching ? (
+              <div className="mt-5 flex items-center justify-center gap-2 py-2 text-xs font-semibold text-emerald-700">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+                <span>棋盘加载中，请稍候…</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onCancelMatchmaking}
+                className="mt-5 rounded-xl border border-slate-200 bg-slate-50 px-5 py-2 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 cursor-pointer"
+              >
+                取消匹配
+              </button>
+            )}
           </div>
         </div>
       )}

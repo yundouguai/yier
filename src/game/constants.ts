@@ -51,15 +51,166 @@ export interface SlotDef {
   finalYaw: number;
 }
 
+export type AiPersonality = 'vengeful' | 'chill' | 'rusher' | 'tactician';
+
+export interface AiPersonalityDef {
+  id: AiPersonality;
+  name: string;
+  badge: string;
+  icon: string;
+  color: string;
+  desc: string;
+  shopPriority: ItemType[];
+}
+
+export const AI_PERSONALITY_ORDER: AiPersonality[] = [
+  'vengeful',
+  'chill',
+  'rusher',
+  'tactician',
+];
+
+export const AI_PERSONALITIES: Record<AiPersonality, AiPersonalityDef> = {
+  vengeful: {
+    id: 'vengeful',
+    name: '记仇型',
+    badge: '记仇',
+    icon: '😠',
+    color: '#e11d48',
+    desc: '记小本本！被踩或被炸必记仇，优先导弹与追击报复',
+    shopPriority: ['missile', 'shield', 'sixDie', 'refuel', 'twinDice'],
+  },
+  chill: {
+    id: 'chill',
+    name: '佛系型',
+    badge: '佛系',
+    icon: '🍵',
+    color: '#0d9488',
+    desc: '随缘出行，偏爱护盾保平安，极少主动踩人与乱放导弹',
+    shopPriority: ['shield', 'refuel', 'twinDice', 'sixDie', 'missile'],
+  },
+  rusher: {
+    id: 'rusher',
+    name: '激进速通',
+    badge: '激进',
+    icon: '⚡',
+    color: '#ea580c',
+    desc: '只想最快通关！狂抢加速道具，挡路敌机一律踩回起点',
+    shopPriority: ['sixDie', 'refuel', 'twinDice', 'missile', 'shield'],
+  },
+  tactician: {
+    id: 'tactician',
+    name: '精算稳健',
+    badge: '精算',
+    icon: '🧠',
+    color: '#6366f1',
+    desc: '讲究收益与节奏，擅长叠机推进与精准打击领跑者',
+    shopPriority: ['sixDie', 'missile', 'shield', 'twinDice', 'refuel'],
+  },
+};
+
 export type PlayerConfig = CharacterDef &
   SlotDef & {
     type: PlayerType;
+    personality?: AiPersonality;
   };
 
 export interface SeatConfig {
   on: boolean;
   char: CharKey;
   type: PlayerType;
+  personality?: AiPersonality;
+}
+
+export type ItemType = 'sixDie' | 'twinDice' | 'refuel' | 'shield' | 'missile';
+export type ItemCategory = 'attack' | 'defense' | 'counter';
+
+export interface ItemDef {
+  type: ItemType;
+  name: string;
+  category: ItemCategory;
+  categoryLabel: string;
+  icon: string;
+  shortEffect: string;
+  limitNote: string;
+  desc: string;
+  accentColor: string;
+}
+
+export const ITEM_ORDER: ItemType[] = ['sixDie', 'twinDice', 'refuel', 'shield', 'missile'];
+
+export const ITEM_DEFS: Record<ItemType, ItemDef> = {
+  sixDie: {
+    type: 'sixDie',
+    name: '6数骰',
+    category: 'attack',
+    categoryLabel: '攻击类',
+    icon: '🎲',
+    shortEffect: '下次必出 6 点',
+    limitNote: '没有连投效果',
+    desc: '下一次掷骰必定掷出 6 点，但本次掷出 6 点不会触发奖励连投。',
+    accentColor: '#e87a24',
+  },
+  twinDice: {
+    type: 'twinDice',
+    name: '动力装置',
+    category: 'attack',
+    categoryLabel: '攻击类',
+    icon: '⚙️',
+    shortEffect: '同时掷两颗骰子',
+    limitNote: '投出 6 无连投',
+    desc: '本次同时掷出两颗骰子并按点数之和前进（任一为 5/6 可起飞），投出 6 不触发连投。',
+    accentColor: '#d94862',
+  },
+  refuel: {
+    type: 'refuel',
+    name: '空中加油机',
+    category: 'attack',
+    categoryLabel: '攻击类',
+    icon: '⛽',
+    shortEffect: '额外多一次投骰',
+    limitNote: '投出 6 无连投',
+    desc: '本次移动后在本回合内额外获得 1 次投骰机会；本次投出 6 不再叠加连投。',
+    accentColor: '#2c9a60',
+  },
+  shield: {
+    type: 'shield',
+    name: '护盾',
+    category: 'defense',
+    categoryLabel: '防御类',
+    icon: '🛡️',
+    shortEffect: '抵挡一次导弹或被踩',
+    limitNote: '不可叠加',
+    desc: '为指定己方场上棋子套上护盾，可抵挡 1 次导弹或被踩（同格挤脸站立）。',
+    accentColor: '#2b8bd4',
+  },
+  missile: {
+    type: 'missile',
+    name: '导弹',
+    category: 'counter',
+    categoryLabel: '环境反制',
+    icon: '🚀',
+    shortEffect: '敌方棋子后退 6 格',
+    limitNote: '起点终点除外 · 无大跳飞机',
+    desc: '锁定场上敌方棋子（起点与终点除外）使其后退 6 格，后退不触发大跳与航线飞机。',
+    accentColor: '#8b5cf6',
+  },
+};
+
+export interface PlayerQuestState {
+  roll1: number;
+  roll2: number;
+  stomped: number;
+}
+
+export interface ItemTargetChoice {
+  pid: number;
+  idx: number;
+  ownerName: string;
+  ownerColor: string;
+  pos: number;
+  shielded: boolean;
+  stackCount: number;
 }
 
 export type GamePhase =
@@ -68,6 +219,7 @@ export type GamePhase =
   | 'rolling'
   | 'awaitMove'
   | 'moving'
+  | 'shopChoice'
   | 'aiWait'
   | 'over';
 
@@ -83,12 +235,21 @@ export interface HudPlayerSnapshot {
   doneCount: number;
   finishRank: number | null;
   active: boolean;
+  items: Record<ItemType, number>;
+  quest: PlayerQuestState;
+}
+
+export interface HudEmoteEvent {
+  pid: number;
+  text: string;
+  key: number;
 }
 
 export interface GameHudSnapshot {
   phase: GamePhase;
   turn: number;
   die: number | null;
+  twinDice: [number, number] | null;
   hudDieFace: number;
   hudDieRolling: boolean;
   hudDiePopKey: number;
@@ -100,6 +261,7 @@ export interface GameHudSnapshot {
   message: string | null;
   messageColor: string | null;
   messageKey: number;
+  latestEmote: HudEmoteEvent | null;
   splashText: string | null;
   splashAvatar: string;
   splashCharKey: CharKey;
@@ -109,6 +271,15 @@ export interface GameHudSnapshot {
   winnerPid: number | null;
   rankings: number[];
   gmDie: number | null;
+  turnUsedAtkDef: boolean;
+  armedSixDie: boolean;
+  armedTwinDice: boolean;
+  armedRefuel: boolean;
+  pendingItemTarget: 'shield' | 'missile' | null;
+  targetChoices: ItemTargetChoice[];
+  shopOffer: ItemType[] | null;
+  shopSecondsLeft: number | null;
+  shopPid: number | null;
   players: HudPlayerSnapshot[];
 }
 

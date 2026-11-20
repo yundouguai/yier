@@ -35,6 +35,8 @@ export interface PlaneData {
   pos: number;
   animating: boolean;
   phase: number;
+  shielded: boolean;
+  shieldMesh?: THREE.Group;
   mesh: THREE.Group;
 }
 
@@ -683,7 +685,45 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   g.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) o.castShadow = true;
   });
+  // 护盾透明球形光罩 + 绕身金青能量环（默认隐藏，获得护盾后激活）
+  const shieldMesh = new THREE.Group();
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(0.45, 24, 18),
+    new THREE.MeshStandardMaterial({
+      color: 0x6ce5ff,
+      emissive: 0x26b6e8,
+      emissiveIntensity: 0.42,
+      roughness: 0.16,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.27,
+      depthWrite: false,
+    }),
+  );
+  dome.position.y = 0.34;
+  dome.renderOrder = 4;
+  shieldMesh.add(dome);
+
+  const eqRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.455, 0.016, 8, 32),
+    new THREE.MeshStandardMaterial({
+      color: 0x8ef5ff,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 0.65,
+      roughness: 0.25,
+      transparent: true,
+      opacity: 0.85,
+    }),
+  );
+  eqRing.rotation.x = Math.PI / 2 - 0.18;
+  eqRing.position.y = 0.34;
+  shieldMesh.add(eqRing);
+  shieldMesh.visible = false;
+  shieldMesh.userData.eqRing = eqRing;
+  g.add(shieldMesh);
+
   g.scale.setScalar(0.92);
+  g.userData.shieldMesh = shieldMesh;
   g.userData.parts = {
     animRoot,
     body,
@@ -759,6 +799,27 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
   dice.castShadow = true;
   scene.add(dice);
 
+  const dice2 = new THREE.Mesh(createChibiDiceGeometry(), diceMaterials);
+  dice2.position.set(0.28, DICE_REST_Y, 0);
+  dice2.scale.setScalar(0.46);
+  dice2.castShadow = true;
+  dice2.visible = false;
+  scene.add(dice2);
+
+  const dice2Shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.29, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0x201a12,
+      transparent: true,
+      opacity: 0.26,
+      depthWrite: false,
+    }),
+  );
+  dice2Shadow.rotation.x = -Math.PI / 2;
+  dice2Shadow.position.set(0.28, 0.2515, 0);
+  dice2Shadow.visible = false;
+  scene.add(dice2Shadow);
+
   const diceHitMesh = new THREE.Mesh(
     new THREE.SphereGeometry(0.95, 12, 10),
     new THREE.MeshBasicMaterial({ visible: false }),
@@ -809,9 +870,11 @@ export function buildDiceRig(scene: THREE.Scene, anisotropy: number) {
 
   return {
     dice,
+    dice2,
     diceMaterials,
     diceHitMesh,
     diceShadow,
+    dice2Shadow,
     diceHint,
     dhRing,
     dhRipple,
@@ -867,3 +930,70 @@ export function buildTurnArrow(scene: THREE.Scene): THREE.Mesh {
   scene.add(turnArrow);
   return turnArrow;
 }
+
+export function buildToyMissileMesh(accentColor: number): THREE.Group {
+  const g = new THREE.Group();
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0xfff8ee,
+    roughness: 0.34,
+    metalness: 0.08,
+  });
+  const redMat = new THREE.MeshStandardMaterial({
+    color: 0xe5484d,
+    roughness: 0.38,
+    metalness: 0.1,
+  });
+  const goldMat = new THREE.MeshStandardMaterial({
+    color: accentColor,
+    roughness: 0.32,
+    metalness: 0.25,
+  });
+  const flameMat = new THREE.MeshStandardMaterial({
+    color: 0xffb224,
+    emissive: 0xff6a00,
+    emissiveIntensity: 1.4,
+    roughness: 0.2,
+  });
+
+  // 导弹沿着 +Z 方向前进
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.125, 0.46, 20), bodyMat);
+  body.rotation.x = Math.PI / 2;
+  g.add(body);
+
+  const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.122, 0.122, 0.09, 20), goldMat);
+  stripe.rotation.x = Math.PI / 2;
+  stripe.position.z = 0.04;
+  g.add(stripe);
+
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.118, 0.24, 20), redMat);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.z = 0.35;
+  g.add(nose);
+
+  const tipCap = new THREE.Mesh(new THREE.SphereGeometry(0.036, 12, 10), goldMat);
+  tipCap.position.z = 0.455;
+  g.add(tipCap);
+
+  // 4 片尾翼
+  const finGeo = new THREE.BoxGeometry(0.024, 0.13, 0.14);
+  for (let i = 0; i < 4; i++) {
+    const fin = new THREE.Mesh(finGeo, redMat);
+    const a = (i * Math.PI) / 2 + Math.PI / 4;
+    fin.position.set(Math.cos(a) * 0.12, Math.sin(a) * 0.12, -0.17);
+    fin.rotation.z = a + Math.PI / 2;
+    g.add(fin);
+  }
+
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.24, 14), flameMat);
+  flame.rotation.x = -Math.PI / 2;
+  flame.position.z = -0.34;
+  g.add(flame);
+  g.userData.flame = flame;
+
+  g.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+  });
+  return g;
+}
+
