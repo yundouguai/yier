@@ -56,13 +56,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onHumanEmote,
 }) => {
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [camMenuOpen, setCamMenuOpen] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [questExpanded, setQuestExpanded] = useState(() =>
     typeof window === 'undefined' ? true : window.innerWidth >= 900 && window.innerHeight >= 560,
   );
-  const [topBarCollapsed, setTopBarCollapsed] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
   const [inspectedPid, setInspectedPid] = useState<number | null>(null);
   const lastHumanPidRef = useRef(0);
@@ -222,11 +222,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const effectiveQuestPid =
     inspectedPid !== null && snap.players[inspectedPid] ? inspectedPid : snap.turn;
   const questPlayer = snap.players[effectiveQuestPid] ?? cur;
-  const questHeldItems = ITEM_ORDER.filter((t) => (questPlayer.items?.[t] ?? 0) > 0);
-  const questTotalCards = questHeldItems.reduce(
-    (sum, t) => sum + (questPlayer.items?.[t] ?? 0),
-    0,
-  );
   // 底部道具栏展示当前回合人类玩家的背包（AI 回合时隐藏主动使用条）
   const deckPlayer = cur.type === 'human' ? cur : null;
   const heldItemEntries = deckPlayer
@@ -265,20 +260,29 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <span>恭喜</span>
                 <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
                 <span>{snap.giftQuestEvent.playerName} 完成任务布布不烦恼，获得道具</span>
+                <span
+                  className="inline-flex items-center gap-1.5"
+                  style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+                >
+                  <ItemIcon item={snap.giftQuestEvent.item} size={22} />
+                  <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+                </span>
               </>
             ) : (
               <>
+                <span>恭喜</span>
                 <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
-                <span>{snap.giftQuestEvent.playerName} 获得</span>
+                <span>{snap.giftQuestEvent.playerName} 完成 一二宝的馈赠，获得</span>
+                <span
+                  className="inline-flex items-center gap-1.5"
+                  style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+                >
+                  <ItemIcon item={snap.giftQuestEvent.item} size={22} />
+                  <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+                </span>
+                <span>奖励</span>
               </>
             )}
-            <span
-              className="inline-flex items-center gap-1.5"
-              style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
-            >
-              <ItemIcon item={snap.giftQuestEvent.item} size={22} />
-              <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
-            </span>
           </div>
           <img
             src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.gif' : 'yier_gift_box.gif'}?v=${snap.giftQuestEvent.key}`}
@@ -305,9 +309,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       </div>
 
       <div className="pointer-events-none fixed inset-0 z-10">
-        {/* Party / Player list + Quest panel on its right */}
-        <div className="absolute left-2.5 top-2.5 md:left-3.5 md:top-3.5 flex items-start gap-2 md:gap-2.5">
-          <div className="flex w-[144px] md:w-[196px] flex-col gap-1.5 origin-top-left scale-90">
+        {/* Party / Player list + minimal transparent Quest text below */}
+        <div
+          className="hud-left-corner absolute left-2.5 top-2.5 md:left-3.5 md:top-3.5 flex flex-col items-start gap-1.5"
+          style={{ paddingTop: 'env(safe-area-inset-top)', paddingLeft: 'env(safe-area-inset-left)' }}
+        >
+          <div className="flex w-[124px] md:w-[152px] flex-col gap-1">
             {snap.players.map((pl, i) => {
               const humanNum = snap.players
                 .slice(0, i + 1)
@@ -324,7 +331,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     type="button"
                     onClick={() => setInspectedPid(i)}
                     title={`点击查看 ${pl.name} 的任务与道具详情`}
-                    className={`pointer-events-auto flex w-full items-start gap-2 rounded-[13px] px-2.5 py-1.5 md:px-3 md:py-2 text-left transition-all duration-200 cursor-pointer hover:bg-white ${
+                    className={`pointer-events-auto flex w-full items-start gap-1.5 rounded-[11px] px-2 py-1 md:px-2.5 md:py-1.5 text-left transition-all duration-200 cursor-pointer hover:bg-white ${
                       pl.active
                         ? 'bg-white opacity-100 translate-x-1'
                         : isQuestSelected
@@ -346,21 +353,21 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           : '0 4px 12px rgba(60,80,110,0.14)',
                     }}
                   >
-                    <div className="relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center">
-                      <CharacterAvatar charKey={pl.charKey} size={32} />
+                    <div className="relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center">
+                      <CharacterAvatar charKey={pl.charKey} size={24} />
                       <span
-                        className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-white shadow-sm"
+                        className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-white shadow-sm"
                         style={{ backgroundColor: pl.colorHex }}
                       />
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
-                        <b className="truncate text-[12px] md:text-[13px] text-slate-800">
+                        <b className="truncate text-[10px] md:text-[11px] text-slate-800">
                           {pl.name}
                         </b>
                         {pl.finishRank !== null ? (
-                          <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] md:text-[10px] font-extrabold text-amber-800 whitespace-nowrap">
+                          <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[8px] md:text-[9px] font-extrabold text-amber-800 whitespace-nowrap">
                             {pl.finishRank === 1
                               ? '🥇 第1名'
                               : pl.finishRank === 2
@@ -371,7 +378,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           </span>
                         ) : (
                           <span
-                            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] md:text-[10px] font-bold whitespace-nowrap"
+                            className="shrink-0 rounded px-1.5 py-0.5 text-[8px] md:text-[9px] font-bold whitespace-nowrap"
                             style={{
                               backgroundColor: pl.active ? pl.uiColor : '#eef1f5',
                               color: pl.active ? '#ffffff' : '#64748b',
@@ -387,7 +394,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="mt-1 flex items-center gap-1">
+                      <div className="mt-0.5 flex items-center gap-0.5">
                         {[0, 1, 2, 3].map((k) => (
                           <span
                             key={k}
@@ -396,14 +403,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                             }`}
                           />
                         ))}
-                        <span className="ml-0.5 text-[10px] font-semibold text-slate-400 tabular-nums">
+                        <span className="ml-0.5 text-[9px] font-semibold text-slate-400 tabular-nums">
                           {pl.doneCount}/4
                         </span>
                       </div>
 
                       {/* 持有道具（仅图标与数量） */}
                       {heldItems.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        <div className="mt-1 flex flex-wrap items-center gap-0.5">
                           {heldItems.map((itemKey) => {
                             const def = ITEM_DEFS[itemKey];
                             const cnt = pl.items[itemKey];
@@ -411,14 +418,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                               <span
                                 key={itemKey}
                                 title={`${def.name} ×${cnt}（${def.shortEffect}）`}
-                                className="inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] font-bold leading-none tabular-nums"
+                                className="inline-flex items-center gap-0.5 rounded border px-1 py-0.5 text-[9px] font-bold leading-none tabular-nums"
                                 style={{
                                   borderColor: `${def.accentColor}45`,
                                   backgroundColor: `${def.accentColor}14`,
                                   color: def.accentColor,
                                 }}
                               >
-                                <ItemIcon item={itemKey} size={13} />
+                                <ItemIcon item={itemKey} size={11} />
                                 <span>×{cnt}</span>
                               </span>
                             );
@@ -429,7 +436,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </button>
 
                   {bubble && (
-                    <div className="anim-msg-pop pointer-events-none absolute -top-3 right-1 z-30 whitespace-nowrap rounded-full border border-amber-200 bg-white/98 px-2.5 py-0.5 text-[11px] font-extrabold text-slate-800 shadow-md">
+                    <div className="anim-msg-pop pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 z-30 whitespace-nowrap rounded-full border border-amber-200 bg-white/98 px-2.5 py-1 text-[11px] font-extrabold text-slate-800 shadow-md">
                       {bubble}
                     </div>
                   )}
@@ -438,119 +445,83 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             })}
           </div>
 
-          {/* 队友栏右侧：点击标题栏即可收起/展开悬赏任务与道具 */}
-          <div className="pointer-events-auto">
-            <div className="w-[168px] md:w-[196px] rounded-xl border border-white/80 bg-white/90 p-2 shadow-lg backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={() => setQuestExpanded((v) => !v)}
-                title={questExpanded ? '点击收起任务面板' : '点击展开任务面板'}
-                className={`flex w-full items-center justify-between gap-1 text-left cursor-pointer ${
-                  questExpanded ? 'border-b border-slate-100 pb-1.5' : ''
-                }`}
+          {/* 队伍栏下方：极简透明纯文字任务栏（文字内容保持不变） */}
+          <div
+            className="pointer-events-auto w-[160px] md:w-[190px] px-1"
+            style={{
+              textShadow:
+                '0 1px 2px rgba(255,255,255,0.95), 0 0 6px rgba(255,255,255,0.88)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setQuestExpanded((v) => !v)}
+              title={questExpanded ? '点击收起任务面板' : '点击展开任务面板'}
+              className="flex w-full items-center justify-between gap-1 py-0.5 text-left cursor-pointer"
+            >
+              <span
+                className="truncate max-w-[96px] text-[11px] font-extrabold"
+                style={{ color: questPlayer.uiColor }}
               >
-                <span
-                  className="truncate max-w-[96px] rounded px-1.5 py-0.5 text-[10px] font-extrabold text-white"
-                  style={{ backgroundColor: questPlayer.uiColor }}
-                >
-                  {questPlayer.name}
-                </span>
-                <span className="flex items-center gap-1 text-[9px] font-semibold text-slate-500 whitespace-nowrap">
-                  <span>任务·道具</span>
-                  <span className="text-[10px] text-slate-400">{questExpanded ? '▴' : '▾'}</span>
-                </span>
-              </button>
+                {questPlayer.name}
+              </span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-slate-700 whitespace-nowrap">
+                <span>任务·道具</span>
+                <span>{questExpanded ? '▴' : '▾'}</span>
+              </span>
+            </button>
 
-              {questExpanded && (
+            {questExpanded && (
+              <div className="mt-1 space-y-1.5 text-slate-800">
                 <div>
-
-                <div className="mt-1.5 space-y-1.5">
-                  <div className="rounded-lg bg-amber-50/85 px-2 py-1.5 border border-amber-200/65">
-                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-800">
-                      <span>🎲 一二的馈赠</span>
-                      <span className="text-[9px] font-semibold text-amber-700">随机卡×1</span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-1 text-[10px] font-bold tabular-nums">
-                      <span
-                        className={`flex-1 rounded px-1 py-0.5 text-center ${
-                          (questPlayer.quest?.roll1 ?? 0) >= 1
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-white text-slate-600 border border-amber-200/80'
-                        }`}
-                      >
-                        1点 ×{questPlayer.quest?.roll1 ?? 0}
-                      </span>
-                      <span
-                        className={`flex-1 rounded px-1 py-0.5 text-center ${
-                          (questPlayer.quest?.roll2 ?? 0) >= 1
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-white text-slate-600 border border-amber-200/80'
-                        }`}
-                      >
-                        2点 ×{questPlayer.quest?.roll2 ?? 0}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
-                      1点与2点各≥1次，各扣1次兑换
-                    </div>
+                  <div className="flex items-center justify-between text-[11px] font-extrabold">
+                    <span>🎲 一二的馈赠</span>
+                    <span className="text-[10px] font-bold text-amber-800">随机卡×1</span>
                   </div>
-
-                  <div className="rounded-lg bg-sky-50/85 px-2 py-1.5 border border-sky-200/65">
-                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-800">
-                      <span>🛡️ 布布不烦恼</span>
-                      <span className="text-[9px] font-semibold text-sky-700">护盾/动力×1</span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <div className="flex flex-1 gap-1">
-                        {[0, 1].map((step) => (
-                          <span
-                            key={step}
-                            className={`h-1.5 flex-1 rounded-full ${
-                              step < (questPlayer.quest?.stomped ?? 0)
-                                ? 'bg-sky-500'
-                                : 'bg-sky-200/70'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                      <span className="text-[10px] font-extrabold text-sky-700 tabular-nums">
-                        {questPlayer.quest?.stomped ?? 0}/2
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-[9px] leading-tight text-slate-500">
-                      被踩累计2次，扣2次兑换
-                    </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] font-extrabold tabular-nums">
+                    <span
+                      className={
+                        (questPlayer.quest?.roll1 ?? 0) >= 1
+                          ? 'text-emerald-700'
+                          : 'text-slate-700'
+                      }
+                    >
+                      1点 ×{questPlayer.quest?.roll1 ?? 0}
+                    </span>
+                    <span
+                      className={
+                        (questPlayer.quest?.roll2 ?? 0) >= 1
+                          ? 'text-emerald-700'
+                          : 'text-slate-700'
+                      }
+                    >
+                      2点 ×{questPlayer.quest?.roll2 ?? 0}
+                    </span>
                   </div>
-
-                  {questHeldItems.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pt-0.5">
-                      {questHeldItems.map((itemKey) => {
-                        const def = ITEM_DEFS[itemKey];
-                        const cnt = questPlayer.items[itemKey];
-                        return (
-                          <span
-                            key={itemKey}
-                            title={`${def.name}：${def.shortEffect}`}
-                            className="inline-flex items-center gap-0.5 rounded-md border bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-700 tabular-nums"
-                            style={{ borderColor: `${def.accentColor}44` }}
-                          >
-                            <ItemIcon item={itemKey} size={13} />
-                            <span>{def.name}</span>
-                            <span style={{ color: def.accentColor }}>×{cnt}</span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className="text-[10px] leading-tight font-semibold text-slate-700">
+                    1点与2点各≥1次，各扣1次兑换
                   </div>
                 </div>
-              )}
-            </div>
+
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-extrabold">
+                    <span>🛡️ 布布不烦恼</span>
+                    <span className="text-[10px] font-bold text-sky-800">护盾/动力×1</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between text-[10px] font-bold">
+                    <span className="text-slate-700">被踩累计2次，扣2次兑换</span>
+                    <span className="ml-1 shrink-0 font-extrabold text-sky-800 tabular-nums">
+                      {questPlayer.quest?.stomped ?? 0}/2
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Bottom-center focal point: Turn Owner + Action/Event Pills side-by-side above Dice Pod */}
-        <div className="pointer-events-auto absolute bottom-3 md:bottom-4 left-1/2 -translate-x-1/2 flex max-w-[calc(100vw-20px)] flex-col items-center gap-1.5">
+        <div className="hud-bottom-dock pointer-events-auto absolute bottom-2.5 md:bottom-4 left-1/2 -translate-x-1/2 flex max-w-[calc(100vw-20px)] flex-col items-center gap-1.5" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
           {gmOpen && (
             <div className="anim-card-pop mb-0.5 flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
               <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 border border-emerald-400/30">
@@ -826,101 +797,158 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
 
-        {/* Top-Right Camera View Switcher + Global Mute Switch */}
+        {/* Top-Right Pill Bar: 视角下拉 | 游戏规则 | 声音 | 设置齿轮 */}
         <div
-          className="pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 origin-top-right scale-90 flex items-center gap-1 rounded-xl bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
+          className="hud-right-corner pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-full bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
+          style={{ paddingTop: 'env(safe-area-inset-top)', paddingRight: 'env(safe-area-inset-right)' }}
           role="group"
-          aria-label="视角与音效"
+          aria-label="视角、规则、声音与设置"
         >
-          {!topBarCollapsed && (
-            <>
-              {(
-                [
-                  ['follow', '跟随'],
-                  ['top', '俯视'],
-                  ['free', '自由'],
-                ] as [CameraMode, string][]
-              ).map(([mode, label]) => (
+          {/* 视角下拉按钮 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setCamMenuOpen((v) => !v);
+                setSettingsMenuOpen(false);
+              }}
+              title="切换视角（快捷键 V）"
+              aria-expanded={camMenuOpen}
+              className="flex h-8 items-center gap-1 rounded-full bg-[#2c9a60] px-3 text-[11px] md:text-xs font-bold text-white shadow-xs transition-colors hover:bg-[#258552] whitespace-nowrap cursor-pointer"
+            >
+              <span>
+                {snap.camMode === 'follow' ? '跟随' : snap.camMode === 'top' ? '俯视' : '自由'}
+              </span>
+              <span className="text-[10px] opacity-90">{camMenuOpen ? '▴' : '▾'}</span>
+            </button>
+
+            {camMenuOpen && (
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-28 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
+                {(
+                  [
+                    ['follow', '跟随视角'],
+                    ['top', '俯视视角'],
+                    ['free', '自由视角'],
+                  ] as [CameraMode, string][]
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      onSetCamMode(mode);
+                      setCamMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-xs font-bold transition-colors cursor-pointer ${
+                      snap.camMode === mode
+                        ? 'bg-[#2c9a60] text-white'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{label}</span>
+                    {snap.camMode === mode && <span>✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+
+          {/* 游戏规则按钮 */}
+          <button
+            type="button"
+            onClick={() => {
+              setCamMenuOpen(false);
+              setSettingsMenuOpen(false);
+              setEmoteOpen(false);
+              setRulesOpen(true);
+            }}
+            className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              rulesOpen
+                ? 'bg-emerald-50 text-[#2c9a60]'
+                : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <span>📖 规则</span>
+          </button>
+
+          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+
+          {/* 声音按钮 */}
+          <button
+            type="button"
+            onClick={onToggleMute}
+            title={muted ? '开启全局音效' : '关闭全局音效'}
+            aria-label={muted ? '开启音效' : '静音'}
+            className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              muted
+                ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <span>{muted ? '🔇 静音' : '🔊 音效'}</span>
+          </button>
+
+          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+
+          {/* 齿轮设置按钮（收纳返回设置与暂停） */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsMenuOpen((v) => !v);
+                setCamMenuOpen(false);
+              }}
+              title="设置"
+              aria-label="设置"
+              aria-expanded={settingsMenuOpen}
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-all cursor-pointer ${
+                settingsMenuOpen
+                  ? 'bg-[#2c9a60] text-white rotate-45'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="3.2" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+
+            {settingsMenuOpen && (
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-32 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
                 <button
-                  key={mode}
                   type="button"
-                  onClick={() => onSetCamMode(mode)}
-                  title="切换视角（快捷键 V）"
-                  className={`rounded-lg px-2.5 md:px-3 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    snap.camMode === mode
-                      ? 'bg-[#2c9a60] text-white shadow-sm'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                  }`}
+                  onClick={() => {
+                    setSettingsMenuOpen(false);
+                    onReturnSetup();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 cursor-pointer"
                 >
-                  {label}
+                  <span>🔄 返回设置</span>
                 </button>
-              ))}
-              <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
-              <button
-                type="button"
-                onClick={onToggleMute}
-                title={muted ? '开启全局音效' : '关闭全局音效'}
-                aria-label={muted ? '开启音效' : '静音'}
-                className={`rounded-lg px-2 py-1.5 text-[11px] md:text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  muted
-                    ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`}
-              >
-                {muted ? '🔇 静音' : '🔊 音效'}
-              </button>
-              <span className="mx-0.5 h-4 w-px bg-slate-200" aria-hidden="true" />
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => setTopBarCollapsed((v) => !v)}
-            title={topBarCollapsed ? '展开视角与音效' : '收起视角与音效'}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[11px] font-bold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 cursor-pointer"
-          >
-            {topBarCollapsed ? '◂' : '▸'}
-          </button>
-        </div>
-
-        {/* Left Vertical Control Bar */}
-        <div className="pointer-events-auto absolute bottom-[132px] md:bottom-3.5 left-2.5 md:left-3.5 flex w-[90px] md:w-[102px] flex-col items-stretch gap-1.5">
-          {!dockCollapsed && (
-            <div className="flex flex-col items-stretch gap-1.5">
-              <button
-                type="button"
-                onClick={() => setRulesOpen((v) => !v)}
-                className={`w-full rounded-xl px-2.5 py-2 text-[11px] md:text-xs font-semibold shadow whitespace-nowrap shrink-0 cursor-pointer ${
-                  rulesOpen
-                    ? 'bg-[#2c9a60] text-white'
-                    : 'bg-white/95 text-slate-700 hover:bg-white'
-                }`}
-              >
-                玩法规则
-              </button>
-              <button
-                type="button"
-                onClick={onReturnSetup}
-                className="w-full rounded-xl bg-white/95 px-2.5 py-2 text-[11px] md:text-xs font-semibold text-slate-700 shadow hover:bg-white whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                返回设置
-              </button>
-              <button
-                type="button"
-                onClick={onTogglePause}
-                className="w-full rounded-xl bg-white/95 px-2.5 py-2 text-[11px] md:text-xs font-semibold text-slate-700 shadow hover:bg-white whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                {snap.paused ? '▶ 继续' : '⏸ 暂停'}
-              </button>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setDockCollapsed((v) => !v)}
-            className="w-full rounded-xl bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 shadow hover:text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {dockCollapsed ? '▴ 展开控制' : '▾ 收起控制'}
-          </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsMenuOpen(false);
+                    onTogglePause();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 cursor-pointer"
+                >
+                  <span>{snap.paused ? '▶️ 继续游戏' : '⏸️ 暂停游戏'}</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Rules Modal */}
