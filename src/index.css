@@ -107,26 +107,53 @@
 @keyframes giftItemFloat {
   0% {
     opacity: 0;
-    transform: translateY(18px) scale(0.76);
+    transform: translateY(14px) scale(0.9);
   }
-  16% {
+  20% {
     opacity: 1;
-    transform: translateY(-4px) scale(1.06);
+    transform: translateY(-4px) scale(1.02);
   }
-  28% {
+  32% {
     opacity: 1;
     transform: translateY(-10px) scale(1);
   }
-  82% {
+  74% {
     opacity: 1;
-    transform: translateY(-24px) scale(1);
+    transform: translateY(-20px) scale(1);
   }
   100% {
     opacity: 0;
-    transform: translateY(-34px) scale(0.96);
+    transform: translateY(-34px) scale(0.97);
+  }
+}
+
+@keyframes giftStickerLife {
+  0% {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  82% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
   }
 }
 
 .anim-gift-float {
-  animation: giftItemFloat 3.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: giftItemFloat 2.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.anim-gift-sticker {
+  animation: giftStickerLife 2.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }

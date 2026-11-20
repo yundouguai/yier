@@ -241,6 +241,7 @@ export interface HudPlayerSnapshot {
 
 export interface GiftQuestEvent {
   playerName: string;
+  playerCharKey: CharKey;
   playerColor: string;
   item: ItemType;
   key: number;

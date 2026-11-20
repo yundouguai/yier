@@ -1113,6 +1113,7 @@ export class FlightChessEngine {
       this.setMsg(`🎯 ${pl.name} 完成「一二的馈赠」，获得 ${def.icon} ${def.name}！`, pl.uiColor);
       this.giftQuestEvent = {
         playerName: pl.name,
+        playerCharKey: pl.key,
         playerColor: pl.uiColor,
         item: got,
         key: ++this.giftQuestKey,
@@ -1122,7 +1123,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.giftQuestEvent = null;
         this.emitSnapshot();
-      }, 3600);
+      }, 2400);
     }
     this.emitSnapshot();
   }

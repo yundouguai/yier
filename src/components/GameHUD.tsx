@@ -9,6 +9,7 @@ import {
   ItemType,
 } from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
+import { ItemIcon } from './ItemIcon';
 
 const QUICK_EMOTES = [
   { icon: '😄', text: '开心!' },
@@ -251,21 +252,26 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           className="pointer-events-none fixed left-1/2 top-[35%] md:top-[33%] z-[22] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
         >
           <div
-            className="anim-gift-float mb-1 flex items-center gap-1.5 whitespace-nowrap rounded-full bg-white/90 px-3.5 py-1 text-xs md:text-sm font-extrabold text-slate-900 shadow-[0_8px_22px_rgba(0,0,0,0.2)] backdrop-blur-[2px]"
+            className="anim-gift-float mb-1.5 flex items-center gap-2 whitespace-nowrap rounded-full bg-white/60 px-4 py-1.5 text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
             style={{
-              border: `2px solid ${snap.giftQuestEvent.playerColor}`,
+              border: `1.5px solid ${snap.giftQuestEvent.playerColor}99`,
+              textShadow: '0 1px 2px rgba(255,255,255,0.85)',
             }}
           >
+            <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
             <span>{snap.giftQuestEvent.playerName} 获得</span>
-            <span style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}>
-              {ITEM_DEFS[snap.giftQuestEvent.item].icon}{' '}
-              {ITEM_DEFS[snap.giftQuestEvent.item].name}
+            <span
+              className="inline-flex items-center gap-1.5"
+              style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+            >
+              <ItemIcon item={snap.giftQuestEvent.item} size={22} />
+              <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
             </span>
           </div>
           <img
-            src="./assets/yier_gift_box.gif"
+            src={`./assets/yier_gift_box.gif?v=${snap.giftQuestEvent.key}`}
             alt="一二的馈赠"
-            className="anim-card-pop h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
+            className="anim-gift-sticker h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
           />
         </div>
       )}
@@ -400,7 +406,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                                   color: def.accentColor,
                                 }}
                               >
-                                <span>{def.icon}</span>
+                                <ItemIcon item={itemKey} size={13} />
                                 <span>×{cnt}</span>
                               </span>
                             );
@@ -516,7 +522,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                             className="inline-flex items-center gap-0.5 rounded-md border bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-700 tabular-nums"
                             style={{ borderColor: `${def.accentColor}44` }}
                           >
-                            <span>{def.icon}</span>
+                            <ItemIcon item={itemKey} size={13} />
                             <span>{def.name}</span>
                             <span style={{ color: def.accentColor }}>×{cnt}</span>
                           </span>
@@ -633,7 +639,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    <span className="text-base leading-none">{def.icon}</span>
+                    <ItemIcon item={itemKey} size={22} />
                     <div className="leading-tight">
                       <div className="flex items-center gap-1 text-[11px] font-extrabold text-slate-800">
                         <span>{def.name}</span>
@@ -1036,7 +1042,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           return (
                             <tr key={itemKey}>
                               <td className="px-2.5 py-2 font-bold text-slate-800 whitespace-nowrap">
-                                {def.icon} {def.name}
+                                <span className="inline-flex items-center gap-1.5"><ItemIcon item={itemKey} size={16} /><span>{def.name}</span></span>
                               </td>
                               <td className="px-2.5 py-2 whitespace-nowrap">
                                 <span
@@ -1115,7 +1121,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     >
                       <div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-2xl">{def.icon}</span>
+                          <ItemIcon item={itemKey} size={28} />
                           <span
                             className="rounded-md px-2 py-0.5 text-[10px] font-extrabold text-white"
                             style={{ backgroundColor: def.accentColor }}
