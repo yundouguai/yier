@@ -239,7 +239,17 @@ export default function App() {
     const matchedChars = pickRandomOpponents(draftLocalChars);
     const matchedPersonalities = pickRandomPersonalities(matchedChars.length);
     const needCount = matchedChars.length;
-    const totalWaitMs = 2200 + Math.floor(Math.random() * 2600); // 2.2s ~ 4.8s
+
+    // 首位对手正常匹配（1.0s~1.9s），后续对手更快补齐（每位 0.26s~0.48s）
+    let elapsedMs = 1000 + Math.floor(Math.random() * 900);
+    const stepDelays: number[] = [];
+    for (let k = 1; k <= needCount; k++) {
+      if (k > 1) {
+        elapsedMs += 260 + Math.floor(Math.random() * 220);
+      }
+      stepDelays.push(elapsedMs);
+    }
+    const totalWaitMs = elapsedMs + 320;
 
     setShowSetup(false);
     setMatchmaking({
@@ -251,13 +261,13 @@ export default function App() {
       closing: false,
     });
 
-    for (let k = 1; k <= needCount; k++) {
-      const stepDelay = Math.floor((totalWaitMs * k) / (needCount + 0.5));
+    stepDelays.forEach((stepDelay, idx) => {
+      const k = idx + 1;
       const tid = window.setTimeout(() => {
         setMatchmaking((prev) => (prev ? { ...prev, joinedCount: k } : null));
       }, stepDelay);
       matchTimersRef.current.push(tid);
-    }
+    });
 
     const doneTid = window.setTimeout(() => {
       setMatchmaking((prev) =>

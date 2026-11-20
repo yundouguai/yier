@@ -240,6 +240,7 @@ export interface HudPlayerSnapshot {
 }
 
 export interface GiftQuestEvent {
+  questType?: 'gift' | 'bubu';
   playerName: string;
   playerCharKey: CharKey;
   playerColor: string;

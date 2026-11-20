@@ -830,6 +830,30 @@ export class FlightChessEngine {
     });
   }
 
+  private showShopSplash(
+    P: PlayerConfig,
+    item: ItemType,
+    durationMs = 2400,
+  ): void {
+    const def = ITEM_DEFS[item];
+    this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
+    this.splashCharKey = P.key;
+    this.splashText = `🏪 ${P.name} 购买了「${def.name}」· ${def.shortEffect}`;
+    this.splashColor = def.accentColor;
+    this.splashVisible = true;
+    this.emitSnapshot();
+    cancelAnimationFrame(this.splashRaf);
+    if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
+    this.splashRaf = requestAnimationFrame(() => {
+      if (this.disposed) return;
+      this.splashTimer = window.setTimeout(() => {
+        if (this.disposed) return;
+        this.splashVisible = false;
+        this.emitSnapshot();
+      }, durationMs);
+    });
+  }
+
   private showItemSplash(
     P: PlayerConfig,
     item: ItemType,
@@ -1112,6 +1136,7 @@ export class FlightChessEngine {
       beep(820, 0.12, 'triangle', 0.14);
       this.setMsg(`🎯 ${pl.name} 完成「一二的馈赠」，获得 ${def.icon} ${def.name}！`, pl.uiColor);
       this.giftQuestEvent = {
+        questType: 'gift',
         playerName: pl.name,
         playerCharKey: pl.key,
         playerColor: pl.uiColor,
@@ -1123,7 +1148,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.giftQuestEvent = null;
         this.emitSnapshot();
-      }, 2400);
+      }, 5400);
     }
     this.emitSnapshot();
   }
@@ -1140,6 +1165,20 @@ export class FlightChessEngine {
       const pl = this.players[victimPid];
       beep(720, 0.12, 'triangle', 0.14);
       this.setMsg(`${def.icon} ${pl.name} 触发「布布不烦恼」，任务奖励：${def.name} ×1！`, pl.uiColor);
+      this.giftQuestEvent = {
+        questType: 'bubu',
+        playerName: pl.name,
+        playerCharKey: pl.key,
+        playerColor: pl.uiColor,
+        item: reward,
+        key: ++this.giftQuestKey,
+      };
+      if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
+      this.giftQuestTimer = window.setTimeout(() => {
+        if (this.disposed) return;
+        this.giftQuestEvent = null;
+        this.emitSnapshot();
+      }, 5400);
     }
     this.emitSnapshot();
   }
@@ -2291,6 +2330,7 @@ export class FlightChessEngine {
     const def = ITEM_DEFS[item];
     beep(784, 0.14, 'triangle', 0.15);
     this.setMsg(`🎁 ${pl.name} 在商店获得了 ${def.icon} ${def.name}！`, pl.uiColor);
+    this.showShopSplash(pl, item);
     if (postAction) {
       this.phase = 'moving';
       this.emitSnapshot();
@@ -2990,6 +3030,7 @@ export class FlightChessEngine {
     stepSign = 1,
     baseY = 0.12,
     flipMode: 'none' | 'frontFlip' | 'spinLeft' | 'spinRight' = 'none',
+    onImpact?: () => void,
   ): Promise<void> {
     this.applyCheekSquishDeform(plane, []);
     plane.animating = true;
@@ -2999,8 +3040,13 @@ export class FlightChessEngine {
     const sz = m.position.z;
     const sy = m.position.y;
     const syaw = m.rotation.y;
+    let impactFired = false;
 
     await this.tween(dur, (t) => {
+      if (onImpact && !impactFired && t >= 0.78) {
+        impactFired = true;
+        onImpact();
+      }
       m.position.x = sx + (x - sx) * t;
       m.position.z = sz + (z - sz) * t;
       m.position.y = THREE.MathUtils.lerp(sy, baseY, t) + Math.sin(t * Math.PI) * arc;
@@ -3016,7 +3062,13 @@ export class FlightChessEngine {
       const syScale = 1 + air * 0.09 - sq;
       const sxScale = 1 / Math.sqrt(syScale);
       pt.animRoot.scale.set(sxScale, syScale, sxScale);
-      pt.animRoot.rotation.x = flipMode === 'frontFlip' ? t * Math.PI * 2 : air * 0.16;
+      if (flipMode === 'frontFlip') {
+        const ft = t < 0.08 ? 0 : t > 0.92 ? 1 : (t - 0.08) / 0.84;
+        const fe = ft < 0.5 ? 2 * ft * ft : 1 - Math.pow(-2 * ft + 2, 2) / 2;
+        pt.animRoot.rotation.x = fe * Math.PI * 2;
+      } else {
+        pt.animRoot.rotation.x = air * 0.16;
+      }
       pt.leftArm.rotation.z = 0.35 + air * 0.9;
       pt.rightArm.rotation.z = -0.35 - air * 0.9;
       pt.leftFoot.rotation.x = stepSign * air * 0.55;
@@ -3071,19 +3123,54 @@ export class FlightChessEngine {
     const sy = m.position.y;
     const sz = m.position.z;
     const syaw = m.rotation.y;
-
-    await this.tween(1250, (k) => {
-      m.position.x = sx + (x - sx) * k;
-      m.position.z = sz + (z - sz) * k;
-      m.position.y = sy + Math.sin(k * Math.PI) * 3.2;
-      m.rotation.y = syaw + k * Math.PI * 3;
-      m.rotation.z = Math.sin(k * Math.PI * 4) * 0.55;
-      pt.leftArm.rotation.z = 1.3 + Math.sin(k * Math.PI * 10) * 0.6;
-      pt.rightArm.rotation.z = -1.3 - Math.sin(k * Math.PI * 10) * 0.6;
-      pt.leftFoot.rotation.x = Math.sin(k * Math.PI * 12) * 0.7;
-      pt.rightFoot.rotation.x = -Math.sin(k * Math.PI * 12) * 0.7;
-    });
     const homeYaw = Math.atan2(-x, -z + 2);
+
+    await this.tween(1320, (k) => {
+      if (k < 0.08) {
+        // 被踩瞬间压扁蓄力
+        const sqT = k / 0.08;
+        const syScale = 1 - 0.56 * Math.sin(sqT * Math.PI * 0.5);
+        const sxScale = 1 / Math.sqrt(syScale);
+        pt.animRoot.scale.set(sxScale, syScale, sxScale);
+        pt.animRoot.rotation.set(0, 0, 0);
+        pt.headPivot.rotation.x = -0.35 * sqT;
+        m.position.set(sx, sy, sz);
+        pt.leftArm.rotation.z = 1.45 * sqT;
+        pt.rightArm.rotation.z = -1.45 * sqT;
+      } else if (k < 0.88) {
+        // 爆发击飞：高抛物线 + 翻滚旋转 + 手脚乱蹬
+        const u = (k - 0.08) / 0.80;
+        const easeHoriz = 1 - Math.pow(1 - u, 1.55);
+        const arcY = Math.pow(Math.sin(u * Math.PI), 0.72) * 4.8;
+        m.position.x = sx + (x - sx) * easeHoriz;
+        m.position.z = sz + (z - sz) * easeHoriz;
+        m.position.y = THREE.MathUtils.lerp(sy, 0.12, easeHoriz) + arcY;
+        m.rotation.y = syaw + u * Math.PI * 4.2;
+        m.rotation.z = Math.sin(u * Math.PI * 5) * 0.65;
+        pt.animRoot.rotation.x = u * Math.PI * 4;
+        const stretch = u < 0.22 ? 1 + (1 - u / 0.22) * 0.24 : 1;
+        pt.animRoot.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
+        pt.headPivot.rotation.x = 0.25;
+        pt.leftArm.rotation.z = 1.45 + Math.sin(u * Math.PI * 12) * 0.65;
+        pt.rightArm.rotation.z = -1.45 - Math.sin(u * Math.PI * 12) * 0.65;
+        pt.leftFoot.rotation.x = Math.sin(u * Math.PI * 14) * 0.8;
+        pt.rightFoot.rotation.x = -Math.sin(u * Math.PI * 14) * 0.8;
+      } else {
+        // 落回基地 QQ 回弹
+        const b = (k - 0.88) / 0.12;
+        const syScale = 1 - Math.sin(b * Math.PI) * 0.28;
+        const sxScale = 1 / Math.sqrt(syScale);
+        m.position.set(x, 0.12, z);
+        m.rotation.set(0, homeYaw, 0);
+        pt.animRoot.rotation.set(0, 0, 0);
+        pt.animRoot.scale.set(sxScale, syScale, sxScale);
+        pt.headPivot.rotation.x = Math.sin(b * Math.PI) * 0.2;
+        pt.leftArm.rotation.z = (1 - b) * 0.8;
+        pt.rightArm.rotation.z = -(1 - b) * 0.8;
+        pt.leftFoot.rotation.x = 0;
+        pt.rightFoot.rotation.x = 0;
+      }
+    });
     m.position.set(x, 0.12, z);
     m.rotation.set(0, homeYaw, 0);
     m.userData.stackBaseX = x;
@@ -3093,6 +3180,9 @@ export class FlightChessEngine {
     m.userData.stackTotal = 1;
     m.userData.stackIdx = 0;
     m.userData.dizzyUntil = this.timeMs + 3800;
+    pt.animRoot.scale.set(1, 1, 1);
+    pt.animRoot.rotation.set(0, 0, 0);
+    pt.headPivot.rotation.set(0, 0, 0);
     pt.leftArm.rotation.set(0, 0, 0);
     pt.rightArm.rotation.set(0, 0, 0);
     pt.leftFoot.rotation.set(0, 0, 0);
@@ -3102,7 +3192,7 @@ export class FlightChessEngine {
 
   private spawnImpact(x: number, z: number): void {
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.25, 0.5, 32),
+      new THREE.RingGeometry(0.28, 0.58, 32),
       new THREE.MeshBasicMaterial({
         color: 0xffd54a,
         transparent: true,
@@ -3113,40 +3203,65 @@ export class FlightChessEngine {
       }),
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(x, 0.16, z);
+    ring.position.set(x, 0.18, z);
     this.scene.add(ring);
 
-    const sparks: { m: THREE.Mesh; a: number; sp: number }[] = [];
-    for (let i = 0; i < 10; i++) {
+    const outerRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.22, 0.42, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xff7b54,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.set(x, 0.19, z);
+    this.scene.add(outerRing);
+
+    const sparks: { m: THREE.Mesh; a: number; sp: number; h: number }[] = [];
+    for (let i = 0; i < 14; i++) {
       const m = new THREE.MeshBasicMaterial({
-        color: 0xffe08a,
+        color: i % 2 === 0 ? 0xffe08a : 0xff8a65,
         transparent: true,
         opacity: 1,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), m);
-      s.position.set(x, 0.2, z);
+      const s = new THREE.Mesh(new THREE.SphereGeometry(0.085, 8, 6), m);
+      s.position.set(x, 0.24, z);
       this.scene.add(s);
-      sparks.push({ m: s, a: (i / 10) * Math.PI * 2, sp: 0.6 + Math.random() * 0.7 });
+      sparks.push({
+        m: s,
+        a: (i / 14) * Math.PI * 2 + (Math.random() - 0.5) * 0.2,
+        sp: 0.8 + Math.random() * 0.85,
+        h: 0.65 + Math.random() * 0.65,
+      });
     }
-    this.tween(620, (k) => {
-      const e = 1 - Math.pow(1 - k, 2);
-      ring.scale.setScalar(1 + e * 2.4);
+    this.tween(680, (k) => {
+      const e = 1 - Math.pow(1 - k, 2.2);
+      ring.scale.setScalar(1 + e * 2.8);
       ring.material.opacity = 0.95 * (1 - k);
+      outerRing.scale.setScalar(1 + e * 3.6);
+      outerRing.material.opacity = 0.85 * Math.pow(1 - k, 1.3);
       for (const sp of sparks) {
         sp.m.position.set(
-          x + Math.cos(sp.a) * sp.sp * e * 1.4,
-          0.2 + Math.sin(e * Math.PI) * 0.7,
-          z + Math.sin(sp.a) * sp.sp * e * 1.4,
+          x + Math.cos(sp.a) * sp.sp * e * 1.65,
+          0.24 + Math.sin(e * Math.PI) * sp.h,
+          z + Math.sin(sp.a) * sp.sp * e * 1.65,
         );
         (sp.m.material as THREE.MeshBasicMaterial).opacity = 1 - k;
-        sp.m.scale.setScalar(1 - k * 0.6);
+        sp.m.scale.setScalar(1.1 - k * 0.75);
       }
     }).then(() => {
       this.scene.remove(ring);
       ring.geometry.dispose();
       ring.material.dispose();
+      this.scene.remove(outerRing);
+      outerRing.geometry.dispose();
+      outerRing.material.dispose();
       sparks.forEach((sp) => {
         this.scene.remove(sp.m);
         sp.m.geometry.dispose();
@@ -3570,6 +3685,7 @@ export class FlightChessEngine {
       sign: number,
       targetPos?: number,
       flipMode: 'none' | 'frontFlip' | 'spinLeft' | 'spinRight' = 'none',
+      onImpact?: () => void,
     ) => {
       const baseStackCount = targetPos !== undefined ? countExistingAt(targetPos) : 0;
       return sync((p, idx) =>
@@ -3583,6 +3699,7 @@ export class FlightChessEngine {
           sign,
           0.12 + (baseStackCount + idx) * STACK_STEP_Y,
           flipMode,
+          idx === 0 ? onImpact : undefined,
         ),
       );
     };
@@ -3661,17 +3778,32 @@ export class FlightChessEngine {
         const c = this.posToCell(P, curStep);
         const yaw = curStep === HOME_END ? P.finalYaw : this.faceTravelDir(plane);
         sndHop();
-        await hopAll(c, yaw, 0.5, 460, i % 2 === 0 ? 1 : -1, curStep);
+        let stepCapturePromise: Promise<number> | null = null;
+        await hopAll(
+          c,
+          yaw,
+          0.5,
+          460,
+          i % 2 === 0 ? 1 : -1,
+          curStep,
+          'none',
+          i === die - 1
+            ? () => {
+                stepCapturePromise = this.captureAt(plane);
+              }
+            : undefined,
+        );
         if (this.disposed) return;
         if (i < die - 1) {
           await this.sleep(80);
           if (this.disposed) return;
+        } else if (stepCapturePromise) {
+          await stepCapturePromise;
         }
       }
       if (dir === -1) {
         this.setMsg(`↩️ 点数超出，回弹至航道第 ${curStep - 50} 格`);
       }
-      await this.captureAt(plane);
 
       const continueAfterDirectShop = async () => {
         if (this.disposed) return;
@@ -3698,30 +3830,38 @@ export class FlightChessEngine {
             this.setMsg('⚡ 同色顺风再跳 4 格！');
             beep(540, 0.12, 'triangle', 0.14);
             setPos(plane.pos + 4);
+            let jumpCapture1: Promise<number> | null = null;
             await hopAll(
               this.posToCell(P, plane.pos),
               this.faceTravelDir(plane),
-              1.15,
-              820,
+              1.95,
+              920,
               1,
               plane.pos,
               stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
+              () => {
+                jumpCapture1 = this.captureAt(plane);
+              },
             );
-            await this.captureAt(plane);
+            if (jumpCapture1) await jumpCapture1;
           } else {
             this.setMsg('⚡ 落在己方颜色格，跳跃前进 4 格！');
             beep(540, 0.12, 'triangle', 0.14);
             setPos(plane.pos + 4);
+            let jumpCapture2: Promise<number> | null = null;
             await hopAll(
               this.posToCell(P, plane.pos),
               this.faceTravelDir(plane),
-              1.15,
-              820,
+              1.95,
+              920,
               1,
               plane.pos,
               stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
+              () => {
+                jumpCapture2 = this.captureAt(plane);
+              },
             );
-            await this.captureAt(plane);
+            if (jumpCapture2) await jumpCapture2;
             if (plane.pos === FLIGHT_FROM) {
               await this.sleep(320);
               if (this.disposed) return;
@@ -3771,6 +3911,7 @@ export class FlightChessEngine {
           const def = ITEM_DEFS[chosen];
           beep(740, 0.12, 'triangle', 0.14);
           this.setMsg(`🏪 ${P.name} 踏入商店，选择了 ${def.icon} ${def.name}！`, P.uiColor);
+          this.showShopSplash(P, chosen);
           this.emitAiEmote(plane.pid, 'shopPick', 1400);
           this.emitSnapshot();
           await this.sleep(750);
@@ -3814,30 +3955,38 @@ export class FlightChessEngine {
           this.setMsg('⚡ 同色顺风再跳 4 格！');
           beep(540, 0.12, 'triangle', 0.14);
           setPos(plane.pos + 4);
+          let jumpCapture3: Promise<number> | null = null;
           await hopAll(
             this.posToCell(P, plane.pos),
             this.faceTravelDir(plane),
-            1.15,
-            820,
+            1.95,
+            920,
             1,
             plane.pos,
             stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
+            () => {
+              jumpCapture3 = this.captureAt(plane);
+            },
           );
-          await this.captureAt(plane);
+          if (jumpCapture3) await jumpCapture3;
         } else {
           this.setMsg('⚡ 落在己方颜色格，跳跃前进 4 格！');
           beep(540, 0.12, 'triangle', 0.14);
           setPos(plane.pos + 4);
+          let jumpCapture4: Promise<number> | null = null;
           await hopAll(
             this.posToCell(P, plane.pos),
             this.faceTravelDir(plane),
-            1.15,
-            820,
+            1.95,
+            920,
             1,
             plane.pos,
             stack.length >= 2 ? (Math.random() < 0.5 ? 'spinLeft' : 'spinRight') : 'frontFlip',
+            () => {
+              jumpCapture4 = this.captureAt(plane);
+            },
           );
-          await this.captureAt(plane);
+          if (jumpCapture4) await jumpCapture4;
           if (plane.pos === FLIGHT_FROM) {
             await this.sleep(320);
             if (this.disposed) return;
@@ -3934,6 +4083,7 @@ export class FlightChessEngine {
         const def = ITEM_DEFS[chosen];
         beep(740, 0.12, 'triangle', 0.14);
         this.setMsg(`🏪 ${P.name} 踏入商店，选择了 ${def.icon} ${def.name}！`, P.uiColor);
+        this.showShopSplash(P, chosen);
         this.emitAiEmote(plane.pid, 'shopPick', 1400);
         this.emitSnapshot();
         await this.sleep(750);

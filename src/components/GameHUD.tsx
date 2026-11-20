@@ -245,7 +245,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         }}
       />
 
-      {/* 一二的馈赠任务完成悬浮表情 + 飘出获得道具 */}
+      {/* 一二的馈赠 / 布布不烦恼 任务完成悬浮表情 + 飘出获得道具 */}
       {snap.giftQuestEvent && !showSetup && (
         <div
           key={snap.giftQuestEvent.key}
@@ -258,8 +258,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               textShadow: '0 1px 2px rgba(255,255,255,0.85)',
             }}
           >
-            <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
-            <span>{snap.giftQuestEvent.playerName} 获得</span>
+            {snap.giftQuestEvent.questType === 'bubu' ? (
+              <>
+                <span>恭喜</span>
+                <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
+                <span>{snap.giftQuestEvent.playerName} 完成任务布布不烦恼，获得道具</span>
+              </>
+            ) : (
+              <>
+                <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
+                <span>{snap.giftQuestEvent.playerName} 获得</span>
+              </>
+            )}
             <span
               className="inline-flex items-center gap-1.5"
               style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
@@ -269,8 +279,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </span>
           </div>
           <img
-            src={`./assets/yier_gift_box.gif?v=${snap.giftQuestEvent.key}`}
-            alt="一二的馈赠"
+            src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.gif' : 'yier_gift_box.gif'}?v=${snap.giftQuestEvent.key}`}
+            alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼' : '一二的馈赠'}
             className="anim-gift-sticker h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
           />
         </div>
@@ -1082,34 +1092,28 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         )}
 
-        {/* 15 秒道具商店三选一弹窗 */}
+        {/* 15 秒道具商店三选一弹窗（卡通半透明精简版） */}
         {snap.phase === 'shopChoice' && snap.shopOffer && !showSetup && (
-          <div className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]">
+          <div className="pointer-events-auto fixed inset-0 z-30 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-[2px]">
             <div
-              className="anim-card-pop w-full max-w-[620px] rounded-[24px] bg-white p-5 md:p-6 shadow-2xl"
+              className="anim-card-pop w-full max-w-[560px] rounded-[32px] border-[3px] border-white/80 bg-[#fff9f2]/72 p-4 md:p-5 backdrop-blur-md"
               style={{
-                border: `3px solid ${shopPlayer.uiColor}`,
-                boxShadow: `0 22px 54px rgba(15,23,42,0.34), 0 0 0 6px ${shopPlayer.uiColor}28`,
+                boxShadow: `0 20px 50px rgba(25,18,12,0.22), 0 0 0 4px ${shopPlayer.uiColor}55`,
               }}
             >
-              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+              <div className="flex items-center justify-between gap-3 px-1 pb-3">
                 <div className="flex items-center gap-2.5">
                   <CharacterAvatar charKey={shopPlayer.charKey} size={36} />
-                  <div>
-                    <h3 className="text-base md:text-lg font-extrabold text-slate-900">
-                      🏪 古城道具商店 · 挑选 1 张道具卡
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      {shopPlayer.name} 踩中了商店格，请在倒计时结束前选取 1 张卡片
-                    </p>
-                  </div>
+                  <h3 className="text-base md:text-lg font-extrabold text-slate-800 drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)]">
+                    🏪 选 1 个道具
+                  </h3>
                 </div>
-                <div className="shrink-0 rounded-xl bg-amber-100 px-3 py-1.5 text-sm font-extrabold text-amber-800 tabular-nums border border-amber-300">
+                <div className="shrink-0 rounded-full bg-amber-400/90 px-3.5 py-1 text-sm font-extrabold text-white tabular-nums shadow-sm">
                   ⏱️ {snap.shopSecondsLeft ?? 15}s
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-3 gap-2.5 md:gap-3.5">
                 {snap.shopOffer.map((itemKey) => {
                   const def = ITEM_DEFS[itemKey];
                   return (
@@ -1117,36 +1121,34 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       key={itemKey}
                       type="button"
                       onClick={() => onPickShopItem(itemKey)}
-                      className="group flex flex-col justify-between rounded-2xl border-2 border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-3.5 text-left transition-all hover:-translate-y-1 hover:border-amber-400 hover:shadow-lg cursor-pointer"
+                      className="group relative flex flex-col items-center rounded-[24px] border-2 border-white/85 bg-white/65 px-2.5 py-4 text-center backdrop-blur-sm transition-all duration-200 hover:-translate-y-1.5 hover:scale-[1.03] hover:bg-white/92 hover:shadow-xl active:scale-95 cursor-pointer"
                     >
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <ItemIcon item={itemKey} size={28} />
-                          <span
-                            className="rounded-md px-2 py-0.5 text-[10px] font-extrabold text-white"
-                            style={{ backgroundColor: def.accentColor }}
-                          >
-                            {def.categoryLabel}
-                          </span>
-                        </div>
-                        <h4 className="mt-2.5 text-sm font-extrabold text-slate-900">
-                          {def.name}
-                        </h4>
-                        <p className="mt-1 text-xs leading-snug text-slate-600">
-                          {def.shortEffect}
-                        </p>
+                      <span
+                        className="absolute right-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-extrabold text-white shadow-xs"
+                        style={{ backgroundColor: def.accentColor }}
+                      >
+                        {def.category === 'defense' ? '防御' : '攻击'}
+                      </span>
+
+                      <div
+                        className="mt-2 flex h-16 w-16 items-center justify-center rounded-full transition-transform duration-200 group-hover:scale-110"
+                        style={{ backgroundColor: `${def.accentColor}1c` }}
+                      >
+                        <ItemIcon item={itemKey} size={44} />
                       </div>
 
-                      <div className="mt-3 pt-2 border-t border-slate-100">
-                        <div className="text-[10px] font-bold text-amber-700">
-                          限制：{def.limitNote}
-                        </div>
-                        <div
-                          className="mt-2 w-full rounded-xl py-1.5 text-center text-xs font-extrabold text-white transition-opacity group-hover:opacity-95"
-                          style={{ backgroundColor: def.accentColor }}
-                        >
-                          选择获得
-                        </div>
+                      <h4 className="mt-2.5 text-sm md:text-base font-extrabold text-slate-800">
+                        {def.name}
+                      </h4>
+                      <p className="mt-0.5 text-[11px] font-semibold text-slate-500 leading-tight">
+                        {def.shortEffect}
+                      </p>
+
+                      <div
+                        className="mt-3 rounded-full px-4 py-1 text-xs font-extrabold text-white shadow-sm transition-transform group-hover:scale-105"
+                        style={{ backgroundColor: def.accentColor }}
+                      >
+                        选它！
                       </div>
                     </button>
                   );
