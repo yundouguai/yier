@@ -3,6 +3,7 @@ import { beep } from '../game/audio';
 import {
   CameraMode,
   GameHudSnapshot,
+  GraphicsQuality,
   HUD_PIPS,
   ITEM_DEFS,
   ITEM_ORDER,
@@ -24,7 +25,9 @@ interface GameHUDProps {
   snap: GameHudSnapshot;
   showSetup: boolean;
   muted: boolean;
+  quality: GraphicsQuality;
   onToggleMute: () => void;
+  onChangeQuality: (q: GraphicsQuality) => void;
   onSetGmDie: (val: number | null) => void;
   onActionPod: () => void;
   onUseItem: (item: ItemType) => void;
@@ -42,7 +45,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   snap,
   showSetup,
   muted,
+  quality,
   onToggleMute,
+  onChangeQuality,
   onSetGmDie,
   onActionPod,
   onUseItem,
@@ -69,6 +74,27 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const emoteTimers = useRef<Record<number, number>>({});
   const secretTapCount = useRef(0);
   const secretTapTimer = useRef<number | null>(null);
+
+  // 启动时预加载全部 7 张轻量 WebP 表情包到内存，触发时零等待秒开
+  useEffect(() => {
+    const urls = [
+      './assets/yier_gift_box.webp',
+      './assets/bubu_gift_box.webp',
+      './assets/item_sixDie.webp',
+      './assets/item_twinDice.webp',
+      './assets/item_refuel.webp',
+      './assets/item_shield.webp',
+      './assets/item_missile.webp',
+    ];
+    urls.forEach((url) => {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+      if (typeof img.decode === 'function') {
+        img.decode().catch(() => {});
+      }
+    });
+  }, []);
 
   const curTurnPlayerType = snap.players[snap.turn]?.type;
   useEffect(() => {
@@ -286,8 +312,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             )}
           </div>
           <img
-            src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.gif' : 'yier_gift_box.gif'}?v=${snap.giftQuestEvent.key}`}
+            src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
             alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼' : '一二的馈赠'}
+            loading="eager"
+            decoding="sync"
             className="anim-gift-sticker h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
           />
           </div>
@@ -308,8 +336,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           {snap.splashVisible && snap.splashItem && (
             <img
               key={`item-sticker-${snap.splashKey}`}
-              src={`./assets/item_${snap.splashItem}.gif?v=${snap.splashKey}`}
+              src={`./assets/item_${snap.splashItem}.webp`}
               alt={ITEM_DEFS[snap.splashItem].name}
+              loading="eager"
+              decoding="sync"
               className="h-28 w-28 md:h-32 md:w-32 shrink-0 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.24)]"
             />
           )}
@@ -1016,7 +1046,33 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </button>
 
             {settingsMenuOpen && (
-              <div className="anim-card-pop absolute right-0 top-full mt-2 w-32 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-40 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
+                <div className="px-2 py-1.5">
+                  <div className="mb-1 text-[11px] font-bold text-slate-600">🎨 画质</div>
+                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-0.5">
+                    {(
+                      [
+                        ['high', '高'],
+                        ['medium', '中'],
+                        ['low', '低'],
+                      ] as [GraphicsQuality, string][]
+                    ).map(([q, label]) => (
+                      <button
+                        key={q}
+                        type="button"
+                        onClick={() => onChangeQuality(q)}
+                        className={`rounded-md py-1 text-[11px] font-extrabold transition-colors cursor-pointer ${
+                          quality === q
+                            ? 'bg-[#2c9a60] text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="my-1 h-px bg-slate-100" />
                 <button
                   type="button"
                   onClick={() => {

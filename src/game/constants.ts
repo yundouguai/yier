@@ -223,6 +223,8 @@ export type GamePhase =
   | 'aiWait'
   | 'over';
 
+export type GraphicsQuality = 'high' | 'medium' | 'low';
+
 export type CameraMode = 'follow' | 'top' | 'free';
 
 export interface HudPlayerSnapshot {

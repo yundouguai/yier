@@ -22,6 +22,7 @@ import {
   GiftQuestEvent,
   GameHudSnapshot,
   GamePhase,
+  GraphicsQuality,
   HOME_END,
   HudEmoteEvent,
   ITEM_DEFS,
@@ -146,12 +147,9 @@ export class FlightChessEngine {
   private controls: OrbitControls;
   private envRT: THREE.WebGLRenderTarget;
   private isSoftwareGl: boolean;
-  private isMobile: boolean;
+  private quality: GraphicsQuality = 'high';
   private frameCounter = 0;
   private shadowInterval = 1;
-  private perfFrameAccum = 0;
-  private perfFrameCount = 0;
-  private perfDowngraded = false;
   private anisotropy: number;
 
   private players: PlayerConfig[];
@@ -279,6 +277,7 @@ export class FlightChessEngine {
     onContextLost?: (lost: boolean) => void,
     onReady?: () => void,
     mapId: MapId = 'ancient_city',
+    quality: GraphicsQuality = 'high',
   ) {
     this.container = container;
     this.mapId = mapId;
@@ -347,33 +346,29 @@ export class FlightChessEngine {
     this.lastAiEmoteAt = this.players.map(() => -9999);
 
     this.isSoftwareGl = detectSoftwareGl();
-    this.isMobile =
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-      (navigator.maxTouchPoints > 1 && Math.min(window.innerWidth, window.innerHeight) < 820);
+    this.quality = quality;
     this.renderer = new THREE.WebGLRenderer({
-      antialias: !this.isSoftwareGl && !this.isMobile,
+      antialias: !this.isSoftwareGl && this.quality !== 'low',
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    const maxDpr = this.isSoftwareGl ? 1 : this.isMobile ? 1.25 : 1.75;
+    const maxDpr = this.isSoftwareGl || this.quality === 'low' ? 1 : this.quality === 'medium' ? 1.4 : 2;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.04;
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
-    this.renderer.shadowMap.type = this.isMobile
-      ? THREE.PCFShadowMap
-      : THREE.PCFSoftShadowMap;
-    if (this.isMobile && !this.isSoftwareGl) {
-      // 移动端隔帧刷新阴影，显著降低 Shadow Pass GPU 负载
+    this.renderer.shadowMap.type =
+      this.quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    if (!this.isSoftwareGl && this.quality !== 'high') {
       this.renderer.shadowMap.autoUpdate = false;
       this.renderer.shadowMap.needsUpdate = true;
-      this.shadowInterval = 2;
+      this.shadowInterval = this.quality === 'low' ? 4 : 2;
     }
     this.container.appendChild(this.renderer.domElement);
 
     const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
-    this.anisotropy = this.isMobile ? Math.min(4, maxAniso) : maxAniso;
+    this.anisotropy = this.quality === 'high' ? maxAniso : this.quality === 'medium' ? Math.min(8, maxAniso) : Math.min(4, maxAniso);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.mapConfig.skyBgHex);
@@ -436,8 +431,7 @@ export class FlightChessEngine {
     );
     sun.position.set(...this.mapConfig.sunPosition);
     sun.castShadow = !this.isSoftwareGl;
-    const devMem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 4;
-    const shadowDim = this.isMobile ? (devMem <= 3 ? 512 : 1024) : window.innerWidth < 900 || window.innerHeight < 560 ? 1024 : 2048;
+    const shadowDim = this.quality === 'high' ? 2048 : this.quality === 'medium' ? 1536 : 1024;
     sun.shadow.mapSize.set(shadowDim, shadowDim);
     sun.shadow.camera.left = -13;
     sun.shadow.camera.right = 13;
@@ -824,7 +818,7 @@ export class FlightChessEngine {
   private scheduleCritter(kind: 'rabbit' | 'bird' | 'fly' | 'fish', delay: number): void {
     this.after(delay, () => {
       if (this.disposed) return;
-      const maxCritters = this.isMobile ? 3 : 8;
+      const maxCritters = this.quality === 'high' ? 8 : this.quality === 'medium' ? 5 : 3;
       if (this.mapConfig.enableCritterSpawns && this.world.critters.length < maxCritters) this.world.spawnCritter?.(kind);
       this.scheduleCritter(kind, rnd(5500, 12000));
     });
@@ -2476,6 +2470,19 @@ export class FlightChessEngine {
     }
   }
 
+  public setQuality(q: GraphicsQuality): void {
+    this.quality = q;
+    if (this.disposed || this.isSoftwareGl) return;
+    const maxDpr = q === 'low' ? 1 : q === 'medium' ? 1.4 : 2;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
+    this.renderer.shadowMap.autoUpdate = q === 'high';
+    this.shadowInterval = q === 'low' ? 4 : q === 'medium' ? 2 : 1;
+    this.renderer.shadowMap.needsUpdate = true;
+    if (!this.isContextLost) {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
   public setPaused(paused: boolean): void {
     if (this.phase === 'over' || this.phase === 'idle') return;
     if (this.paused === paused) return;
@@ -2529,7 +2536,7 @@ export class FlightChessEngine {
     if (plane.pos === HOME_END) return `f${plane.pid}`;
     if (plane.pos >= 51) return `h${plane.pid}-${plane.pos}`;
     if (plane.pos === 0) return `L${plane.pid}`;
-    return `r${this.ringIndexOf(plane)}-${plane.pid}`;
+    return `r${this.ringIndexOf(plane)}`;
   }
 
   private faceTravelDir(plane: PlaneData): number {
@@ -3704,7 +3711,8 @@ export class FlightChessEngine {
     if (defendedPids.length > 0 && toSendHome.length === 0) {
       beep(680, 0.16, 'triangle', 0.15);
       const names = defendedPids.map((id) => this.players[id].name).join('、');
-      this.setMsg(`🛡️ ${names} 的护盾挡下踩踏！大家挤脸站在同一格~`);
+      this.setMsg(`🫧 ${names} 的泡泡罩挡下踩踏！大家挤脸站在同一格~`);
+      this.relayout();
       await this.sleep(360);
       return 0;
     }
@@ -4580,23 +4588,7 @@ export class FlightChessEngine {
       }
     }
 
-    // 动态帧率保护：若连续 45 帧平均低于 28fps，自动柔和降一档分辨率与阴影刷新率
-    if (!this.isSoftwareGl && !this.perfDowngraded && dt > 0) {
-      this.perfFrameAccum += dt;
-      this.perfFrameCount++;
-      if (this.perfFrameCount >= 45) {
-        const avgDt = this.perfFrameAccum / this.perfFrameCount;
-        this.perfFrameAccum = 0;
-        this.perfFrameCount = 0;
-        if (avgDt > 1 / 28) {
-          this.perfDowngraded = true;
-          this.renderer.setPixelRatio(1);
-          this.renderer.shadowMap.autoUpdate = false;
-          this.shadowInterval = 4;
-          this.renderer.shadowMap.needsUpdate = true;
-        }
-      }
-    }
+
 
     if (!this.paused) {
       this.timeMs += dt * 1000;
@@ -5059,11 +5051,12 @@ export class FlightChessEngine {
         w.g.rotation.x = Math.cos(t * 0.9 + w.phase) * 0.04;
       }
       for (let pi = 0; pi < this.world.petals.length; pi++) {
-        if (this.isMobile && pi % 2 === 1) {
-          this.world.petals[pi].m.visible = false;
+        const p = this.world.petals[pi];
+        if (this.quality === 'low' && pi % 2 === 1) {
+          p.m.visible = false;
           continue;
         }
-        const p = this.world.petals[pi];
+        p.m.visible = true;
         p.m.position.y -= p.speed * dt;
         p.m.position.x += Math.sin(t * 1.5 + p.sway) * 0.35 * dt;
         p.m.rotation.x += dt * 1.8;

@@ -17,6 +17,7 @@ import {
   CharKey,
   DEFAULT_SEATS,
   GameHudSnapshot,
+  GraphicsQuality,
   MAP_ORDER,
   MapId,
   SeatConfig,
@@ -144,6 +145,15 @@ export default function App() {
   const [snap, setSnap] = useState<GameHudSnapshot>(INITIAL_SNAPSHOT);
   const [contextLost, setContextLost] = useState(false);
   const [muted, setMuted] = useState(isAudioMuted);
+  const [quality, setQuality] = useState<GraphicsQuality>(() => {
+    try {
+      const saved = window.localStorage.getItem('yier_graphics_quality');
+      if (saved === 'high' || saved === 'medium' || saved === 'low') return saved;
+    } catch {
+      // ignore storage errors
+    }
+    return 'high';
+  });
   const [allHumansPrompt, setAllHumansPrompt] = useState(false);
   const [allHumansDismissed, setAllHumansDismissed] = useState(false);
 
@@ -184,6 +194,7 @@ export default function App() {
         matchTimersRef.current.push(revealTid);
       },
       activeMapId,
+      quality,
     );
     engineRef.current = engine;
 
@@ -335,6 +346,16 @@ export default function App() {
     setSessionId((id) => id + 1);
   }, [activeLocalChars, clearMatchTimers]);
 
+  const handleChangeQuality = useCallback((next: GraphicsQuality) => {
+    setQuality(next);
+    try {
+      window.localStorage.setItem('yier_graphics_quality', next);
+    } catch {
+      // ignore storage errors
+    }
+    engineRef.current?.setQuality(next);
+  }, []);
+
   const handleToggleMute = useCallback(() => {
     setMuted(toggleAudioMuted());
   }, []);
@@ -427,7 +448,9 @@ export default function App() {
           snap={snap}
           showSetup={showSetup}
           muted={muted}
+          quality={quality}
           onToggleMute={handleToggleMute}
+          onChangeQuality={handleChangeQuality}
           onSetGmDie={(val) => engineRef.current?.setGmDie(val)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onUseItem={(item) => engineRef.current?.useItem(item)}
