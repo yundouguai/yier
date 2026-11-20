@@ -103,3 +103,30 @@
 .anim-card-pop {
   animation: cardPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+@keyframes giftItemFloat {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.76);
+  }
+  16% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.06);
+  }
+  28% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1);
+  }
+  82% {
+    opacity: 1;
+    transform: translateY(-24px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-34px) scale(0.96);
+  }
+}
+
+.anim-gift-float {
+  animation: giftItemFloat 3.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

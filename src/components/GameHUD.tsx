@@ -244,39 +244,29 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         }}
       />
 
-      {/* 一二的馈赠任务完成动画提示弹窗 */}
+      {/* 一二的馈赠任务完成悬浮表情 + 飘出获得道具 */}
       {snap.giftQuestEvent && !showSetup && (
         <div
           key={snap.giftQuestEvent.key}
-          className="pointer-events-none fixed left-1/2 top-[34%] md:top-[32%] z-[22] -translate-x-1/2 -translate-y-1/2"
+          className="pointer-events-none fixed left-1/2 top-[35%] md:top-[33%] z-[22] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
         >
           <div
-            className="anim-card-pop flex items-center gap-3 rounded-[24px] bg-[#fff8f2]/95 px-4 py-3 md:px-5 md:py-3.5 shadow-[0_20px_52px_rgba(30,20,15,0.28)] backdrop-blur-sm"
+            className="anim-gift-float mb-1 flex items-center gap-1.5 whitespace-nowrap rounded-full bg-white/90 px-3.5 py-1 text-xs md:text-sm font-extrabold text-slate-900 shadow-[0_8px_22px_rgba(0,0,0,0.2)] backdrop-blur-[2px]"
             style={{
-              border: `3px solid ${snap.giftQuestEvent.playerColor}`,
+              border: `2px solid ${snap.giftQuestEvent.playerColor}`,
             }}
           >
-            <img
-              src="./assets/yier_gift_box.gif"
-              alt="一二的馈赠"
-              className="h-24 w-24 md:h-28 md:w-28 shrink-0 rounded-2xl object-contain"
-            />
-            <div className="min-w-0 pr-1">
-              <div className="text-[11px] md:text-xs font-extrabold tracking-wide text-rose-500">
-                🎁 完成「一二的馈赠」！
-              </div>
-              <div className="mt-1 text-sm md:text-base font-extrabold text-slate-900 whitespace-nowrap">
-                {snap.giftQuestEvent.playerName} 获得{' '}
-                <span style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}>
-                  {ITEM_DEFS[snap.giftQuestEvent.item].icon}{' '}
-                  {ITEM_DEFS[snap.giftQuestEvent.item].name}
-                </span>
-              </div>
-              <div className="mt-0.5 text-[11px] font-semibold text-slate-500 whitespace-nowrap">
-                {ITEM_DEFS[snap.giftQuestEvent.item].shortEffect}
-              </div>
-            </div>
+            <span>{snap.giftQuestEvent.playerName} 获得</span>
+            <span style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}>
+              {ITEM_DEFS[snap.giftQuestEvent.item].icon}{' '}
+              {ITEM_DEFS[snap.giftQuestEvent.item].name}
+            </span>
           </div>
+          <img
+            src="./assets/yier_gift_box.gif"
+            alt="一二的馈赠"
+            className="anim-card-pop h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
+          />
         </div>
       )}
 

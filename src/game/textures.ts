@@ -784,8 +784,8 @@ export function createDiceFaceTexture(n: number, anisotropy: number): THREE.Canv
     ],
   };
 
-  if (n === 5 || n === 6) {
-    const isYier = n === 6;
+  if (n === 1) {
+    const isYier = true;
     const outline = '#3a231a';
     const fur = isYier ? '#ffffff' : '#c69069';
     const cheek = isYier ? '#f7aa9c' : '#f2c56d';
