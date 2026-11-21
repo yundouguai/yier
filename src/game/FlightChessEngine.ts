@@ -880,8 +880,11 @@ export class FlightChessEngine {
             : true;
       if (allowed && this.mapConfig.enableCritterSpawns && this.world.critters.length < maxCritters) {
         if (kind === 'bird') {
-          const allowSeagullPerch = tod === 'noon' || tod === 'afternoon';
-          this.world.spawnCritter?.('bird', { perch: allowSeagullPerch ? undefined : false });
+          // 阶段 3 及之后天上飞鸟出现概率降低 50%
+          if (this.maxDoneStage < 3 || Math.random() < 0.5) {
+            const allowSeagullPerch = tod === 'noon' || tod === 'afternoon';
+            this.world.spawnCritter?.('bird', { perch: allowSeagullPerch ? undefined : false });
+          }
         } else {
           this.world.spawnCritter?.(kind);
         }
@@ -5543,7 +5546,7 @@ export class FlightChessEngine {
             this.diceRig.diceShadow.scale.setScalar(1 - ease);
             this.diceRig.diceHint.scale.setScalar(1 - ease);
           }
-          this.campfireRig.group.visible = true;
+          this.campfireRig.group.position.y = 0.05 + 0.20 * ease;
           this.campfireRig.group.scale.setScalar(0.05 + 0.95 * ease);
         }
         // 篝火火焰与火星跳动动画

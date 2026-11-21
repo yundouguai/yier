@@ -2756,8 +2756,8 @@ export function buildAncientWorld(
       camLens.position.set(0, 0.37, 0.06);
       camGrp.add(camLens);
       const flashLight = new THREE.PointLight(0xfff4dc, 0, 4.2, 1.6);
-      flashLight.position.set(0, 0.45, 0.14);
-      camGrp.add(flashLight);
+      flashLight.position.set(0, 0.47, -2.04);
+      heartTree.add(flashLight);
       const flashHaloMat = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,

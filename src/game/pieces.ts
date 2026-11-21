@@ -1165,9 +1165,10 @@ export interface CampfireRig {
 /** 阶段 4 彩蛋：中央骰台温暖篝火（石圈 + 交叉木柴 + 炭火 + 跳动三层火苗 + 火星） */
 export function buildCampfireRig(scene: THREE.Scene): CampfireRig {
   const group = new THREE.Group();
-  group.position.set(0, 0.25, 0);
-  group.scale.setScalar(0.001);
-  group.visible = false;
+  // 保持 visible = true（微缩藏于底座内，避免运行时首次显示触发 PointLight 全场景着色器重编译卡顿）
+  group.position.set(0, 0.05, 0);
+  group.scale.setScalar(0.0001);
+  group.visible = true;
 
   // 1) 8 颗围炉小卵石
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7c746c, roughness: 0.88 });
