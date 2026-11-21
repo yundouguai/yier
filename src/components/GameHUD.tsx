@@ -8,6 +8,7 @@ import {
   ITEM_DEFS,
   ITEM_ORDER,
   ItemType,
+  TimeOfDay,
 } from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
 import { ItemIcon } from './ItemIcon';
@@ -29,6 +30,9 @@ interface GameHUDProps {
   onToggleMute: () => void;
   onChangeQuality: (q: GraphicsQuality) => void;
   onSetGmDie: (val: number | null) => void;
+  onGmGrantItem: (item: ItemType) => void;
+  onGmClearItems: () => void;
+  onSetGmTimeOfDay: (tod: TimeOfDay) => void;
   onActionPod: () => void;
   onUseItem: (item: ItemType) => void;
   onPickItemTarget: (pid: number, idx: number) => void;
@@ -49,6 +53,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onToggleMute,
   onChangeQuality,
   onSetGmDie,
+  onGmGrantItem,
+  onGmClearItems,
+  onSetGmTimeOfDay,
   onActionPod,
   onUseItem,
   onPickItemTarget,
@@ -119,7 +126,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         delete next[playerIdx];
         return next;
       });
-    }, 2800);
+    }, 5600);
   };
 
   useEffect(() => {
@@ -268,94 +275,178 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         }}
       />
 
-      {/* 一二的馈赠 / 布布不烦恼 任务完成悬浮表情 + 飘出获得道具（严格居中） */}
+      {/* 一二的馈赠 / 布布不烦恼：本地玩家显示居中表情包+提示（缩小20%），AI仅显示弱化顶部小提示 */}
       {snap.giftQuestEvent && !showSetup && (
-        <div
-          key={snap.giftQuestEvent.key}
-          className="pointer-events-none fixed inset-0 z-[22] flex items-center justify-center p-4"
-        >
-          <div className="hud-gift-toast-inner flex max-w-[calc(100vw-24px)] flex-col items-center">
+        snap.giftQuestEvent.isLocalHuman ? (
           <div
-            className="anim-gift-float mb-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 max-w-[calc(100vw-28px)] rounded-full bg-white/65 px-4 py-1.5 text-sm sm:text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
-            style={{
-              border: `1.5px solid ${snap.giftQuestEvent.playerColor}99`,
-              textShadow: '0 1px 2px rgba(255,255,255,0.85)',
-            }}
+            key={snap.giftQuestEvent.key}
+            className="pointer-events-none fixed inset-0 z-[22] flex items-center justify-center p-4"
           >
-            {snap.giftQuestEvent.questType === 'bubu' ? (
+            <div className="hud-gift-toast-inner flex max-w-[calc(100vw-24px)] flex-col items-center">
+              <div
+                className="anim-gift-float mb-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 max-w-[calc(100vw-28px)] rounded-full bg-white/65 px-4 py-1.5 text-sm sm:text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
+                style={{
+                  border: `1.5px solid ${snap.giftQuestEvent.playerColor}99`,
+                  textShadow: '0 1px 2px rgba(255,255,255,0.85)',
+                }}
+              >
+                {snap.giftQuestEvent.questType === 'bubu' ? (
+                  <>
+                    <span>恭喜</span>
+                    <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
+                    <span>{snap.giftQuestEvent.playerName} 完成任务布布不烦恼，获得道具</span>
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+                    >
+                      <ItemIcon item={snap.giftQuestEvent.item} size={22} />
+                      <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>恭喜</span>
+                    <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
+                    <span>{snap.giftQuestEvent.playerName} 完成 一二宝的馈赠，获得</span>
+                    <span
+                      className="inline-flex items-center gap-1.5"
+                      style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+                    >
+                      <ItemIcon item={snap.giftQuestEvent.item} size={22} />
+                      <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+                    </span>
+                    <span>奖励</span>
+                  </>
+                )}
+              </div>
+              <img
+                src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
+                alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼' : '一二的馈赠'}
+                loading="eager"
+                decoding="sync"
+                className="anim-gift-sticker h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
+              />
+            </div>
+          </div>
+        ) : (
+          <div
+            key={snap.giftQuestEvent.key}
+            className="pointer-events-none fixed left-1/2 top-14 md:top-16 z-[18] -translate-x-1/2 max-w-[calc(100vw-32px)]"
+          >
+            <div className="anim-msg-pop flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/60 bg-white/68 px-3 py-1 text-[11px] md:text-xs font-bold text-slate-600 shadow-xs backdrop-blur-xs">
+              <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={18} />
+              <span>
+                {snap.giftQuestEvent.playerName} 完成
+                {snap.giftQuestEvent.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}，获得
+              </span>
+              <span
+                className="inline-flex items-center gap-1 font-extrabold"
+                style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+              >
+                <ItemIcon item={snap.giftQuestEvent.item} size={15} />
+                <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+              </span>
+            </div>
+          </div>
+        )
+      )}
+
+      {/* Turn / Item splash：本地玩家居中展示表情包+提示（缩小20%），非本地AI仅顶部弱化文字提示 */}
+      {snap.splashIsHuman ? (
+        <div
+          className={`pointer-events-none fixed inset-0 z-[20] flex items-center justify-center p-4 transition-opacity duration-200 ${
+            snap.splashVisible ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
+          <div
+            className={`hud-item-splash-inner flex max-w-[calc(100vw-24px)] flex-col items-center gap-1.5 transition-transform duration-200 ${
+              snap.splashVisible ? 'scale-100' : 'scale-90'
+            }`}
+          >
+            {snap.splashVisible && snap.splashItem && (
+              <img
+                key={`item-sticker-${snap.splashKey}`}
+                src={`./assets/item_${snap.splashItem}.webp`}
+                alt={ITEM_DEFS[snap.splashItem].name}
+                loading="eager"
+                decoding="sync"
+                className="h-28 w-28 md:h-32 md:w-32 shrink-0 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.24)]"
+              />
+            )}
+            <div
+              className="flex flex-wrap items-center justify-center gap-2 rounded-full bg-white/88 px-5 py-2 text-sm sm:text-base md:text-lg font-extrabold text-slate-800 backdrop-blur-sm"
+              style={{
+                border: `2.5px solid ${snap.splashColor}`,
+                boxShadow: `0 12px 32px rgba(0,0,0,0.2), 0 0 0 4px ${snap.splashColor}28`,
+              }}
+            >
+              <CharacterAvatar charKey={snap.splashCharKey} size={28} />
+              {snap.splashItem && snap.splashItem !== 'shield' && snap.splashActorName ? (
+                <>
+                  <span>{snap.splashActorName} 使用</span>
+                  <span
+                    className="inline-flex items-center gap-1"
+                    style={{ color: ITEM_DEFS[snap.splashItem].accentColor }}
+                  >
+                    <ItemIcon item={snap.splashItem} size={22} />
+                    <span>「{ITEM_DEFS[snap.splashItem].name}」</span>
+                  </span>
+                  {snap.splashDetail && <span>· {snap.splashDetail}</span>}
+                  {snap.splashTargetCharKey && snap.splashTargetName && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <CharacterAvatar charKey={snap.splashTargetCharKey} size={26} />
+                      <span>{snap.splashTargetName}！</span>
+                    </span>
+                  )}
+                </>
+              ) : snap.splashItem === 'shield' ? (
+                <>
+                  <ItemIcon item="shield" size={22} />
+                  <span>{snap.splashText}</span>
+                </>
+              ) : (
+                <span>{snap.splashText}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div
+          className={`pointer-events-none fixed left-1/2 top-14 md:top-16 z-[18] -translate-x-1/2 max-w-[calc(100vw-32px)] transition-opacity duration-200 ${
+            snap.splashVisible ? 'opacity-90' : 'opacity-0'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/60 bg-white/70 px-3.5 py-1 text-[11px] md:text-xs font-bold text-slate-600 shadow-xs backdrop-blur-xs">
+            <CharacterAvatar charKey={snap.splashCharKey} size={18} />
+            {snap.splashItem && snap.splashItem !== 'shield' && snap.splashActorName ? (
               <>
-                <span>恭喜</span>
-                <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
-                <span>{snap.giftQuestEvent.playerName} 完成任务布布不烦恼，获得道具</span>
+                <span>{snap.splashActorName} 使用</span>
                 <span
-                  className="inline-flex items-center gap-1.5"
-                  style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+                  className="inline-flex items-center gap-1"
+                  style={{ color: ITEM_DEFS[snap.splashItem].accentColor }}
                 >
-                  <ItemIcon item={snap.giftQuestEvent.item} size={22} />
-                  <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+                  <ItemIcon item={snap.splashItem} size={15} />
+                  <span>「{ITEM_DEFS[snap.splashItem].name}」</span>
                 </span>
+                {snap.splashDetail && <span>· {snap.splashDetail}</span>}
+                {snap.splashTargetCharKey && snap.splashTargetName && (
+                  <span className="inline-flex items-center gap-1">
+                    <CharacterAvatar charKey={snap.splashTargetCharKey} size={18} />
+                    <span>{snap.splashTargetName}！</span>
+                  </span>
+                )}
+              </>
+            ) : snap.splashItem === 'shield' ? (
+              <>
+                <ItemIcon item="shield" size={15} />
+                <span>{snap.splashText}</span>
               </>
             ) : (
-              <>
-                <span>恭喜</span>
-                <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
-                <span>{snap.giftQuestEvent.playerName} 完成 一二宝的馈赠，获得</span>
-                <span
-                  className="inline-flex items-center gap-1.5"
-                  style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
-                >
-                  <ItemIcon item={snap.giftQuestEvent.item} size={22} />
-                  <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
-                </span>
-                <span>奖励</span>
-              </>
+              <span>{snap.splashText}</span>
             )}
-          </div>
-          <img
-            src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
-            alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼' : '一二的馈赠'}
-            loading="eager"
-            decoding="sync"
-            className="anim-gift-sticker h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
-          />
           </div>
         </div>
       )}
-
-      {/* Turn / Item splash banner + floating Yier & Bubu item sticker（严格居中） */}
-      <div
-        className={`pointer-events-none fixed inset-0 z-[20] flex items-center justify-center p-4 transition-opacity duration-200 ${
-          snap.splashVisible ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        <div
-          className={`hud-item-splash-inner flex max-w-[calc(100vw-24px)] flex-col items-center gap-1.5 transition-transform duration-200 ${
-            snap.splashVisible ? 'scale-100' : 'scale-90'
-          }`}
-        >
-          {snap.splashVisible && snap.splashItem && (
-            <img
-              key={`item-sticker-${snap.splashKey}`}
-              src={`./assets/item_${snap.splashItem}.webp`}
-              alt={ITEM_DEFS[snap.splashItem].name}
-              loading="eager"
-              decoding="sync"
-              className="h-28 w-28 md:h-32 md:w-32 shrink-0 object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.24)]"
-            />
-          )}
-          <div
-            className="flex flex-wrap items-center justify-center gap-2 rounded-full bg-white/88 px-5 py-2 text-sm sm:text-base md:text-lg font-extrabold text-slate-800 backdrop-blur-sm"
-            style={{
-              border: `2.5px solid ${snap.splashColor}`,
-              boxShadow: `0 12px 32px rgba(0,0,0,0.2), 0 0 0 4px ${snap.splashColor}28`,
-            }}
-          >
-            <CharacterAvatar charKey={snap.splashCharKey} size={28} />
-            {snap.splashItem && <ItemIcon item={snap.splashItem} size={22} />}
-            <span>{snap.splashText}</span>
-          </div>
-        </div>
-      </div>
 
       <div className="pointer-events-none fixed inset-0 z-10">
         {/* Party / Player list + minimal transparent Quest text below */}
@@ -381,7 +472,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <div key={i} className="relative">
                   <button
                     type="button"
-                    onClick={() => setInspectedPid(i)}
+                    onClick={() => { setInspectedPid(i); setQuestExpanded(true); }}
                     title={`点击查看 ${pl.name} 的任务与道具详情`}
                     className={`pointer-events-auto flex w-full items-start gap-1.5 rounded-[11px] px-2 py-1 md:px-2.5 md:py-1.5 text-left transition-all duration-200 cursor-pointer hover:bg-white ${
                       pl.active
@@ -457,6 +548,15 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         ))}
                         <span className="ml-0.5 text-[9px] font-semibold text-slate-400 tabular-nums">
                           {pl.doneCount}/4
+                        </span>
+                      </div>
+                      <div
+                        className="mt-0.5 flex items-center gap-1 text-[9px] font-semibold text-slate-500 tabular-nums leading-tight"
+                        title={`踩人 ${pl.kda?.stomps ?? 0} / 被踩 ${pl.kda?.stomped ?? 0} / 击破护盾 ${pl.kda?.shieldBreaks ?? 0}`}
+                      >
+                        <span className="text-slate-400">KDA</span>
+                        <span>
+                          {pl.kda?.stomps ?? 0}/{pl.kda?.stomped ?? 0}/{pl.kda?.shieldBreaks ?? 0}
                         </span>
                       </div>
 
@@ -555,35 +655,41 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         <span>🎲 一二的馈赠</span>
                         <span className="text-[10px] font-bold text-amber-800">随机卡×1</span>
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2 text-[10px] font-extrabold tabular-nums">
-                        <span
-                          className={
-                            (questPlayer.quest?.roll1 ?? 0) >= 1
-                              ? 'text-emerald-700'
-                              : 'text-slate-700'
-                          }
-                        >
-                          1点 ×{questPlayer.quest?.roll1 ?? 0}
-                        </span>
-                        <span
-                          className={
-                            (questPlayer.quest?.roll2 ?? 0) >= 1
-                              ? 'text-emerald-700'
-                              : 'text-slate-700'
-                          }
-                        >
-                          2点 ×{questPlayer.quest?.roll2 ?? 0}
-                        </span>
+                      <div className="mt-0.5 space-y-0.5 text-[10px] font-bold tabular-nums">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-700">骰子摇出1点</span>
+                          <span
+                            className={
+                              (questPlayer.quest?.roll1 ?? 0) >= 1
+                                ? 'font-extrabold text-emerald-700'
+                                : 'font-extrabold text-slate-700'
+                            }
+                          >
+                            {questPlayer.quest?.roll1 ?? 0}/1
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-700">骰子摇出2点</span>
+                          <span
+                            className={
+                              (questPlayer.quest?.roll2 ?? 0) >= 1
+                                ? 'font-extrabold text-emerald-700'
+                                : 'font-extrabold text-slate-700'
+                            }
+                          >
+                            {questPlayer.quest?.roll2 ?? 0}/1
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-[10px] leading-tight font-semibold text-slate-700">
-                        1点与2点各≥1次，各扣1次兑换
+                      <div className="mt-0.5 text-[10px] leading-tight font-semibold text-slate-700">
+                        同时满足，自动消耗1次兑换奖励
                       </div>
                     </div>
 
                     <div>
                       <div className="flex items-center justify-between text-[11px] font-extrabold">
-                        <span>🛡️ 布布不烦恼</span>
-                        <span className="text-[10px] font-bold text-sky-800">护盾/动力×1</span>
+                        <span>🫧 布布不烦恼</span>
+                        <span className="text-[10px] font-bold text-sky-800">泡泡/奶茶×1</span>
                       </div>
                       <div className="mt-0.5 flex items-center justify-between text-[10px] font-bold">
                         <span className="text-slate-700">被踩累计2次，扣2次兑换</span>
@@ -591,6 +697,32 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           {questPlayer.quest?.stomped ?? 0}/2
                         </span>
                       </div>
+                    </div>
+
+                    <div className="pt-1 border-t border-slate-500/15">
+                      {ITEM_ORDER.some((it) => (questPlayer.items?.[it] ?? 0) > 0) ? (
+                        <div className="flex flex-wrap gap-1">
+                          {ITEM_ORDER.filter((it) => (questPlayer.items?.[it] ?? 0) > 0).map((itemKey) => {
+                            const def = ITEM_DEFS[itemKey];
+                            const cnt = questPlayer.items[itemKey];
+                            return (
+                              <span
+                                key={itemKey}
+                                title={`${def.name} ×${cnt}（${def.shortEffect}）`}
+                                className="inline-flex items-center gap-0.5 rounded-md bg-white/65 px-1.5 py-0.5 text-[10px] font-bold text-slate-800 tabular-nums"
+                              >
+                                <ItemIcon item={itemKey} size={13} />
+                                <span>{def.name}</span>
+                                <span style={{ color: def.accentColor }}>×{cnt}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] font-semibold text-slate-600">
+                          持有道具：暂无
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -626,7 +758,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           ) : (
             <>
           {gmOpen && (
-            <div className="anim-card-pop mb-0.5 flex items-center justify-center gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
+            <div className="anim-card-pop mb-0.5 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
               <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 border border-emerald-400/30">
                 GM 控骰
               </span>
@@ -655,6 +787,64 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   {n}
                 </button>
               ))}
+
+              <span className="mx-0.5 h-4 w-px bg-slate-700" aria-hidden="true" />
+
+              <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-amber-300 border border-amber-400/30">
+                道具
+              </span>
+              {ITEM_ORDER.map((itemKey) => {
+                const def = ITEM_DEFS[itemKey];
+                return (
+                  <button
+                    key={itemKey}
+                    type="button"
+                    onClick={() => onGmGrantItem(itemKey)}
+                    title={`GM 获得 +1「${def.name}」`}
+                    aria-label={`GM 获得 ${def.name}`}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 transition hover:bg-slate-700 hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <ItemIcon item={itemKey} size={18} />
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={onGmClearItems}
+                title="清空当前玩家所有道具"
+                className="rounded-lg border border-rose-400/35 bg-rose-500/20 px-2 py-1 text-[11px] font-bold text-rose-200 transition hover:bg-rose-500/35 hover:text-white active:scale-95 cursor-pointer"
+              >
+                清空
+              </button>
+
+              <span className="mx-0.5 h-4 w-px bg-slate-700" aria-hidden="true" />
+
+              <span className="rounded-md bg-sky-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-sky-300 border border-sky-400/30">
+                天气
+              </span>
+              {(
+                [
+                  ['morning', '🌅', '清晨'],
+                  ['noon', '☀️', '中午'],
+                  ['afternoon', '🌇', '下午'],
+                  ['evening', '🌙', '夜晚'],
+                ] as [TimeOfDay, string, string][]
+              ).map(([tod, icon, label]) => (
+                <button
+                  key={tod}
+                  type="button"
+                  onClick={() => onSetGmTimeOfDay(tod)}
+                  title={`切换天气：${label}`}
+                  className={`rounded-lg px-1.5 py-1 text-[11px] font-bold transition cursor-pointer ${
+                    snap.timeOfDay === tod
+                      ? 'bg-sky-500 text-white shadow-sm'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {icon}
+                </button>
+              ))}
+
               <button
                 type="button"
                 onClick={() => setGmOpen(false)}
@@ -683,111 +873,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           )}
 
 
-
-          {/* 己方道具卡栏 + 已激活增益提示 */}
-          {deckPlayer && (heldItemEntries.length > 0 || snap.armedSixDie || snap.armedTwinDice || snap.armedRefuel) && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-white/90 bg-white/92 px-2.5 py-1.5 shadow-[0_8px_22px_rgba(30,40,55,0.16)] backdrop-blur-md">
-              {snap.armedSixDie && (
-                <span className="rounded-lg bg-orange-100 px-2 py-1 text-[10px] font-extrabold text-orange-800 border border-orange-300">
-                  🎲 6数骰生效中（无连投）
-                </span>
-              )}
-              {snap.armedTwinDice && (
-                <span className="rounded-lg bg-rose-100 px-2 py-1 text-[10px] font-extrabold text-rose-800 border border-rose-300">
-                  ⚙️ 动力装置生效中（双骰）
-                </span>
-              )}
-              {snap.armedRefuel && (
-                <span className="rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-extrabold text-emerald-800 border border-emerald-300">
-                  🍪 再来一口小饼干生效中（+1次投骰）
-                </span>
-              )}
-
-              {heldItemEntries.map((itemKey) => {
-                const def = ITEM_DEFS[itemKey];
-                const count = deckPlayer.items[itemKey];
-                const isDefenseCard = itemKey === 'shield';
-                const blockedByCap = isDefenseCard ? snap.turnUsedDef : snap.turnUsedAtkDef;
-                const canUseNow = snap.phase === 'awaitRoll' && !blockedByCap;
-                const isPickingThis = snap.pendingItemTarget === itemKey;
-                return (
-                  <button
-                    key={itemKey}
-                    type="button"
-                    disabled={!canUseNow}
-                    onClick={() => onUseItem(itemKey)}
-                    title={`${def.name}（${def.categoryLabel}）：${def.desc}`}
-                    className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 ${
-                      isPickingThis
-                        ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-300'
-                        : canUseNow
-                          ? 'border-slate-200 bg-white hover:border-amber-400 hover:bg-amber-50/70 shadow-sm'
-                          : 'border-slate-200 bg-slate-50'
-                    }`}
-                  >
-                    <ItemIcon item={itemKey} size={22} />
-                    <div className="leading-tight">
-                      <div className="flex items-center gap-1 text-[11px] font-extrabold text-slate-800">
-                        <span>{def.name}</span>
-                        <span
-                          className="rounded px-1 text-[9px] font-bold text-white"
-                          style={{ backgroundColor: def.accentColor }}
-                        >
-                          ×{count}
-                        </span>
-                      </div>
-                      <div className="text-[9px] font-medium text-slate-500">
-                        {blockedByCap ? (isDefenseCard ? '下回合再洗香香~' : '已经吃不下啦~') : def.shortEffect}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="flex max-w-full items-center justify-center gap-1.5 md:gap-2">
-            <div
-              className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-2.5 md:px-3.5 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
-              style={{
-                border: `2px solid ${cur.uiColor}`,
-                boxShadow: humanTurn
-                  ? `0 6px 18px rgba(0,0,0,0.16), 0 0 0 3px ${cur.uiColor}2e`
-                  : '0 6px 20px rgba(0,0,0,0.14)',
-              }}
-            >
-              <CharacterAvatar charKey={cur.charKey} size={24} />
-              <span>{cur.name}</span>
-              <span
-                className="rounded-md px-1.5 py-0.5 text-[10px] md:text-[11px] font-extrabold text-white whitespace-nowrap"
-                style={{ backgroundColor: cur.uiColor }}
-              >
-                {isOpponent ? `对手${curOppNum}` : `玩家${curHumanNum}`}
-              </span>
-            </div>
-
-            <div
-              aria-live="polite"
-              className="flex h-9 md:h-10 min-w-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-3 md:px-4 text-[12px] md:text-[14px] font-bold text-slate-800 transition-colors"
-              style={{
-                border: `2px solid ${cur.uiColor}`,
-                boxShadow: '0 6px 20px rgba(0,0,0,0.14)',
-              }}
-            >
-              <span className="truncate text-[12px] md:text-[14px] font-bold text-slate-700">
-                {topPrompt}
-              </span>
-              {snap.pendingItemTarget !== null && (
-                <button
-                  type="button"
-                  onClick={onCancelItemTarget}
-                  className="pointer-events-auto ml-1 shrink-0 rounded-full bg-rose-500 px-2.5 py-0.5 text-[11px] font-extrabold text-white shadow-xs transition-colors hover:bg-rose-600 cursor-pointer"
-                >
-                  ✕ 取消选择
-                </button>
-              )}
-            </div>
-          </div>
 
           <div
             className="flex items-center gap-2.5 md:gap-3 rounded-[20px] bg-white/95 px-3.5 py-2.5 transition-shadow"
@@ -910,6 +995,122 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               ▾
             </button>
           </div>
+
+          {/* 己方道具卡栏 + 已自动选中提示 */}
+          {deckPlayer && (heldItemEntries.length > 0 || (snap.armedRefuel && snap.turnUsedAtkDef)) && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-white/90 bg-white/92 px-2.5 py-1.5 shadow-[0_8px_22px_rgba(30,40,55,0.16)] backdrop-blur-md">
+              {snap.armedRefuel && snap.turnUsedAtkDef && (
+                <span className="inline-flex items-center gap-1 rounded-xl border border-emerald-400 bg-emerald-50 px-2.5 py-1 text-[10px] font-extrabold text-emerald-800 ring-2 ring-emerald-200">
+                  <ItemIcon item="refuel" size={16} />
+                  <span>再来一口小饼干（已自动选中 · 本次投骰生效）</span>
+                </span>
+              )}
+
+              {heldItemEntries.map((itemKey) => {
+                const def = ITEM_DEFS[itemKey];
+                const count = deckPlayer.items[itemKey];
+                const isDefenseCard = itemKey === 'shield';
+                const blockedByCap = isDefenseCard ? snap.turnUsedDef : snap.turnUsedAtkDef;
+                const canUseNow = snap.phase === 'awaitRoll' && !blockedByCap;
+                const isPickingThis = snap.pendingItemTarget === itemKey;
+                const isArmedDiceThis =
+                  !snap.turnUsedAtkDef &&
+                  ((itemKey === 'sixDie' && snap.armedSixDie) ||
+                    (itemKey === 'twinDice' && snap.armedTwinDice) ||
+                    (itemKey === 'refuel' && snap.armedRefuel));
+                return (
+                  <button
+                    key={itemKey}
+                    type="button"
+                    disabled={!canUseNow}
+                    onClick={() => onUseItem(itemKey)}
+                    title={`${def.name}（${def.categoryLabel}）：${def.desc}`}
+                    className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-left transition cursor-pointer disabled:cursor-not-allowed disabled:opacity-45 ${
+                      isPickingThis
+                        ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-300'
+                        : isArmedDiceThis
+                          ? 'border-amber-500 bg-amber-50 ring-2 ring-amber-300/80 shadow-sm'
+                          : canUseNow
+                            ? 'border-slate-200 bg-white hover:border-amber-400 hover:bg-amber-50/70 shadow-sm'
+                            : 'border-slate-200 bg-slate-50'
+                    }`}
+                  >
+                    <ItemIcon item={itemKey} size={22} />
+                    <div className="leading-tight">
+                      <div className="flex items-center gap-1 text-[11px] font-extrabold text-slate-800">
+                        <span>{def.name}</span>
+                        <span
+                          className="rounded px-1 text-[9px] font-bold text-white"
+                          style={{ backgroundColor: def.accentColor }}
+                        >
+                          ×{count}
+                        </span>
+                        {isArmedDiceThis && (
+                          <span className="rounded bg-amber-500 px-1 text-[9px] font-extrabold text-white">
+                            已选
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[9px] font-medium text-slate-500">
+                        {isArmedDiceThis
+                          ? '投骰时使用 · 再点取消'
+                          : blockedByCap
+                            ? isDefenseCard
+                              ? '下回合再洗香香~'
+                              : '已经吃不下啦~'
+                            : def.shortEffect}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+
+          <div className="flex max-w-full items-center justify-center gap-1.5 md:gap-2">
+            <div
+              className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-2.5 md:px-3.5 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
+              style={{
+                border: `2px solid ${cur.uiColor}`,
+                boxShadow: humanTurn
+                  ? `0 6px 18px rgba(0,0,0,0.16), 0 0 0 3px ${cur.uiColor}2e`
+                  : '0 6px 20px rgba(0,0,0,0.14)',
+              }}
+            >
+              <CharacterAvatar charKey={cur.charKey} size={24} />
+              <span>{cur.name}</span>
+              <span
+                className="rounded-md px-1.5 py-0.5 text-[10px] md:text-[11px] font-extrabold text-white whitespace-nowrap"
+                style={{ backgroundColor: cur.uiColor }}
+              >
+                {isOpponent ? `对手${curOppNum}` : `玩家${curHumanNum}`}
+              </span>
+            </div>
+
+            <div
+              aria-live="polite"
+              className="flex h-9 md:h-10 min-w-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-3 md:px-4 text-[12px] md:text-[14px] font-bold text-slate-800 transition-colors"
+              style={{
+                border: `2px solid ${cur.uiColor}`,
+                boxShadow: '0 6px 20px rgba(0,0,0,0.14)',
+              }}
+            >
+              <span className="truncate text-[12px] md:text-[14px] font-bold text-slate-700">
+                {topPrompt}
+              </span>
+              {snap.pendingItemTarget !== null && (
+                <button
+                  type="button"
+                  onClick={onCancelItemTarget}
+                  className="pointer-events-auto ml-1 shrink-0 rounded-full bg-rose-500 px-2.5 py-0.5 text-[11px] font-extrabold text-white shadow-xs transition-colors hover:bg-rose-600 cursor-pointer"
+                >
+                  ✕ 取消选择
+                </button>
+              )}
+            </div>
+          </div>
+
             </>
           )}
         </div>
@@ -921,21 +1122,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           role="group"
           aria-label="天色、视角、规则、声音与设置"
         >
-          <span
-            title="当前对局天色（随最高完赛棋子数推进）"
-            className="flex h-8 items-center gap-1 rounded-full px-2 text-[11px] md:text-xs font-bold text-slate-600 whitespace-nowrap select-none"
-          >
-            <span>
-              {snap.timeOfDay === 'morning'
-                ? '🌅 清晨'
-                : snap.timeOfDay === 'noon'
-                  ? '☀️ 中午'
-                  : snap.timeOfDay === 'afternoon'
-                    ? '🌤️ 下午'
-                    : '🌇 傍晚'}
-            </span>
-          </span>
-          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+
           {/* 视角下拉按钮 */}
           <div className="relative">
             <button
@@ -1010,19 +1197,19 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
           <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
 
-          {/* 声音按钮 */}
+          {/* 声音按钮（仅保留图标） */}
           <button
             type="button"
             onClick={onToggleMute}
             title={muted ? '开启全局音效' : '关闭全局音效'}
             aria-label={muted ? '开启音效' : '静音'}
-            className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
+            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors cursor-pointer ${
               muted
                 ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
                 : 'text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span>{muted ? '🔇 静音' : '🔊 音效'}</span>
+            <span>{muted ? '🔇' : '🔊'}</span>
           </button>
 
           <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
@@ -1178,8 +1365,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <span className="shrink-0 font-semibold text-slate-800">航线飞 +12</span>
                       <span>
                         落在带 <b className="text-slate-900">✈</b> 标记的己色斜角格，沿虚线直飞对岸{' '}
-                        <b className="text-slate-900">12 格</b>，并击落航线穿过的对家终点前第 4
-                        格敌机（直飞后仍可顺风连跳）。
+                        <b className="text-slate-900">12 格</b>，并击落航线穿过的对家终点通道第 4 格（终点前第 2 格）敌机（直飞后仍可顺风连跳）。
                       </span>
                     </li>
                     <li className="flex gap-2.5">
@@ -1232,13 +1418,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <span className="shrink-0 font-semibold text-slate-800">获取途径</span>
                       <span>
                         踩中棋盘上的 <b className="text-amber-700">🍰 草莓蛋糕商店格</b> 可在 15 秒内从 3
-                        张不重复随机道具卡中挑选 1 张；完成左侧悬赏任务（<b>一二的馈赠</b>：1点与2点同时≥1次奖随机卡；<b>布布不烦恼</b>：累计被踩2次随机奖护盾或动力装置）也可获得。
+                        张不重复随机道具卡中挑选 1 张；完成左侧悬赏任务（<b>一二的馈赠</b>：1点与2点同时≥1次奖随机卡；<b>布布不烦恼</b>：累计被踩2次随机奖软绵绵泡泡罩或双倍珍珠奶茶）也可获得。
                       </span>
                     </li>
                     <li className="flex gap-2.5">
                       <span className="shrink-0 font-semibold text-slate-800">使用限制</span>
                       <span>
-                        在回合内投骰前使用。单回合（含奖励连投）最多使用 <b className="text-slate-900">1 张攻击或防护类道具</b>（导弹与 6数骰、动力装置、空中加油机同属攻击类道具）。
+                        在回合内投骰前使用。单回合（含奖励连投）最多使用 <b className="text-slate-900">1 张进攻/加速道具 + 1 张软绵绵泡泡罩</b>（奶油派炸弹与幸运草莓蛋糕、双倍珍珠奶茶、再来一口小饼干共用每回合 1 次上限）。
                       </span>
                     </li>
                   </ul>
@@ -1329,13 +1515,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       onClick={() => onPickShopItem(itemKey)}
                       className="group relative flex flex-col items-center rounded-[24px] border-2 border-white/85 bg-white/65 px-2.5 py-4 text-center backdrop-blur-sm transition-all duration-200 hover:-translate-y-1.5 hover:scale-[1.03] hover:bg-white/92 hover:shadow-xl active:scale-95 cursor-pointer"
                     >
-                      <span
-                        className="absolute right-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-extrabold text-white shadow-xs"
-                        style={{ backgroundColor: def.accentColor }}
-                      >
-                        {def.category === 'defense' ? '防御' : '攻击'}
-                      </span>
-
                       <div
                         className="mt-2 flex h-16 w-16 items-center justify-center rounded-full transition-transform duration-200 group-hover:scale-110"
                         style={{ backgroundColor: `${def.accentColor}1c` }}

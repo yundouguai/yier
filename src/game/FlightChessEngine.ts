@@ -19,6 +19,7 @@ import {
   CameraMode,
   FLIGHT_FROM,
   FLIGHT_STEP,
+  GIFT_QUEST_ITEM_WEIGHTS,
   GiftQuestEvent,
   GameHudSnapshot,
   GamePhase,
@@ -34,10 +35,13 @@ import {
   MapId,
   ORIENT,
   PlayerConfig,
+  PlayerKdaStats,
   PlayerQuestState,
+  ProgressStage,
   Point2D,
   RING,
   SEAT_ORDER,
+  SHOP_ITEM_WEIGHTS,
   SLOTS,
   SeatConfig,
   TimeOfDay,
@@ -194,6 +198,7 @@ export class FlightChessEngine {
   private camGoalSpherical = new THREE.Spherical(16.4, 0.96, 0.18);
   private camFollowPlane: PlaneData | null = null;
   private camFollowObj: THREE.Object3D | null = null;
+  private camFollowCloseup = false;
   private camUserInteracting = false;
   private winnerPid: number | null = null;
   private finishedOrder: number[] = [];
@@ -204,11 +209,13 @@ export class FlightChessEngine {
   private shopRingSet = new Set<number>();
   private playerItems: Record<ItemType, number>[] = [];
   private playerQuests: PlayerQuestState[] = [];
+  private playerKda: PlayerKdaStats[] = [];
   private turnUsedAtkDef = false;
   private turnUsedDef = false;
   private armedSixDie = false;
   private armedTwinDice = false;
   private armedRefuel = false;
+  private refuelCarriedOver = false;
   private pendingExtraRoll = false;
   private suppressSixBonusThisRoll = false;
   private pendingItemTarget: 'shield' | 'missile' | null = null;
@@ -244,6 +251,11 @@ export class FlightChessEngine {
   private splashVisible = false;
   private splashItem: ItemType | null = null;
   private splashKey = 0;
+  private splashIsHuman = true;
+  private splashActorName: string | null = null;
+  private splashDetail: string | null = null;
+  private splashTargetCharKey: CharKey | null = null;
+  private splashTargetName: string | null = null;
   private splashTimer: number | null = null;
   private splashRaf = 0;
   private shakeKey = 0;
@@ -372,7 +384,7 @@ export class FlightChessEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.04;
+    this.renderer.toneMappingExposure = this.mapConfig.timePresets.morning.exposure;
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type =
       this.quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
@@ -395,7 +407,7 @@ export class FlightChessEngine {
     const roomEnv = new RoomEnvironment();
     this.envRT = pmremGenerator.fromScene(roomEnv, 0.04);
     this.scene.environment = this.envRT.texture;
-    this.scene.environmentIntensity = 0.38;
+    this.scene.environmentIntensity = initTod.envIntensity;
     roomEnv.dispose();
     pmremGenerator.dispose();
 
@@ -462,9 +474,7 @@ export class FlightChessEngine {
 
     // World & Pieces
     this.world = buildWorldByMapId(this.mapId, this.scene, this.players, this.anisotropy);
-    this.world.lanternMats?.forEach((m) => {
-      m.emissiveIntensity = initTod.lanternEmissive;
-    });
+    this.applyTimeOfDayLerp(1);
     this.shopRingSet = new Set(this.world.shopRingIndices);
     this.playerItems = this.players.map(() => ({
       sixDie: 0,
@@ -477,6 +487,11 @@ export class FlightChessEngine {
       roll1: 0,
       roll2: 0,
       stomped: 0,
+    }));
+    this.playerKda = this.players.map(() => ({
+      stomps: 0,
+      stomped: 0,
+      shieldBreaks: 0,
     }));
     this.diceRig = buildDiceRig(this.scene, this.anisotropy);
     this.pickHints = buildPickHints(this.scene, this.anisotropy);
@@ -719,6 +734,7 @@ export class FlightChessEngine {
       this.camGoalActive = false;
       this.camFollowPlane = null;
       this.camFollowObj = null;
+      this.camFollowCloseup = false;
     };
     this.boundControlsEnd = () => {
       this.camUserInteracting = false;
@@ -764,8 +780,9 @@ export class FlightChessEngine {
     const portrait = window.innerHeight > window.innerWidth;
     this.camera.fov = portrait ? 54 : 47;
     if (this.scene.fog instanceof THREE.Fog) {
-      this.scene.fog.near = portrait ? 52 : 48;
-      this.scene.fog.far = portrait ? 116 : 108;
+      const curTod = this.mapConfig.timePresets[this.timeOfDay];
+      this.scene.fog.near = curTod.fogNear + (portrait ? 4 : 0);
+      this.scene.fog.far = curTod.fogFar + (portrait ? 8 : 0);
     }
     this.camera.updateProjectionMatrix();
   }
@@ -893,6 +910,11 @@ export class FlightChessEngine {
     this.splashText = isBonus ? `再掷一次！${P.name}` : `轮到你啦！${P.name}`;
     this.splashColor = P.uiColor;
     this.splashItem = null;
+    this.splashActorName = null;
+    this.splashDetail = null;
+    this.splashTargetCharKey = null;
+    this.splashTargetName = null;
+    this.splashIsHuman = P.type === 'human';
     this.splashVisible = true;
     this.emitSnapshot();
     cancelAnimationFrame(this.splashRaf);
@@ -918,6 +940,11 @@ export class FlightChessEngine {
     this.splashText = `🏪 ${P.name} 购买了「${def.name}」· ${def.shortEffect}`;
     this.splashColor = def.accentColor;
     this.splashItem = null;
+    this.splashActorName = null;
+    this.splashDetail = null;
+    this.splashTargetCharKey = null;
+    this.splashTargetName = null;
+    this.splashIsHuman = P.type === 'human';
     this.splashVisible = true;
     this.emitSnapshot();
     cancelAnimationFrame(this.splashRaf);
@@ -938,14 +965,20 @@ export class FlightChessEngine {
     item: ItemType,
     detail?: string,
     durationMs = 3600,
+    targetPlayer?: PlayerConfig,
   ): void {
     const def = ITEM_DEFS[item];
     this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
     this.splashCharKey = P.key;
-    this.splashText = item === 'shield' ? '🫧 香布布~香布布~浑身香香的布布~' : `${def.icon} ${P.name} 使用「${def.name}」· ${detail ?? def.shortEffect}`;
+    this.splashActorName = P.name;
+    this.splashDetail = detail ?? def.shortEffect;
+    this.splashTargetCharKey = targetPlayer ? targetPlayer.key : null;
+    this.splashTargetName = targetPlayer ? targetPlayer.name : null;
+    this.splashText = item === 'shield' ? '香布布~香布布~浑身香香的布布~' : `${P.name} 使用「${def.name}」· ${detail ?? def.shortEffect}`;
     this.splashColor = def.accentColor;
     this.splashItem = item;
     this.splashKey++;
+    this.splashIsHuman = P.type === 'human';
     this.splashVisible = true;
     this.emitSnapshot();
     cancelAnimationFrame(this.splashRaf);
@@ -956,6 +989,10 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.splashVisible = false;
         this.splashItem = null;
+        this.splashActorName = null;
+        this.splashDetail = null;
+        this.splashTargetCharKey = null;
+        this.splashTargetName = null;
         this.emitSnapshot();
       }, durationMs);
     });
@@ -1042,6 +1079,11 @@ export class FlightChessEngine {
       splashVisible: this.splashVisible,
       splashItem: this.splashItem,
       splashKey: this.splashKey,
+      splashIsHuman: this.splashIsHuman,
+      splashActorName: this.splashActorName,
+      splashDetail: this.splashDetail,
+      splashTargetCharKey: this.splashTargetCharKey,
+      splashTargetName: this.splashTargetName,
       shakeKey: this.shakeKey,
       winnerPid: this.winnerPid,
       rankings: this.getRankings(),
@@ -1082,6 +1124,7 @@ export class FlightChessEngine {
           active: this.turn === i && this.phase !== 'over' && P !== undefined,
           items: { ...this.playerItems[i] },
           quest: { ...this.playerQuests[i] },
+          kda: { ...this.playerKda[i] },
         };
       }),
     });
@@ -1179,13 +1222,45 @@ export class FlightChessEngine {
     });
   }
 
-  private pickUniqueShopOffer(): ItemType[] {
-    const pool = [...ITEM_ORDER];
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+  private getProgressStage(): ProgressStage {
+    const maxDone = Math.max(
+      0,
+      ...this.players.map((_, pid) => this.planesOf(pid).filter((p) => p.pos === HOME_END).length),
+    );
+    return Math.min(3, maxDone) as ProgressStage;
+  }
+
+  private pickWeightedItem(
+    weights: Record<ItemType, number>,
+    exclude?: Set<ItemType>,
+  ): ItemType {
+    const candidates = ITEM_ORDER.filter(
+      (it) => (!exclude || !exclude.has(it)) && (weights[it] ?? 0) > 0,
+    );
+    if (candidates.length === 0) {
+      const fallback = ITEM_ORDER.filter((it) => !exclude || !exclude.has(it));
+      return fallback[0] ?? ITEM_ORDER[0];
     }
-    return pool.slice(0, 3);
+    const total = candidates.reduce((acc, it) => acc + weights[it], 0);
+    let r = Math.random() * total;
+    for (const it of candidates) {
+      r -= weights[it];
+      if (r <= 0) return it;
+    }
+    return candidates[candidates.length - 1];
+  }
+
+  private pickUniqueShopOffer(): ItemType[] {
+    const stage = this.getProgressStage();
+    const weights = SHOP_ITEM_WEIGHTS[stage];
+    const picked = new Set<ItemType>();
+    const offer: ItemType[] = [];
+    for (let i = 0; i < 3; i++) {
+      const next = this.pickWeightedItem(weights, picked);
+      picked.add(next);
+      offer.push(next);
+    }
+    return offer;
   }
 
   private grantItem(pid: number, item: ItemType): void {
@@ -1196,7 +1271,8 @@ export class FlightChessEngine {
   }
 
   private grantRandomItem(pid: number): ItemType {
-    const item = ITEM_ORDER[Math.floor(Math.random() * ITEM_ORDER.length)];
+    const stage = this.getProgressStage();
+    const item = this.pickWeightedItem(GIFT_QUEST_ITEM_WEIGHTS[stage]);
     this.grantItem(pid, item);
     return item;
   }
@@ -1230,6 +1306,7 @@ export class FlightChessEngine {
       this.setMsg(`🎯 ${pl.name} 完成「一二的馈赠」，获得 ${def.icon} ${def.name}！`, pl.uiColor);
       this.giftQuestEvent = {
         questType: 'gift',
+        isLocalHuman: pl.type === 'human',
         playerName: pl.name,
         playerCharKey: pl.key,
         playerColor: pl.uiColor,
@@ -1260,6 +1337,7 @@ export class FlightChessEngine {
       this.setMsg(`${def.icon} ${pl.name} 触发「布布不烦恼」，任务奖励：${def.name} ×1！`, pl.uiColor);
       this.giftQuestEvent = {
         questType: 'bubu',
+        isLocalHuman: pl.type === 'human',
         playerName: pl.name,
         playerCharKey: pl.key,
         playerColor: pl.uiColor,
@@ -1523,7 +1601,7 @@ export class FlightChessEngine {
           '😈 君子报仇，十步不晚！',
         ],
         fireMissile: [
-          `🥧 ${targetName ?? ''}，接我一记恶作剧奶油派！`,
+          `🥧 ${targetName ?? ''}，接我一记奶油派炸弹！`,
           '💢 新仇旧恨一起算！',
         ],
         useSpeedItem: ['🔥 全速追上去算账！', '😠 别想跑太远！'],
@@ -1713,7 +1791,7 @@ export class FlightChessEngine {
     return prio.find((it) => offer.includes(it)) ?? offer[0];
   }
 
-  /** 给被恶作剧奶油派命中的小熊头顶糊上 3D 蓬松奶油与小樱桃，持续 durationMs 后自然消散 */
+  /** 给被奶油派炸弹命中的小熊头顶糊上 3D 蓬松奶油与小樱桃，持续 durationMs 后自然消散 */
   private attachCreamSplat(plane: PlaneData, durationMs = 3000): void {
     const pt = plane.mesh.userData.parts as PlaneParts | undefined;
     if (!pt) return;
@@ -1832,12 +1910,22 @@ export class FlightChessEngine {
     rocket.position.copy(startVec);
     this.scene.add(rocket);
 
-    this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了恶作剧奶油派！`, P.uiColor);
-    this.showItemSplash(P, 'missile', `锁定 ${T.name}！`, 3600);
+    // 自动跟随视角下特写锁定被炸小熊并全程跟随
+    if (this.camMode === 'follow' && !this.camUserInteracting) {
+      this.camFollowPlane = target;
+      this.camFollowObj = target.mesh;
+      this.camFollowCloseup = true;
+    }
+
+    this.setMsg(`🚀 ${P.name} 向 ${T.name} 发射了奶油派炸弹！`, P.uiColor);
+    this.showItemSplash(P, 'missile', '锁定', 3600, T);
     await this.sleep(1000);
     if (this.disposed) {
       this.scene.remove(rocket);
       this.disposeObject3D(rocket);
+      this.camFollowPlane = null;
+      this.camFollowObj = null;
+      this.camFollowCloseup = false;
       this.itemBusy = false;
       return;
     }
@@ -1877,6 +1965,9 @@ export class FlightChessEngine {
       }
     });
     if (this.disposed) {
+      this.camFollowPlane = null;
+      this.camFollowObj = null;
+      this.camFollowCloseup = false;
       this.itemBusy = false;
       return;
     }
@@ -1884,11 +1975,12 @@ export class FlightChessEngine {
     const shieldedCarrier = targetStack.find((p) => p.shielded);
     if (shieldedCarrier) {
       shieldedCarrier.shielded = false;
+      if (this.playerKda[attackerPid]) this.playerKda[attackerPid].shieldBreaks += 1;
       this.syncShieldVisuals();
       this.spawnShieldBreak(tc[0], tc[1]);
       this.triggerShake();
       beep(640, 0.16, 'triangle', 0.15);
-      this.setMsg(`🛡️ ${T.name} 的护盾成功抵挡了导弹攻击！`, T.uiColor);
+      this.setMsg(`🫧 ${T.name} 的软绵绵泡泡罩成功抵挡了奶油派炸弹！`, T.uiColor);
       this.recordOffense(target.pid, attackerPid, 0.4);
       if (T.type === 'ai') {
         this.emitAiEmote(target.pid, 'gotMissiled', 1800, P.name, {
@@ -1978,6 +2070,17 @@ export class FlightChessEngine {
 
     this.relayout();
     this.syncShieldVisuals();
+    if (this.camFollowPlane === target && this.camFollowCloseup) {
+      await this.sleep(650);
+      if (this.camFollowPlane === target) {
+        this.camFollowPlane = null;
+        this.camFollowObj = null;
+        this.camFollowCloseup = false;
+        if (!this.disposed && this.camMode === 'follow' && !this.camUserInteracting) {
+          this.focusTurn();
+        }
+      }
+    }
     this.itemBusy = false;
     this.emitSnapshot();
   }
@@ -2441,52 +2544,33 @@ export class FlightChessEngine {
 
     ensureAudio();
 
-    if (type === 'sixDie') {
-      if (this.armedSixDie) return;
-      inv.sixDie -= 1;
-      this.armedSixDie = true;
-      this.turnUsedAtkDef = true;
+    if (type === 'sixDie' || type === 'twinDice' || type === 'refuel') {
+      const alreadySelected =
+        (type === 'sixDie' && this.armedSixDie) ||
+        (type === 'twinDice' && this.armedTwinDice) ||
+        (type === 'refuel' && this.armedRefuel && !this.refuelCarriedOver);
+      this.armedSixDie = false;
+      this.armedTwinDice = false;
+      if (!this.refuelCarriedOver) this.armedRefuel = false;
       this.pendingItemTarget = null;
       this.targetChoices = [];
       this.clearHL();
-      beep(660, 0.1, 'triangle', 0.14);
-      this.setMsg('🎲 已激活「幸运草莓蛋糕」，下次掷骰必出 6 点（无连投）！');
-      this.showItemSplash(this.cur(), 'sixDie');
-      this.emitSnapshot();
-      return;
-    }
-
-    if (type === 'twinDice') {
-      if (this.armedTwinDice) return;
-      inv.twinDice -= 1;
-      this.armedTwinDice = true;
-      this.turnUsedAtkDef = true;
-      this.pendingItemTarget = null;
-      this.targetChoices = [];
-      this.clearHL();
-      beep(620, 0.1, 'triangle', 0.14);
-      this.setMsg('⚙️ 已激活「双倍珍珠奶茶」，下次同时掷两颗骰子！');
-      this.showItemSplash(this.cur(), 'twinDice');
-      this.emitSnapshot();
-      return;
-    }
-
-    if (type === 'refuel') {
-      if (this.armedRefuel) return;
-      inv.refuel -= 1;
-      this.armedRefuel = true;
-      this.turnUsedAtkDef = true;
-      this.pendingItemTarget = null;
-      this.targetChoices = [];
-      this.clearHL();
-      beep(700, 0.1, 'triangle', 0.14);
-      this.setMsg('⛽ 已激活「再来一口小饼干」，本次移动后将多一次投骰！');
-      this.showItemSplash(this.cur(), 'refuel');
+      if (!alreadySelected) {
+        if (type === 'sixDie') this.armedSixDie = true;
+        if (type === 'twinDice') this.armedTwinDice = true;
+        if (type === 'refuel') this.armedRefuel = true;
+      }
+      beep(alreadySelected ? 480 : 660, 0.08, 'triangle', 0.11);
       this.emitSnapshot();
       return;
     }
 
     if (type === 'shield' || type === 'missile') {
+      if (type === 'missile') {
+        this.armedSixDie = false;
+        this.armedTwinDice = false;
+        if (!this.refuelCarriedOver) this.armedRefuel = false;
+      }
       if (this.pendingItemTarget === type) {
         this.cancelItemTarget();
         return;
@@ -2509,7 +2593,7 @@ export class FlightChessEngine {
       this.setMsg(
         type === 'shield'
           ? '🫧 请点选场上己方小熊套上软绵绵泡泡罩'
-          : '🥧 请点选场上敌方小熊丢出恶作剧奶油派',
+          : '🥧 请点选场上敌方小熊丢出奶油派炸弹',
       );
       this.emitSnapshot();
     }
@@ -2606,6 +2690,53 @@ export class FlightChessEngine {
     }
   }
 
+  private resolveGmTargetPid(pid?: number): number {
+    if (pid !== undefined && this.players[pid]) return pid;
+    if (this.players[this.turn]?.type === 'human') return this.turn;
+    const firstHuman = this.players.findIndex((p) => p.type === 'human');
+    return firstHuman >= 0 ? firstHuman : this.turn;
+  }
+
+  public gmGrantItem(type: ItemType, pid?: number): void {
+    if (this.disposed) return;
+    const targetPid = this.resolveGmTargetPid(pid);
+    const inv = this.playerItems[targetPid];
+    if (!inv) return;
+    inv[type] = (inv[type] ?? 0) + 1;
+    ensureAudio();
+    beep(740, 0.07, 'triangle', 0.1);
+    this.emitSnapshot();
+  }
+
+  public gmClearItems(pid?: number): void {
+    if (this.disposed) return;
+    const targetPid = this.resolveGmTargetPid(pid);
+    const inv = this.playerItems[targetPid];
+    if (!inv) return;
+    for (const k of ITEM_ORDER) {
+      inv[k] = 0;
+    }
+    if (targetPid === this.turn) {
+      this.armedSixDie = false;
+      this.armedTwinDice = false;
+      if (!this.refuelCarriedOver) this.armedRefuel = false;
+      if (this.pendingItemTarget !== null) this.cancelItemTarget();
+    }
+    ensureAudio();
+    beep(420, 0.08, 'triangle', 0.1);
+    this.emitSnapshot();
+  }
+
+  public setGmTimeOfDay(tod: TimeOfDay): void {
+    if (this.disposed) return;
+    if (this.timeOfDay === tod && this.todBlend >= 1) return;
+    this.todFrom = this.mapConfig.timePresets[this.timeOfDay];
+    this.todTo = this.mapConfig.timePresets[tod];
+    this.timeOfDay = tod;
+    this.todBlend = 0;
+    this.emitSnapshot();
+  }
+
   public setQuality(q: GraphicsQuality): void {
     this.quality = q;
     if (this.disposed || this.isSoftwareGl) return;
@@ -2631,6 +2762,7 @@ export class FlightChessEngine {
     if (mode !== 'follow') {
       this.camFollowPlane = null;
       this.camFollowObj = null;
+      this.camFollowCloseup = false;
     }
     if (mode === 'free') {
       this.camGoalActive = false;
@@ -3214,12 +3346,44 @@ export class FlightChessEngine {
     }
     this.clearHL();
 
-    const usedSixDie = this.armedSixDie;
-    const usedTwinDice = this.armedTwinDice;
-    const usedRefuel = this.armedRefuel;
+    let usedSixDie = this.armedSixDie;
+    let usedTwinDice = this.armedTwinDice;
+    let usedRefuel = this.armedRefuel;
+    const carriedRefuel = this.refuelCarriedOver;
     this.armedSixDie = false;
     this.armedTwinDice = false;
     this.armedRefuel = false;
+    this.refuelCarriedOver = false;
+
+    if (!this.isAI()) {
+      const inv = this.playerItems[this.turn];
+      if (usedSixDie) {
+        if (inv && inv.sixDie > 0) {
+          inv.sixDie -= 1;
+          this.turnUsedAtkDef = true;
+          this.showItemSplash(this.cur(), 'sixDie');
+        } else {
+          usedSixDie = false;
+        }
+      } else if (usedTwinDice) {
+        if (inv && inv.twinDice > 0) {
+          inv.twinDice -= 1;
+          this.turnUsedAtkDef = true;
+          this.showItemSplash(this.cur(), 'twinDice');
+        } else {
+          usedTwinDice = false;
+        }
+      } else if (usedRefuel && !carriedRefuel) {
+        if (inv && inv.refuel > 0) {
+          inv.refuel -= 1;
+          this.turnUsedAtkDef = true;
+          this.showItemSplash(this.cur(), 'refuel');
+        } else {
+          usedRefuel = false;
+        }
+      }
+    }
+
     this.pendingExtraRoll = this.pendingExtraRoll || usedRefuel;
     this.suppressSixBonusThisRoll = usedSixDie || usedTwinDice;
     this.twinDice = null;
@@ -3866,6 +4030,7 @@ export class FlightChessEngine {
       const shieldedUnit = grp.find((v) => v.shielded);
       if (shieldedUnit) {
         shieldedUnit.shielded = false;
+        if (this.playerKda[plane.pid]) this.playerKda[plane.pid].shieldBreaks += 1;
         this.syncShieldVisuals();
         defendedPids.push(vPid);
         this.spawnShieldBreak(c[0], c[1]);
@@ -3880,6 +4045,8 @@ export class FlightChessEngine {
         }
       } else {
         toSendHome.push(...grp);
+        if (this.playerKda[plane.pid]) this.playerKda[plane.pid].stomps += grp.length;
+        if (this.playerKda[vPid]) this.playerKda[vPid].stomped += grp.length;
         this.recordStompQuest(vPid, 1);
         this.recordOffense(vPid, plane.pid, 1.0);
         if (this.players[plane.pid].type === 'ai') {
@@ -3947,6 +4114,7 @@ export class FlightChessEngine {
     const shieldedUnit = victims.find((v) => v.shielded);
     if (shieldedUnit) {
       shieldedUnit.shielded = false;
+      if (this.playerKda[flyingPid]) this.playerKda[flyingPid].shieldBreaks += 1;
       this.syncShieldVisuals();
       this.spawnShieldBreak(c[0], c[1]);
       this.triggerShake();
@@ -3963,6 +4131,8 @@ export class FlightChessEngine {
       return;
     }
 
+    if (this.playerKda[flyingPid]) this.playerKda[flyingPid].stomps += victims.length;
+    if (this.playerKda[oppPid]) this.playerKda[oppPid].stomped += victims.length;
     sndCap();
     this.setMsg(`💥 飞越航线，击落 ${oppPlayer.name} 航道敌机！`);
     this.spawnImpact(c[0], c[1]);
@@ -4006,6 +4176,7 @@ export class FlightChessEngine {
     this.clearHL();
     this.camFollowPlane = plane;
     this.camFollowObj = plane.mesh;
+    this.camFollowCloseup = false;
     this.emitSnapshot();
 
     const P = this.players[plane.pid];
@@ -4252,6 +4423,7 @@ export class FlightChessEngine {
         }
         this.camFollowPlane = null;
         this.camFollowObj = null;
+        this.camFollowCloseup = false;
         this.endTurn(willRollAgainAfter);
       };
 
@@ -4318,6 +4490,7 @@ export class FlightChessEngine {
       if (rank >= finishLimit) {
         this.camFollowPlane = null;
         this.camFollowObj = null;
+        this.camFollowCloseup = false;
         this.showWin(this.finishedOrder[0]);
         return;
       }
@@ -4329,6 +4502,7 @@ export class FlightChessEngine {
       if (this.disposed) return;
       this.camFollowPlane = null;
       this.camFollowObj = null;
+      this.camFollowCloseup = false;
       this.endTurn(false);
       return;
     }
@@ -4350,6 +4524,7 @@ export class FlightChessEngine {
     }
     this.camFollowPlane = null;
     this.camFollowObj = null;
+    this.camFollowCloseup = false;
 
     // 踩中商店格子：15 秒内从 3 张不重复随机道具卡中选择 1 张
     if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
@@ -4386,6 +4561,11 @@ export class FlightChessEngine {
   private endTurn(again: boolean): void {
     if (this.phase === 'over' || this.disposed) return;
     if (again) {
+      if (this.pendingExtraRoll) {
+        // 本次掷出 6 触发免费连投导致再来一口小饼干尚未消耗，下次投骰默认自动选中
+        this.armedRefuel = true;
+        this.refuelCarriedOver = true;
+      }
       this.setMsg('🎲 奖励再掷一次！');
       this.beginRollPhase(true);
       return;
@@ -4404,6 +4584,7 @@ export class FlightChessEngine {
     this.armedSixDie = false;
     this.armedTwinDice = false;
     this.armedRefuel = false;
+    this.refuelCarriedOver = false;
     this.pendingExtraRoll = false;
     this.suppressSixBonusThisRoll = false;
     this.pendingItemTarget = null;
@@ -4429,14 +4610,63 @@ export class FlightChessEngine {
       const home = this.getHomeCameraPose();
       _scratchCamOffset.copy(this.camera.position).sub(this.controls.target);
       _scratchCamSpherical.setFromVector3(_scratchCamOffset);
-      this.setCamGoal(
-        home.tx * 0.55 + P.court[0] * 0.45,
-        home.ty,
-        home.tz * 0.55 + P.court[1] * 0.45,
-        home.radius * 0.78,
-        home.phi,
-        _scratchCamSpherical.theta,
-      );
+      const theta = _scratchCamSpherical.theta;
+      const myBears = this.planesOf(this.turn).filter((p) => p.pos < HOME_END);
+      const onBoardCount = myBears.filter((p) => p.pos >= 0).length;
+
+      if (myBears.length >= 2 && onBoardCount >= 1) {
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        for (const b of myBears) {
+          const bx = b.mesh.position.x;
+          const bz = b.mesh.position.z;
+          if (bx < minX) minX = bx;
+          if (bx > maxX) maxX = bx;
+          if (bz < minZ) minZ = bz;
+          if (bz > maxZ) maxZ = bz;
+        }
+        const cx = (minX + maxX) * 0.5;
+        const cz = (minZ + maxZ) * 0.5;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        let maxRight = 0;
+        let maxFwd = 0;
+        for (const b of myBears) {
+          const dx = b.mesh.position.x - cx;
+          const dz = b.mesh.position.z - cz;
+          const rProj = Math.abs(dx * cosT - dz * sinT);
+          const fProj = Math.abs(dx * sinT + dz * cosT);
+          if (rProj > maxRight) maxRight = rProj;
+          if (fProj > maxFwd) maxFwd = fProj;
+        }
+        const halfW = maxRight + 1.8;
+        const halfD = maxFwd + 2.0;
+        const vFov = THREE.MathUtils.degToRad(this.camera.fov);
+        const aspect = Math.max(0.5, (window.innerWidth || 1280) / (window.innerHeight || 720));
+        const hFov = 2 * Math.atan(Math.tan(vFov * 0.5) * aspect);
+        const basePhi = home.phi;
+        const rH = halfW / Math.tan(hFov * 0.5);
+        const rV = (halfD * Math.cos(basePhi)) / Math.tan(vFov * 0.5) + halfD * Math.sin(basePhi);
+        const targetRadius = THREE.MathUtils.clamp(
+          Math.max(rH, rV) * 1.18,
+          home.radius * 0.82,
+          24.5,
+        );
+        const spreadT = THREE.MathUtils.clamp((targetRadius - home.radius * 0.85) / 10, 0, 1);
+        const targetPhi = THREE.MathUtils.lerp(home.phi, 0.72, spreadT);
+        this.setCamGoal(cx, home.ty, cz, targetRadius, targetPhi, theta);
+      } else {
+        this.setCamGoal(
+          home.tx * 0.55 + P.court[0] * 0.45,
+          home.ty,
+          home.tz * 0.55 + P.court[1] * 0.45,
+          home.radius * 0.78,
+          home.phi,
+          theta,
+        );
+      }
     }
   }
 
@@ -4794,13 +5024,7 @@ export class FlightChessEngine {
     this.timeOfDay = nextTod;
     this.todBlend = 0;
 
-    const banners: Record<TimeOfDay, string> = {
-      morning: '🌅 清晨微光，对局开始',
-      noon: '☀️ 天色渐亮，进入正午时分！',
-      afternoon: '🌤️ 午后暖阳，棋局渐入佳境！',
-      evening: '🌇 夕阳西下，古城灯火亮起，进入决胜傍晚！',
-    };
-    this.setMsg(banners[nextTod], '#f59e0b', 3600);
+
     this.emitSnapshot();
   }
 
@@ -4843,10 +5067,31 @@ export class FlightChessEngine {
     this.fillLight.color.copy(this._todColA).lerp(this._todColB, ease);
     this.fillLight.intensity = THREE.MathUtils.lerp(A.fillIntensity, B.fillIntensity, ease);
 
+    this.scene.environmentIntensity = THREE.MathUtils.lerp(A.envIntensity, B.envIntensity, ease);
+    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(A.exposure, B.exposure, ease);
+
     const lantVal = THREE.MathUtils.lerp(A.lanternEmissive, B.lanternEmissive, ease);
     this.world.lanternMats?.forEach((m) => {
       m.emissiveIntensity = lantVal;
     });
+
+    const nightScale = THREE.MathUtils.lerp(A.lanternLightScale, B.lanternLightScale, ease);
+    this.world.nightLights?.forEach((nl) => {
+      nl.light.intensity = nl.baseIntensity * nightScale;
+    });
+
+    const ffOp = THREE.MathUtils.lerp(A.fireflyOpacity, B.fireflyOpacity, ease);
+    if (this.world.fireflyMat && this.world.fireflyPoints) {
+      this.world.fireflyMat.opacity = ffOp;
+      this.world.fireflyPoints.visible = ffOp > 0.015;
+    }
+
+    if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
+      this._todColA.setHex(A.waterTintHex);
+      this._todColB.setHex(B.waterTintHex);
+      this.world.waterMesh.material.color.copy(this._todColA).lerp(this._todColB, ease);
+    }
+
     if (!this.isSoftwareGl) {
       this.renderer.shadowMap.needsUpdate = true;
     }
@@ -4874,6 +5119,19 @@ export class FlightChessEngine {
       if (this.todBlend < 1) {
         this.todBlend = Math.min(1, this.todBlend + dt / 3.0);
         this.applyTimeOfDayLerp(this.todBlend);
+      }
+      if (this.world.fireflyPoints?.visible && this.world.fireflyBase) {
+        const posAttr = this.world.fireflyPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const arr = posAttr.array as Float32Array;
+        const base = this.world.fireflyBase;
+        for (let i = 0; i < base.length; i++) {
+          const b = base[i];
+          const ph = t * b.speed + b.phase;
+          arr[i * 3] = b.x + Math.cos(ph) * b.radius;
+          arr[i * 3 + 1] = b.y + Math.sin(ph * 1.35) * 0.28;
+          arr[i * 3 + 2] = b.z + Math.sin(ph * 0.9) * b.radius;
+        }
+        posAttr.needsUpdate = true;
       }
       if (this.deadline !== null && this.timeMs >= this.deadline && !this.itemBusy) {
         this.deadline = null;
@@ -6423,9 +6681,13 @@ export class FlightChessEngine {
         0.25 + Math.min(Math.max(pos.y - 0.12, 0) * 0.55, 1.1),
         pos.z,
       );
+      const targetRadius = this.camFollowCloseup
+        ? THREE.MathUtils.clamp(home.radius * 0.34, 5.5, 6.2)
+        : THREE.MathUtils.clamp(home.radius * 0.48, 6.8, 9.2);
+      const targetPhi = this.camFollowCloseup ? 1.04 : 0.94;
       this.camGoalSpherical.set(
-        THREE.MathUtils.clamp(home.radius * 0.48, 6.8, 9.2),
-        0.94,
+        targetRadius,
+        targetPhi,
         _scratchCamSpherical.theta,
       );
       this.camGoalActive = true;
@@ -6433,7 +6695,7 @@ export class FlightChessEngine {
 
     if (!this.camGoalActive) return;
 
-    const rate = this.camMode === 'follow' && this.camFollowPlane ? 7.0 : 3.8;
+    const rate = this.camMode === 'follow' && this.camFollowPlane ? (this.camFollowCloseup ? 8.5 : 7.0) : 3.8;
     const alpha = 1 - Math.exp(-rate * Math.min(dt, 0.1));
     this.controls.target.lerp(this.camGoalTarget, alpha);
 
@@ -6513,6 +6775,7 @@ export class FlightChessEngine {
     this.badgeTexCache.forEach((tex) => {
       tex.needsUpdate = true;
     });
+    this.applyTimeOfDayLerp(this.todBlend);
     this.renderer.shadowMap.needsUpdate = true;
     this.clock.getDelta();
     this.renderer.render(this.scene, this.camera);

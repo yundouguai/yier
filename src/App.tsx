@@ -72,6 +72,11 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   splashVisible: false,
   splashItem: null,
   splashKey: 0,
+  splashIsHuman: false,
+  splashActorName: null,
+  splashDetail: null,
+  splashTargetCharKey: null,
+  splashTargetName: null,
   shakeKey: 0,
   winnerPid: null,
   rankings: [],
@@ -453,6 +458,9 @@ export default function App() {
           onToggleMute={handleToggleMute}
           onChangeQuality={handleChangeQuality}
           onSetGmDie={(val) => engineRef.current?.setGmDie(val)}
+          onGmGrantItem={(item) => engineRef.current?.gmGrantItem(item)}
+          onGmClearItems={() => engineRef.current?.gmClearItems()}
+          onSetGmTimeOfDay={(tod) => engineRef.current?.setGmTimeOfDay(tod)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onUseItem={(item) => engineRef.current?.useItem(item)}
           onPickItemTarget={(pid, idx) => engineRef.current?.pickItemTarget(pid, idx)}

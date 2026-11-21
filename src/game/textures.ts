@@ -1253,6 +1253,52 @@ export function createLandingPadTexture(P: PlayerConfig, anisotropy = 4): THREE.
   return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
 }
 
+/** 航线穿越危险格（终点通道第4格 / 终点前第2格）淡雅地画警示标识 */
+export function createCrossDangerTexture(anisotropy = 4): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d')!;
+  g.clearRect(0, 0, 256, 256);
+
+  // 外圈淡淡虚线警戒环
+  g.strokeStyle = 'rgba(196, 52, 42, 0.34)';
+  g.lineWidth = 6;
+  g.setLineDash([14, 10]);
+  g.beginPath();
+  g.arc(128, 128, 104, 0, Math.PI * 2);
+  g.stroke();
+  g.setLineDash([]);
+
+  // 圆角警示三角（弱化透明，自然融入格子底色）
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(128, 54);
+  g.lineTo(194, 168);
+  g.lineTo(62, 168);
+  g.closePath();
+  g.fillStyle = 'rgba(220, 68, 54, 0.16)';
+  g.fill();
+  g.strokeStyle = 'rgba(196, 52, 42, 0.54)';
+  g.lineWidth = 10;
+  g.stroke();
+
+  // 三角内感叹号
+  g.strokeStyle = 'rgba(196, 52, 42, 0.62)';
+  g.lineWidth = 12;
+  g.beginPath();
+  g.moveTo(128, 92);
+  g.lineTo(128, 132);
+  g.stroke();
+
+  g.fillStyle = 'rgba(196, 52, 42, 0.62)';
+  g.beginPath();
+  g.arc(128, 151, 7, 0, Math.PI * 2);
+  g.fill();
+
+  return prepColorTex(new THREE.CanvasTexture(c), anisotropy);
+}
+
 export function createShopMedallionTexture(
   accentHex: number,
   isYier: boolean,

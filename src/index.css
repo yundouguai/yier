@@ -176,9 +176,9 @@
     transform-origin: bottom center;
   }
   .hud-gift-toast-inner {
-    transform: scale(0.78);
+    transform: scale(0.64);
   }
   .hud-item-splash-inner {
-    transform: scale(0.82);
+    transform: scale(0.66);
   }
 }

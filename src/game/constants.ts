@@ -181,26 +181,54 @@ export const ITEM_DEFS: Record<ItemType, ItemDef> = {
     icon: '🫧',
     shortEffect: '抵挡一次恶作剧或被踩',
     limitNote: '不可叠加',
-    desc: '为己方场上小熊套上软绵绵泡泡罩，可抵挡 1 次恶作剧奶油派或被踩（同格挤脸站立）。',
+    desc: '为己方场上小熊套上软绵绵泡泡罩，可抵挡 1 次奶油派炸弹或被踩（同格挤脸站立）。',
     accentColor: '#3b9ae1',
   },
   missile: {
     type: 'missile',
-    name: '恶作剧奶油派',
+    name: '奶油派炸弹',
     category: 'attack',
     categoryLabel: '俏皮恶作剧',
     icon: '🥧',
     shortEffect: '敌方棋子后退 6 格',
     limitNote: '起点终点除外 · 无大跳飞机',
-    desc: '向场上敌方小熊丢出恶作剧奶油派（起点与终点除外），使其后退 6 格。',
+    desc: '向场上敌方小熊丢出奶油派炸弹（起点与终点除外），使其后退 6 格。',
     accentColor: '#9b6bff',
   },
+};
+
+export type ProgressStage = 0 | 1 | 2 | 3;
+
+/** 按阶段（全场最多完赛棋子数 0/1/2/3）配置「一二的馈赠」各道具权重/概率 */
+export const GIFT_QUEST_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, number>> = {
+  // 阶段 0~1：奶油派 10%、泡泡罩 10%，其余 3 种平分剩余 80%
+  0: { sixDie: 80 / 3, twinDice: 80 / 3, refuel: 80 / 3, shield: 10, missile: 10 },
+  1: { sixDie: 80 / 3, twinDice: 80 / 3, refuel: 80 / 3, shield: 10, missile: 10 },
+  // 阶段 2~3：所有道具概率平均分配
+  2: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+  3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+};
+
+/** 按阶段（全场最多完赛棋子数 0/1/2/3）配置「道具商店」各道具出现权重/概率 */
+export const SHOP_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, number>> = {
+  // 阶段 0：奶油派 0%，其余 4 种平均分配
+  0: { sixDie: 25, twinDice: 25, refuel: 25, shield: 25, missile: 0 },
+  // 阶段 1~3：所有道具概率平均分配
+  1: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+  2: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+  3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
 };
 
 export interface PlayerQuestState {
   roll1: number;
   roll2: number;
   stomped: number;
+}
+
+export interface PlayerKdaStats {
+  stomps: number;
+  stomped: number;
+  shieldBreaks: number;
 }
 
 export interface ItemTargetChoice {
@@ -239,6 +267,7 @@ export interface HudPlayerSnapshot {
   active: boolean;
   items: Record<ItemType, number>;
   quest: PlayerQuestState;
+  kda: PlayerKdaStats;
 }
 
 export type TimeOfDay = 'morning' | 'noon' | 'afternoon' | 'evening';
@@ -258,7 +287,12 @@ export interface TimeOfDayPreset {
   sunPosition: [number, number, number];
   fillColorHex: number;
   fillIntensity: number;
+  envIntensity: number;
+  exposure: number;
   lanternEmissive: number;
+  lanternLightScale: number;
+  fireflyOpacity: number;
+  waterTintHex: number;
 }
 
 export type MapId = 'ancient_city';
@@ -313,70 +347,90 @@ export const MAPS: Record<MapId, MapConfig> = {
       morning: {
         label: '清晨',
         icon: '🌅',
-        skyBgHex: 0xd8ece9,
-        fogHex: 0xd8ece9,
-        fogNear: 42,
-        fogFar: 96,
-        hemiSkyHex: 0xf4fbff,
-        hemiGroundHex: 0x8ea884,
-        hemiIntensity: 0.72,
-        sunColorHex: 0xffe9c2,
-        sunIntensity: 1.22,
-        sunPosition: [14, 10, 6],
-        fillColorHex: 0xcbe4f6,
-        fillIntensity: 0.36,
-        lanternEmissive: 0.28,
+        skyBgHex: 0xd8eef0,
+        fogHex: 0xdff0f1,
+        fogNear: 26,
+        fogFar: 74,
+        hemiSkyHex: 0xd8f1ff,
+        hemiGroundHex: 0x7c9c78,
+        hemiIntensity: 0.64,
+        sunColorHex: 0xffd7a0,
+        sunIntensity: 1.12,
+        sunPosition: [18, 7.5, 5],
+        fillColorHex: 0xb6dbf5,
+        fillIntensity: 0.34,
+        envIntensity: 0.26,
+        exposure: 0.98,
+        lanternEmissive: 0.22,
+        lanternLightScale: 0.0,
+        fireflyOpacity: 0.0,
+        waterTintHex: 0xc8ecea,
       },
       noon: {
         label: '中午',
         icon: '☀️',
-        skyBgHex: 0xcfe7f5,
-        fogHex: 0xd7ecf7,
-        fogNear: 52,
-        fogFar: 118,
+        skyBgHex: 0xbbe2ff,
+        fogHex: 0xcfebff,
+        fogNear: 68,
+        fogFar: 150,
         hemiSkyHex: 0xffffff,
-        hemiGroundHex: 0x90ad78,
-        hemiIntensity: 0.78,
-        sunColorHex: 0xfff5dc,
-        sunIntensity: 1.42,
-        sunPosition: [5, 19, 4],
-        fillColorHex: 0xd4e8f8,
-        fillIntensity: 0.38,
-        lanternEmissive: 0.16,
+        hemiGroundHex: 0xa2bf82,
+        hemiIntensity: 1.04,
+        sunColorHex: 0xfff8e6,
+        sunIntensity: 2.18,
+        sunPosition: [4, 24, 3],
+        fillColorHex: 0xdcf0ff,
+        fillIntensity: 0.48,
+        envIntensity: 0.54,
+        exposure: 1.22,
+        lanternEmissive: 0.05,
+        lanternLightScale: 0.0,
+        fireflyOpacity: 0.0,
+        waterTintHex: 0xffffff,
       },
       afternoon: {
         label: '下午',
-        icon: '🌤️',
-        skyBgHex: 0xf2e2c9,
-        fogHex: 0xf0dfca,
-        fogNear: 48,
-        fogFar: 110,
-        hemiSkyHex: 0xfff0d4,
-        hemiGroundHex: 0x969d6e,
-        hemiIntensity: 0.72,
-        sunColorHex: 0xffd29d,
-        sunIntensity: 1.34,
-        sunPosition: [-10, 13, 7],
-        fillColorHex: 0xd9d8ee,
-        fillIntensity: 0.34,
-        lanternEmissive: 0.58,
+        icon: '🌇',
+        skyBgHex: 0xf4b378,
+        fogHex: 0xefaa72,
+        fogNear: 34,
+        fogFar: 90,
+        hemiSkyHex: 0xffc486,
+        hemiGroundHex: 0x7b604b,
+        hemiIntensity: 0.66,
+        sunColorHex: 0xff7b36,
+        sunIntensity: 1.88,
+        sunPosition: [-19, 6.2, 8],
+        fillColorHex: 0x9c90d0,
+        fillIntensity: 0.36,
+        envIntensity: 0.24,
+        exposure: 1.03,
+        lanternEmissive: 0.95,
+        lanternLightScale: 0.38,
+        fireflyOpacity: 0.16,
+        waterTintHex: 0xffcfa4,
       },
       evening: {
-        label: '傍晚',
-        icon: '🌇',
-        skyBgHex: 0xf0c0a0,
-        fogHex: 0xeab698,
-        fogNear: 44,
-        fogFar: 100,
-        hemiSkyHex: 0xffcfb0,
-        hemiGroundHex: 0x6f687a,
-        hemiIntensity: 0.66,
-        sunColorHex: 0xff9e64,
-        sunIntensity: 1.26,
-        sunPosition: [-16, 7, 9],
-        fillColorHex: 0x9eb2e0,
-        fillIntensity: 0.42,
-        lanternEmissive: 1.45,
+        label: '夜晚',
+        icon: '🌙',
+        skyBgHex: 0x0b1224,
+        fogHex: 0x101932,
+        fogNear: 26,
+        fogFar: 78,
+        hemiSkyHex: 0x2e467c,
+        hemiGroundHex: 0x13172a,
+        hemiIntensity: 0.32,
+        sunColorHex: 0x7ba4f0,
+        sunIntensity: 0.55,
+        sunPosition: [-12, 16, -10],
+        fillColorHex: 0x243663,
+        fillIntensity: 0.2,
+        envIntensity: 0.08,
+        exposure: 0.86,
+        lanternEmissive: 2.9,
+        lanternLightScale: 1.0,
+        fireflyOpacity: 1.0,
+        waterTintHex: 0x5c7ca8,
       },
     },
   },
@@ -384,6 +438,7 @@ export const MAPS: Record<MapId, MapConfig> = {
 
 export interface GiftQuestEvent {
   questType?: 'gift' | 'bubu';
+  isLocalHuman: boolean;
   playerName: string;
   playerCharKey: CharKey;
   playerColor: string;
@@ -423,6 +478,11 @@ export interface GameHudSnapshot {
   splashVisible: boolean;
   splashItem: ItemType | null;
   splashKey: number;
+  splashIsHuman: boolean;
+  splashActorName: string | null;
+  splashDetail: string | null;
+  splashTargetCharKey: CharKey | null;
+  splashTargetName: string | null;
   shakeKey: number;
   winnerPid: number | null;
   rankings: number[];

@@ -965,7 +965,7 @@ export function buildTurnArrow(scene: THREE.Scene): THREE.Mesh {
 }
 
 export function buildToyMissileMesh(accentColor: number): THREE.Group {
-  // 恶作剧奶油派 3D 模型（银色锡纸托盘 + 蓬松奶油堆 + 红樱桃 + 奶油拖尾）
+  // 奶油派炸弹 3D 模型（银色锡纸托盘 + 蓬松奶油堆 + 红樱桃 + 奶油拖尾）
   const g = new THREE.Group();
 
   const tinMat = new THREE.MeshStandardMaterial({

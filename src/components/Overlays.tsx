@@ -219,9 +219,12 @@ export const Overlays: React.FC<OverlaysProps> = ({
         </div>
       )}
 
-      {winner && !matchmaking && (
+      {winner && !matchmaking && (() => {
+        const maxStomps = Math.max(0, ...players.map((p) => p.kda?.stomps ?? 0));
+        const maxShieldBreaks = Math.max(0, ...players.map((p) => p.kda?.shieldBreaks ?? 0));
+        return (
         <div className="fixed inset-0 z-25 flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="anim-card-pop w-full max-w-[420px] rounded-[24px] bg-white px-7 py-8 text-center shadow-2xl">
+          <div className="anim-card-pop w-full max-w-[460px] rounded-[24px] bg-white px-7 py-8 text-center shadow-2xl">
             <div className="flex items-center justify-center gap-2">
               <CharacterAvatar charKey={winner.charKey} size={58} />
               <span className="text-[40px]">🏆</span>
@@ -230,13 +233,23 @@ export const Overlays: React.FC<OverlaysProps> = ({
               {winner.name} 夺冠！
             </h2>
             <p className="mb-4 text-xs text-slate-500">
-              本局完整排名榜单
+              本局完整排名与 KDA 战绩
             </p>
 
             <div className="mb-5 space-y-2 text-left">
               {rankings.map((pid, rankIdx) => {
                 const pl = players[pid];
                 if (!pl) return null;
+                const kda = pl.kda ?? { stomps: 0, stomped: 0, shieldBreaks: 0 };
+                const isTopStomper = maxStomps > 0 && kda.stomps === maxStomps;
+                const isTopBreaker = maxShieldBreaks > 0 && kda.shieldBreaks === maxShieldBreaks;
+                const isFierceBear = isTopStomper || isTopBreaker;
+                const fierceReason =
+                  isTopStomper && isTopBreaker
+                    ? '本局最高踩人 & 最高击破护盾'
+                    : isTopStomper
+                      ? '本局最高踩人'
+                      : '本局最高击破护盾';
                 const medal =
                   rankIdx === 0
                     ? '🥇'
@@ -259,7 +272,7 @@ export const Overlays: React.FC<OverlaysProps> = ({
                     </span>
                     <CharacterAvatar charKey={pl.charKey} size={30} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <b className="truncate text-sm text-slate-800">{pl.name}</b>
                         <span
                           className="rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
@@ -267,9 +280,27 @@ export const Overlays: React.FC<OverlaysProps> = ({
                         >
                           {getRoleLabel(pid)}
                         </span>
+                        {isFierceBear && (
+                          <span
+                            title={fierceReason}
+                            className="inline-flex items-center gap-0.5 rounded-full border border-rose-200 bg-gradient-to-r from-orange-50 to-rose-50 px-1.5 py-0.5 text-[10px] font-extrabold text-rose-600 shadow-xs"
+                          >
+                            <span>🔥</span>
+                            <span>暴躁小熊</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-semibold text-slate-500 tabular-nums">
+                        <span className={isTopStomper ? 'font-extrabold text-rose-600' : ''}>
+                          踩人 {kda.stomps}
+                        </span>
+                        <span>被踩 {kda.stomped}</span>
+                        <span className={isTopBreaker ? 'font-extrabold text-orange-600' : ''}>
+                          破盾 {kda.shieldBreaks}
+                        </span>
                       </div>
                     </div>
-                    <span className="text-xs font-bold text-slate-500 tabular-nums">
+                    <span className="shrink-0 text-xs font-bold text-slate-500 tabular-nums">
                       {pl.doneCount === 4 ? '已完赛' : `${pl.doneCount}/4`}
                     </span>
                   </div>
@@ -295,7 +326,8 @@ export const Overlays: React.FC<OverlaysProps> = ({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {contextLost && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/65 p-4">

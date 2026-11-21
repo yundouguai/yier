@@ -28,6 +28,7 @@ import {
   createMoatTexture,
   createRiverbedTexture,
   createShoreEarthTexture,
+  createCrossDangerTexture,
   createFlightTakeoffTexture,
   createLandingPadTexture,
   createShopMedallionTexture,
@@ -208,6 +209,10 @@ export interface WorldRefs {
   waterNormalTex?: THREE.DataTexture;
   waterUniforms?: { uTime: { value: number } };
   lanternMats?: THREE.MeshStandardMaterial[];
+  nightLights?: { light: THREE.PointLight; baseIntensity: number }[];
+  fireflyPoints?: THREE.Points;
+  fireflyMat?: THREE.PointsMaterial;
+  fireflyBase?: { x: number; y: number; z: number; phase: number; speed: number; radius: number }[];
   waterY: number;
   rideToys: RideToyAnim[];
   planeMarks: THREE.Group[];
@@ -2799,12 +2804,28 @@ export function buildAncientWorld(
     scene.add(pPadRim);
   });
 
-  players.forEach((P) =>
-    P.home.forEach((c) => {
+  const crossDangerMat = new THREE.MeshStandardMaterial({
+    map: createCrossDangerTexture(anisotropy),
+    transparent: true,
+    depthWrite: false,
+    roughness: 0.72,
+  });
+
+  players.forEach((P) => {
+    const hasOppFlight = players.some((op) => op.slotId === (P.slotId + 2) % 4);
+    P.home.forEach((c, idx) => {
       rectTile(c[0], c[1], 0.72, 0.72, P);
       cellDisc(c[0], c[1], P, 0.255);
-    }),
-  );
+      // 终点通道第 4 格（pos 54 / 终点前第 2 格）：对家航线穿过点，绘淡雅危险警示标
+      if (idx === 3 && hasOppFlight) {
+        const dangerMark = new THREE.Mesh(new THREE.CircleGeometry(0.245, 32), crossDangerMat);
+        dangerMark.rotation.x = -Math.PI / 2;
+        dangerMark.position.set(c[0], 0.1235, c[1]);
+        dangerMark.receiveShadow = true;
+        scene.add(dangerMark);
+      }
+    });
+  });
 
   /* ================= 5. 1:1 摇摇车手办与基地庭院 ================= */
   const rideToys: RideToyAnim[] = [];
@@ -5191,12 +5212,90 @@ export function buildAncientWorld(
     makeBoat(-1, 1.72, -0.68, { cloth: 0xfaf7f0, variant: 'maiden' });
   }
 
+  // 古城夜景暖色灯笼光源（傍晚渐亮、夜晚点亮中央棋盘与四门牌坊，保持棋盘清晰又具浓郁夜色）
+  const nightLights: { light: THREE.PointLight; baseIntensity: number }[] = [];
+  const addNightLight = (
+    x: number,
+    y: number,
+    z: number,
+    colorHex: number,
+    baseIntensity: number,
+    distance: number,
+    decay = 1.4,
+  ) => {
+    const pt = new THREE.PointLight(colorHex, 0, distance, decay);
+    pt.position.set(x, y, z);
+    scene.add(pt);
+    nightLights.push({ light: pt, baseIntensity });
+  };
+  // 中央骰台上方暖金主灯（柔和照亮棋盘中心与小熊）
+  addNightLight(0, 4.6, 0, 0xffb85c, 2.8, 19, 1.35);
+  // 四座熊熊坊/城门暖橘灯笼池
+  addNightLight(8.2, 2.3, 0, 0xff9438, 2.4, 13.5, 1.45);
+  addNightLight(-8.2, 2.3, 0, 0xff9438, 2.4, 13.5, 1.45);
+  addNightLight(0, 2.3, 8.2, 0xff9438, 2.4, 13.5, 1.45);
+  addNightLight(0, 2.3, -8.2, 0xff9438, 2.4, 13.5, 1.45);
+  // 爱心古榕树灯笼暖光
+  addNightLight(-11.8, 2.8, 0, 0xff8d36, 2.1, 11.5, 1.45);
+
+  // 夜景护城河与庭院周边漂浮萤火虫
+  const fireflyCount = 68;
+  const fireflyPos = new Float32Array(fireflyCount * 3);
+  const fireflyBase: { x: number; y: number; z: number; phase: number; speed: number; radius: number }[] = [];
+  for (let i = 0; i < fireflyCount; i++) {
+    const ang = (i / fireflyCount) * Math.PI * 2 + Math.random() * 0.4;
+    const rad = 9.2 + Math.random() * 9.5;
+    const fx = Math.cos(ang) * rad;
+    const fz = Math.sin(ang) * rad;
+    const fy = 0.65 + Math.random() * 2.5;
+    fireflyBase.push({
+      x: fx,
+      y: fy,
+      z: fz,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.65 + Math.random() * 0.85,
+      radius: 0.25 + Math.random() * 0.45,
+    });
+    fireflyPos[i * 3] = fx;
+    fireflyPos[i * 3 + 1] = fy;
+    fireflyPos[i * 3 + 2] = fz;
+  }
+  const ffGeo = new THREE.BufferGeometry();
+  ffGeo.setAttribute('position', new THREE.BufferAttribute(fireflyPos, 3));
+  const ffCanvas = document.createElement('canvas');
+  ffCanvas.width = ffCanvas.height = 64;
+  const ffg = ffCanvas.getContext('2d')!;
+  const ffGrad = ffg.createRadialGradient(32, 32, 2, 32, 32, 30);
+  ffGrad.addColorStop(0, 'rgba(255, 248, 185, 1)');
+  ffGrad.addColorStop(0.35, 'rgba(255, 220, 105, 0.85)');
+  ffGrad.addColorStop(1, 'rgba(255, 180, 60, 0)');
+  ffg.fillStyle = ffGrad;
+  ffg.fillRect(0, 0, 64, 64);
+  const ffTex = new THREE.CanvasTexture(ffCanvas);
+  const fireflyMat = new THREE.PointsMaterial({
+    map: ffTex,
+    color: 0xffe680,
+    size: 0.34,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    sizeAttenuation: true,
+  });
+  const fireflyPoints = new THREE.Points(ffGeo, fireflyMat);
+  fireflyPoints.visible = false;
+  scene.add(fireflyPoints);
+
   return {
     waterMesh,
     moatTex,
     waterNormalTex,
     waterUniforms,
     lanternMats,
+    nightLights,
+    fireflyPoints,
+    fireflyMat,
+    fireflyBase,
     waterY: WATER_Y,
     rideToys,
     planeMarks,

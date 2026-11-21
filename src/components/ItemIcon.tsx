@@ -184,7 +184,7 @@ export const ItemIcon: React.FC<ItemIconProps> = ({
       );
 
     case 'missile':
-      // 恶作剧奶油派
+      // 奶油派炸弹
       return (
         <svg
           width={size}
