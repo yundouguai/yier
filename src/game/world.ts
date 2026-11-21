@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {
+  CHARS,
   FLIGHT_FROM,
   FLIGHT_STEP,
   MapId,
@@ -13,7 +14,7 @@ import {
   lineOf,
   ringColor,
 } from './constants';
-import { makePlaneModel } from './pieces';
+import { buildPlaneMesh, makePlaneModel } from './pieces';
 import {
   createAncientTileTexture,
   createBrickBankTexture,
@@ -225,6 +226,24 @@ export interface WorldRefs {
   nightSkyGroup?: THREE.Group;
   starMat?: THREE.PointsMaterial;
   moonMat?: THREE.MeshBasicMaterial;
+  heartTreeNight?: {
+    waveMats: THREE.MeshStandardMaterial[];
+    heartPoints: THREE.Points;
+    heartMat: THREE.PointsMaterial;
+    heartBase: { x: number; y: number; z: number; phase: number; speed: number }[];
+    groundHalo: THREE.Mesh;
+    groundHaloMat: THREE.MeshBasicMaterial;
+    spotLight: THREE.SpotLight;
+    projCanvas: HTMLCanvasElement;
+    projTex: THREE.CanvasTexture;
+    lastProjDraw: number;
+    dioramaGroup: THREE.Group;
+    yierMesh: THREE.Group;
+    bubuMesh: THREE.Group;
+    flashLight: THREE.PointLight;
+    flashHalo: THREE.Mesh;
+    flashHaloMat: THREE.MeshBasicMaterial;
+  };
   waterY: number;
   rideToys: RideToyAnim[];
   planeMarks: THREE.Group[];
@@ -1396,6 +1415,7 @@ export function buildAncientWorld(
   /* ================= 2. 森林、垂柳、樱花、灌木、野花与小蘑菇 ================= */
   const petals: PetalAnim[] = [];
   const lanternMats: THREE.MeshStandardMaterial[] = [];
+  let heartTreeNightData: WorldRefs['heartTreeNight'];
   {
     const barkMat = mat(0x6e4b35, 0.9);
     const darkBarkMat = mat(0x523626, 0.92);
@@ -2358,14 +2378,17 @@ export function buildAncientWorld(
       if (leafMesh.instanceColor) leafMesh.instanceColor.needsUpdate = true;
       heartTree.add(leafMesh);
 
-      // 4. 沿收拢后的心形下缘 V 形弧线密密挂满 64 盏小巧暖红灯笼
-      const treeLantMat = new THREE.MeshStandardMaterial({
-        color: 0xec3422,
-        emissive: 0xd92512,
-        emissiveIntensity: 0.86,
-        roughness: 0.35,
+      // 4. 沿收拢后的心形下缘 V 形弧线密密挂满 64 盏小巧暖红灯笼（4 组错峰呼吸波浪灯效）
+      const treeWaveMats = [0, 1, 2, 3].map(() => {
+        const m = new THREE.MeshStandardMaterial({
+          color: 0xec3422,
+          emissive: 0xd92512,
+          emissiveIntensity: 0.86,
+          roughness: 0.35,
+        });
+        lanternMats.push(m);
+        return m;
       });
-      lanternMats.push(treeLantMat);
       const cordMat = mat(0x52341c, 0.7);
       const lanternBodyGeo = new THREE.SphereGeometry(0.06, 12, 9);
       const lanternCapGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.013, 8);
@@ -2396,7 +2419,7 @@ export function buildAncientWorld(
         lanternSpecs.push([lx, ly, zBand, cordLen]);
       }
 
-      lanternSpecs.forEach(([lx, ly, lz, cordLen]) => {
+      lanternSpecs.forEach(([lx, ly, lz, cordLen], lIdx) => {
         const lg = new THREE.Group();
         const cord = new THREE.Mesh(
           new THREE.CylinderGeometry(0.005, 0.005, cordLen, 5),
@@ -2405,7 +2428,7 @@ export function buildAncientWorld(
         cord.position.y = cordLen * 0.5;
         lg.add(cord);
 
-        const body = new THREE.Mesh(lanternBodyGeo, treeLantMat);
+        const body = new THREE.Mesh(lanternBodyGeo, treeWaveMats[lIdx % 4]);
         body.scale.set(1, 0.84, 1);
         body.position.y = -0.048;
         lg.add(body);
@@ -2423,6 +2446,185 @@ export function buildAncientWorld(
         lg.position.set(lx, ly, lz);
         heartTree.add(lg);
       });
+
+      // 5. 树冠粉金小爱心萤火粒子
+      const hCount = 20;
+      const hPos = new Float32Array(hCount * 3);
+      const hBase: { x: number; y: number; z: number; phase: number; speed: number }[] = [];
+      for (let i = 0; i < hCount; i++) {
+        const ang = (i / hCount) * Math.PI * 2;
+        const rad = 1.15 + Math.random() * 0.95;
+        const hx = Math.cos(ang) * rad;
+        const hz = Math.sin(ang) * rad;
+        const hy = 2.05 + Math.random() * 1.95;
+        hBase.push({ x: hx, y: hy, z: hz, phase: Math.random() * Math.PI * 2, speed: 0.7 + Math.random() * 0.7 });
+        hPos[i * 3] = hx;
+        hPos[i * 3 + 1] = hy;
+        hPos[i * 3 + 2] = hz;
+      }
+      const hGeo = new THREE.BufferGeometry();
+      hGeo.setAttribute('position', new THREE.BufferAttribute(hPos, 3));
+      const hCanvas = document.createElement('canvas');
+      hCanvas.width = hCanvas.height = 64;
+      const hg = hCanvas.getContext('2d')!;
+      hg.fillStyle = '#ff9ec4';
+      hg.shadowColor = '#ffd580';
+      hg.shadowBlur = 10;
+      hg.beginPath();
+      hg.moveTo(32, 48);
+      hg.bezierCurveTo(14, 36, 12, 18, 24, 16);
+      hg.bezierCurveTo(30, 15, 32, 22, 32, 22);
+      hg.bezierCurveTo(32, 22, 34, 15, 40, 16);
+      hg.bezierCurveTo(52, 18, 50, 36, 32, 48);
+      hg.fill();
+      const hTex = new THREE.CanvasTexture(hCanvas);
+      const heartMat = new THREE.PointsMaterial({
+        map: hTex,
+        size: 0.24,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true,
+      });
+      const heartPoints = new THREE.Points(hGeo, heartMat);
+      heartPoints.visible = false;
+      heartTree.add(heartPoints);
+
+      // 6. 树池地面暖粉星心魔法光环投影
+      const ghCanvas = document.createElement('canvas');
+      ghCanvas.width = ghCanvas.height = 256;
+      const ghg = ghCanvas.getContext('2d')!;
+      const ghGrad = ghg.createRadialGradient(128, 128, 30, 128, 128, 124);
+      ghGrad.addColorStop(0, 'rgba(255, 190, 215, 0.35)');
+      ghGrad.addColorStop(0.6, 'rgba(255, 210, 145, 0.22)');
+      ghGrad.addColorStop(1, 'rgba(255, 210, 145, 0)');
+      ghg.fillStyle = ghGrad;
+      ghg.fillRect(0, 0, 256, 256);
+      ghg.strokeStyle = 'rgba(255, 225, 168, 0.68)';
+      ghg.lineWidth = 4;
+      ghg.setLineDash([16, 10]);
+      ghg.beginPath();
+      ghg.arc(128, 128, 104, 0, Math.PI * 2);
+      ghg.stroke();
+      ghg.setLineDash([]);
+      ghg.strokeStyle = 'rgba(255, 168, 200, 0.55)';
+      ghg.lineWidth = 3;
+      ghg.beginPath();
+      ghg.arc(128, 128, 86, 0, Math.PI * 2);
+      ghg.stroke();
+      const ghTex = new THREE.CanvasTexture(ghCanvas);
+      const groundHaloMat = new THREE.MeshBasicMaterial({
+        map: ghTex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const groundHalo = new THREE.Mesh(new THREE.CircleGeometry(1.75, 40), groundHaloMat);
+      groundHalo.rotation.x = -Math.PI / 2;
+      groundHalo.position.set(0, 0.03, 0);
+      groundHalo.visible = false;
+      heartTree.add(groundHalo);
+
+      // 7. 树冠动态光影投影秀（无阴影 SpotLight.map 投射至立体叶片）
+      const projCanvas = document.createElement('canvas');
+      projCanvas.width = projCanvas.height = 512;
+      const projTex = new THREE.CanvasTexture(projCanvas);
+      const spotTarget = new THREE.Object3D();
+      spotTarget.position.set(0, 2.75, 0.1);
+      heartTree.add(spotTarget);
+      const spotLight = new THREE.SpotLight(0xffd6ea, 0, 8.5, 0.54, 0.45, 1.0);
+      spotLight.castShadow = false;
+      spotLight.map = projTex;
+      spotLight.position.set(0, 2.15, -3.5);
+      spotLight.target = spotTarget;
+      heartTree.add(spotLight);
+
+      // 8. 树下「奶白一二 & 焦糖布布」夜晚许愿拍照小剧场
+      const dioramaGroup = new THREE.Group();
+      const makeScenicBear = (charDef: typeof CHARS.yier) => {
+        const fakeSlot = {
+          ...charDef,
+          slotId: 0,
+          start: 0,
+          court: [0, 0] as [number, number],
+          launch: [0, 0] as [number, number],
+          gate: [0, 0] as [number, number],
+          gateAxis: 'z' as const,
+          home: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] as [number, number][],
+          final: [0, 0] as [number, number],
+          base: [[0, 0], [0, 0], [0, 0], [0, 0]] as [number, number][],
+          toy: [0, 0] as [number, number],
+          finalYaw: 0,
+          type: 'human' as const,
+        };
+        const m = buildPlaneMesh(fakeSlot, anisotropy);
+        m.scale.setScalar(0.62);
+        return m;
+      };
+      const yierMesh = makeScenicBear(CHARS.yier);
+      yierMesh.position.set(-0.31, 0.02, -1.36);
+      dioramaGroup.add(yierMesh);
+
+      const bubuMesh = makeScenicBear(CHARS.bubu);
+      bubuMesh.position.set(0.31, 0.02, -1.36);
+      dioramaGroup.add(bubuMesh);
+
+      // 迷你复古三脚架相机
+      const camGrp = new THREE.Group();
+      camGrp.position.set(0, 0.02, -2.18);
+      const legMat = mat(0x4a382c, 0.65);
+      for (const ang of [0, 2.1, -2.1]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.008, 0.38, 6), legMat);
+        leg.position.set(Math.sin(ang) * 0.075, 0.17, Math.cos(ang) * 0.075);
+        leg.rotation.z = -Math.sin(ang) * 0.34;
+        leg.rotation.x = Math.cos(ang) * 0.34;
+        camGrp.add(leg);
+      }
+      const camBody = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.11, 0.09), mat(0x2d343e, 0.4));
+      camBody.position.set(0, 0.37, 0);
+      camGrp.add(camBody);
+      const camLens = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.04, 0.055, 12), mat(0x94a3b8, 0.25));
+      camLens.rotation.x = Math.PI / 2;
+      camLens.position.set(0, 0.37, 0.06);
+      camGrp.add(camLens);
+      const flashLight = new THREE.PointLight(0xfff4dc, 0, 4.2, 1.6);
+      flashLight.position.set(0, 0.45, 0.14);
+      camGrp.add(flashLight);
+      const flashHaloMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const flashHalo = new THREE.Mesh(new THREE.CircleGeometry(0.18, 20), flashHaloMat);
+      flashHalo.position.set(0, 0.44, 0.08);
+      camGrp.add(flashHalo);
+      dioramaGroup.add(camGrp);
+
+      dioramaGroup.visible = false;
+      heartTree.add(dioramaGroup);
+
+      heartTreeNightData = {
+        waveMats: treeWaveMats,
+        heartPoints,
+        heartMat,
+        heartBase: hBase,
+        groundHalo,
+        groundHaloMat,
+        spotLight,
+        projCanvas,
+        projTex,
+        lastProjDraw: -1,
+        dioramaGroup,
+        yierMesh,
+        bubuMesh,
+        flashLight,
+        flashHalo,
+        flashHaloMat,
+      };
 
       heartTree.position.set(Math.sin(ha) * 12.15, -0.63, Math.cos(ha) * 12.15);
       heartTree.rotation.y = ha;
@@ -2816,8 +3018,14 @@ export function buildAncientWorld(
     scene.add(pPadRim);
   });
 
-  const crossDangerMat = new THREE.MeshStandardMaterial({
-    map: createCrossDangerTexture(anisotropy),
+  const crossDangerLightMat = new THREE.MeshStandardMaterial({
+    map: createCrossDangerTexture(false, anisotropy),
+    transparent: true,
+    depthWrite: false,
+    roughness: 0.72,
+  });
+  const crossDangerYierMat = new THREE.MeshStandardMaterial({
+    map: createCrossDangerTexture(true, anisotropy),
     transparent: true,
     depthWrite: false,
     roughness: 0.72,
@@ -2828,9 +3036,12 @@ export function buildAncientWorld(
     P.home.forEach((c, idx) => {
       rectTile(c[0], c[1], 0.72, 0.72, P);
       cellDisc(c[0], c[1], P, 0.255);
-      // 终点通道第 4 格（pos 54 / 终点前第 2 格）：对家航线穿过点，绘淡雅危险警示标
+      // 终点通道第 4 格（pos 54 / 终点前第 2 格）：对家航线穿过点，绘与圆圈同色的纯线条警示标
       if (idx === 3 && hasOppFlight) {
-        const dangerMark = new THREE.Mesh(new THREE.CircleGeometry(0.245, 32), crossDangerMat);
+        const dangerMark = new THREE.Mesh(
+          new THREE.CircleGeometry(0.225, 32),
+          P.key === 'yier' ? crossDangerYierMat : crossDangerLightMat,
+        );
         dangerMark.rotation.x = -Math.PI / 2;
         dangerMark.rotation.z = -(Math.PI / 2) * (P.slotId + 1);
         dangerMark.position.set(c[0], 0.1235, c[1]);
@@ -5504,6 +5715,7 @@ export function buildAncientWorld(
     nightSkyGroup,
     starMat,
     moonMat,
+    heartTreeNight: heartTreeNightData,
     waterY: WATER_Y,
     rideToys,
     planeMarks,

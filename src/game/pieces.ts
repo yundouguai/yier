@@ -28,8 +28,10 @@ export interface PlaneParts {
   leftFoot: THREE.Group;
   rightFoot: THREE.Group;
   redScarf?: THREE.Group;
-  scarfTailPivot?: THREE.Group;
-  scarfTailTip?: THREE.Group;
+  leftRibbonPivot?: THREE.Group;
+  leftRibbonTip?: THREE.Group;
+  rightRibbonPivot?: THREE.Group;
+  rightRibbonTip?: THREE.Group;
 }
 
 export interface PlaneData {
@@ -43,12 +45,8 @@ export interface PlaneData {
   mesh: THREE.Group;
 }
 
-let _propDiscTex: THREE.CanvasTexture | null = null;
 function getPropDiscTex(anisotropy = 4): THREE.CanvasTexture {
-  if (!_propDiscTex) {
-    _propDiscTex = createPropellerDiscTexture(anisotropy);
-  }
-  return _propDiscTex;
+  return createPropellerDiscTexture(anisotropy);
 }
 
 export function makePlaneModel(
@@ -758,38 +756,55 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   shieldMesh.userData.eqRing = eqRing;
   g.add(shieldMesh);
 
-  // 跳舞庆祝专属红围巾（含胸前围脖与双节飘逸甩尾，默认隐藏，到达终点跳舞时佩戴）
+  // 跳舞庆祝专属红绸飘带（从背后绕过腰背，双手各握一端左右挥甩，默认隐藏）
   const redScarf = new THREE.Group();
-  const scarfMat = new THREE.MeshStandardMaterial({
-    color: 0xef5350,
-    roughness: 0.48,
-    metalness: 0.02,
+  const ribbonMat = new THREE.MeshStandardMaterial({
+    color: 0xf4605c,
+    roughness: 0.42,
+    metalness: 0.04,
+    side: THREE.DoubleSide,
   });
-  const scarfCollar = new THREE.Mesh(new THREE.TorusGeometry(0.168, 0.032, 10, 26), scarfMat);
-  scarfCollar.rotation.x = Math.PI / 2 + 0.06;
-  scarfCollar.position.set(0, 0.295, 0.012);
-  redScarf.add(scarfCollar);
 
-  const scarfFront = new THREE.Mesh(new THREE.CapsuleGeometry(0.028, 0.13, 6, 10), scarfMat);
-  scarfFront.rotation.z = Math.PI / 2 - 0.14;
-  scarfFront.position.set(0.01, 0.275, 0.155);
-  redScarf.add(scarfFront);
+  // 1) 背后绕过的半弧红绸带（严格留足外廓间距 r>=0.225，不穿入躯干）
+  const backCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-0.225, 0.23, 0.07),
+    new THREE.Vector3(-0.24, 0.23, -0.105),
+    new THREE.Vector3(0.0, 0.23, -0.225),
+    new THREE.Vector3(0.24, 0.23, -0.105),
+    new THREE.Vector3(0.225, 0.23, 0.07),
+  ]);
+  const backGeo = new THREE.TubeGeometry(backCurve, 24, 0.022, 8, false);
+  const backRibbon = new THREE.Mesh(backGeo, ribbonMat);
+  redScarf.add(backRibbon);
 
-  const scarfTailPivot = new THREE.Group();
-  scarfTailPivot.position.set(-0.155, 0.285, 0.045);
-  const tailSeg1 = new THREE.Mesh(new THREE.CapsuleGeometry(0.024, 0.11, 6, 10), scarfMat);
-  tailSeg1.rotation.z = Math.PI / 2;
-  tailSeg1.position.set(-0.065, 0, 0);
-  scarfTailPivot.add(tailSeg1);
+  // 2) 左右手各自抓握的宽扁飘带（位于手掌外侧偏前，向身体外侧延展，不穿帮）
+  const makeHandRibbon = (sideSign: number) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(0.048 * sideSign, -0.045, 0.065);
 
-  const scarfTailTip = new THREE.Group();
-  scarfTailTip.position.set(-0.125, 0, 0);
-  const tailSeg2 = new THREE.Mesh(new THREE.CapsuleGeometry(0.022, 0.095, 6, 10), scarfMat);
-  tailSeg2.rotation.z = Math.PI / 2;
-  tailSeg2.position.set(-0.055, 0, 0);
-  scarfTailTip.add(tailSeg2);
-  scarfTailPivot.add(scarfTailTip);
-  redScarf.add(scarfTailPivot);
+    const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.052, 0.014), ribbonMat);
+    wrap.position.set(0.028 * sideSign, 0, 0.008);
+    pivot.add(wrap);
+
+    const seg1 = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.054, 0.012), ribbonMat);
+    seg1.position.set(0.105 * sideSign, 0.004, 0.012);
+    pivot.add(seg1);
+
+    const tip = new THREE.Group();
+    tip.position.set(0.17 * sideSign, 0.005, 0.014);
+    const seg2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.01), ribbonMat);
+    seg2.position.set(0.06 * sideSign, 0.006, 0.006);
+    tip.add(seg2);
+    pivot.add(tip);
+
+    pivot.visible = false;
+    return { pivot, tip };
+  };
+
+  const leftRib = makeHandRibbon(-1);
+  armPivots[0].add(leftRib.pivot);
+  const rightRib = makeHandRibbon(1);
+  armPivots[1].add(rightRib.pivot);
 
   redScarf.visible = false;
   animRoot.add(redScarf);
@@ -806,8 +821,10 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
     leftFoot: footPivots[0],
     rightFoot: footPivots[1],
     redScarf,
-    scarfTailPivot,
-    scarfTailTip,
+    leftRibbonPivot: leftRib.pivot,
+    leftRibbonTip: leftRib.tip,
+    rightRibbonPivot: rightRib.pivot,
+    rightRibbonTip: rightRib.tip,
   } satisfies PlaneParts;
 
   return g;
@@ -1098,4 +1115,112 @@ export function buildToyMissileMesh(accentColor: number): THREE.Group {
     if ((o as THREE.Mesh).isMesh) o.castShadow = true;
   });
   return g;
+}
+
+export interface CampfireRig {
+  group: THREE.Group;
+  flames: THREE.Mesh[];
+  light: THREE.PointLight;
+  sparks: THREE.Points;
+  sparkBase: { angle: number; radius: number; speed: number; phase: number }[];
+}
+
+/** 阶段 4 彩蛋：中央骰台温暖篝火（石圈 + 交叉木柴 + 炭火 + 跳动三层火苗 + 火星） */
+export function buildCampfireRig(scene: THREE.Scene): CampfireRig {
+  const group = new THREE.Group();
+  group.position.set(0, 0.25, 0);
+  group.scale.setScalar(0.001);
+  group.visible = false;
+
+  // 1) 8 颗围炉小卵石
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x7c746c, roughness: 0.88 });
+  const stoneGeo = new THREE.DodecahedronGeometry(0.075, 1);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const st = new THREE.Mesh(stoneGeo, stoneMat);
+    st.position.set(Math.cos(a) * 0.34, 0.036, Math.sin(a) * 0.34);
+    st.scale.set(1.15, 0.68, 0.95);
+    st.rotation.y = a + 0.4;
+    st.castShadow = true;
+    group.add(st);
+  }
+
+  // 2) 炽热炭火底盘
+  const emberMat = new THREE.MeshStandardMaterial({
+    color: 0x42170a,
+    emissive: 0xff4d14,
+    emissiveIntensity: 1.45,
+    roughness: 0.7,
+  });
+  const emberBed = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.27, 0.04, 16), emberMat);
+  emberBed.position.y = 0.02;
+  group.add(emberBed);
+
+  // 3) 4 根交叉柴火木段
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x5c361c, roughness: 0.92 });
+  const logGeo = new THREE.CylinderGeometry(0.042, 0.048, 0.48, 10);
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.35;
+    const log = new THREE.Mesh(logGeo, logMat);
+    log.position.set(Math.cos(a) * 0.1, 0.09, Math.sin(a) * 0.1);
+    log.rotation.order = 'YXZ';
+    log.rotation.y = a;
+    log.rotation.z = Math.PI / 2 - 0.56;
+    log.castShadow = true;
+    group.add(log);
+  }
+
+  // 4) 三层跳动火苗
+  const flames: THREE.Mesh[] = [];
+  const flameSpecs: [number, number, number, number, number][] = [
+    [0xff5e1a, 0.17, 0.44, 0, 0.14],
+    [0xffa726, 0.125, 0.36, 0.04, 0.16],
+    [0xffe066, 0.08, 0.25, -0.03, 0.14],
+  ];
+  for (const [col, rad, h, xOff, yOff] of flameSpecs) {
+    const fMat = new THREE.MeshBasicMaterial({
+      color: col,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const fMesh = new THREE.Mesh(new THREE.ConeGeometry(rad, h, 14), fMat);
+    fMesh.position.set(xOff, yOff + h * 0.42, xOff * 0.5);
+    group.add(fMesh);
+    flames.push(fMesh);
+  }
+
+  // 5) 暖橘篝火点光源
+  const light = new THREE.PointLight(0xff8c36, 0, 10.5, 1.45);
+  light.position.set(0, 0.46, 0);
+  group.add(light);
+
+  // 6) 上升火星粒子
+  const sparkCount = 16;
+  const sparkPos = new Float32Array(sparkCount * 3);
+  const sparkBase: { angle: number; radius: number; speed: number; phase: number }[] = [];
+  for (let i = 0; i < sparkCount; i++) {
+    sparkBase.push({
+      angle: Math.random() * Math.PI * 2,
+      radius: 0.05 + Math.random() * 0.16,
+      speed: 0.55 + Math.random() * 0.65,
+      phase: Math.random(),
+    });
+  }
+  const sparkGeo = new THREE.BufferGeometry();
+  sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+  const sparkMat = new THREE.PointsMaterial({
+    color: 0xffcf6b,
+    size: 0.065,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const sparks = new THREE.Points(sparkGeo, sparkMat);
+  group.add(sparks);
+
+  scene.add(group);
+  return { group, flames, light, sparks, sparkBase };
 }

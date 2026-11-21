@@ -81,6 +81,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   winnerPid: null,
   rankings: [],
   gmDie: null,
+  gmAutoPlay: false,
   turnUsedAtkDef: false,
   turnUsedDef: false,
   armedSixDie: false,
@@ -329,6 +330,7 @@ export default function App() {
       setMatchmaking(null);
       setShowSetup(true);
       setAutoStart(false);
+      setSnap({ ...INITIAL_SNAPSHOT });
       setSessionId((id) => id + 1);
     }
   }, [activeLocalChars, clearMatchTimers, snap.phase, snap.winnerPid]);
@@ -349,7 +351,7 @@ export default function App() {
     setMatchmaking(null);
     setShowSetup(true);
     setAutoStart(false);
-    setSnap((prev) => ({ ...prev, paused: false, winnerPid: null, phase: 'idle' }));
+    setSnap({ ...INITIAL_SNAPSHOT });
     setSessionId((id) => id + 1);
   }, [activeLocalChars, clearMatchTimers]);
 
@@ -462,6 +464,7 @@ export default function App() {
           onGmGrantItem={(item) => engineRef.current?.gmGrantItem(item)}
           onGmClearItems={() => engineRef.current?.gmClearItems()}
           onSetGmTimeOfDay={(tod) => engineRef.current?.setGmTimeOfDay(tod)}
+          onToggleGmAutoPlay={() => engineRef.current?.toggleGmAutoPlay()}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onUseItem={(item) => engineRef.current?.useItem(item)}
           onPickItemTarget={(pid, idx) => engineRef.current?.pickItemTarget(pid, idx)}

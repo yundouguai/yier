@@ -33,6 +33,7 @@ interface GameHUDProps {
   onGmGrantItem: (item: ItemType) => void;
   onGmClearItems: () => void;
   onSetGmTimeOfDay: (tod: TimeOfDay) => void;
+  onToggleGmAutoPlay: () => void;
   onActionPod: () => void;
   onUseItem: (item: ItemType) => void;
   onPickItemTarget: (pid: number, idx: number) => void;
@@ -56,6 +57,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onGmGrantItem,
   onGmClearItems,
   onSetGmTimeOfDay,
+  onToggleGmAutoPlay,
   onActionPod,
   onUseItem,
   onPickItemTarget,
@@ -839,6 +841,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   className="ml-auto rounded-lg border border-rose-400/35 bg-rose-500/20 px-2.5 py-1 text-[11px] font-bold text-rose-200 transition hover:bg-rose-500/35 hover:text-white active:scale-95 cursor-pointer"
                 >
                   清空
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="w-[58px] shrink-0 text-center rounded-md bg-violet-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-violet-300 border border-violet-400/30">
+                  托管
+                </span>
+                <button
+                  type="button"
+                  onClick={onToggleGmAutoPlay}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-bold transition cursor-pointer ${
+                    snap.gmAutoPlay
+                      ? 'bg-violet-500 text-white ring-2 ring-violet-300 shadow-sm'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  <span>🤖</span>
+                  <span>自动游戏：{snap.gmAutoPlay ? '已开启' : '关闭'}</span>
                 </button>
               </div>
 

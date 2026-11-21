@@ -8,7 +8,15 @@ export function isAudioMuted(): boolean {
 
 export function setAudioMuted(next: boolean): void {
   muted = next;
-  if (!muted) {
+  if (muted) {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+    }
+  } else {
     ensureAudio();
   }
 }

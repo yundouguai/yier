@@ -53,10 +53,12 @@ import {
   toColorHex,
 } from './constants';
 import {
+  CampfireRig,
   DICE_REST_Y,
   HeadFaceParts,
   PlaneData,
   PlaneParts,
+  buildCampfireRig,
   buildDiceRig,
   buildPickHints,
   buildPlaneMesh,
@@ -177,6 +179,9 @@ export class FlightChessEngine {
   private planes: PlaneData[] = [];
   private world: WorldRefs;
   private diceRig: ReturnType<typeof buildDiceRig>;
+  private campfireRig: CampfireRig;
+  private campfireBlend = 0;
+  private stage4CampfireActive = false;
   private pickHints: THREE.Group[];
   private badgeTexCache = new Map<string, THREE.CanvasTexture>();
   private turnArrow: THREE.Mesh;
@@ -206,6 +211,7 @@ export class FlightChessEngine {
   private winnerPid: number | null = null;
   private finishedOrder: number[] = [];
   private gmNextDie: number | null = null;
+  private gmAutoPlay = false;
   private lastSec = -1;
 
   // 道具与任务系统状态
@@ -484,6 +490,7 @@ export class FlightChessEngine {
     // World & Pieces
     this.world = buildWorldByMapId(this.mapId, this.scene, this.players, this.anisotropy);
     this.applyTimeOfDayLerp(1);
+    if (this.world.boats[1]) this.world.boats[1].g.visible = false;
     this.shopRingSet = new Set(this.world.shopRingIndices);
     this.playerItems = this.players.map(() => ({
       sixDie: 0,
@@ -503,6 +510,7 @@ export class FlightChessEngine {
       shieldBreaks: 0,
     }));
     this.diceRig = buildDiceRig(this.scene, this.anisotropy);
+    this.campfireRig = buildCampfireRig(this.scene);
     this.pickHints = buildPickHints(this.scene, this.anisotropy);
     this.turnArrow = buildTurnArrow(this.scene);
 
@@ -597,13 +605,9 @@ export class FlightChessEngine {
       }
     });
 
-    // Schedule critters
+    // Schedule critters (governed by time-of-day ecological habits)
     this.scheduleCritter('rabbit', 4000);
     this.scheduleCritter('bird', 4500);
-    this.after(7800, () => {
-      if (this.disposed) return;
-      if (this.mapConfig.enableCritterSpawns) this.world.spawnCritter?.('bird', { species: 'seagull', perch: true });
-    });
     this.scheduleCritter('fly', 2500);
     this.scheduleCritter('fish', 4500);
 
@@ -864,7 +868,24 @@ export class FlightChessEngine {
     this.after(delay, () => {
       if (this.disposed) return;
       const maxCritters = this.quality === 'high' ? 8 : this.quality === 'medium' ? 5 : 3;
-      if (this.mapConfig.enableCritterSpawns && this.world.critters.length < maxCritters) this.world.spawnCritter?.(kind);
+      const tod = this.timeOfDay;
+      // 兔子：晨昏与夜间活跃，中午烈日躲回洞里午睡
+      // 蝴蝶：喜阳日行，清晨/中午/下午活跃，夜晚栖息消失
+      // 飞鸟/海鸥：仅中午与下午允许海鸥落到布布头上的彩蛋
+      const allowed =
+        kind === 'rabbit'
+          ? tod !== 'noon'
+          : kind === 'fly'
+            ? tod !== 'evening'
+            : true;
+      if (allowed && this.mapConfig.enableCritterSpawns && this.world.critters.length < maxCritters) {
+        if (kind === 'bird') {
+          const allowSeagullPerch = tod === 'noon' || tod === 'afternoon';
+          this.world.spawnCritter?.('bird', { perch: allowSeagullPerch ? undefined : false });
+        } else {
+          this.world.spawnCritter?.(kind);
+        }
+      }
       const nextDelay = kind === 'bird' ? rnd(6100, 13300) : rnd(5500, 12000);
       this.scheduleCritter(kind, nextDelay);
     });
@@ -936,6 +957,32 @@ export class FlightChessEngine {
         this.splashVisible = false;
         this.emitSnapshot();
       }, 2000);
+    });
+  }
+
+  private showTurnEndSplash(P: PlayerConfig, text: string, durationMs = 2100): void {
+    if (P.type !== 'human') return;
+    this.splashAvatar = P.species === 'panda' ? '🐼' : '🐻';
+    this.splashCharKey = P.key;
+    this.splashText = text;
+    this.splashColor = P.uiColor;
+    this.splashItem = null;
+    this.splashActorName = null;
+    this.splashDetail = null;
+    this.splashTargetCharKey = null;
+    this.splashTargetName = null;
+    this.splashIsHuman = true;
+    this.splashVisible = true;
+    this.emitSnapshot();
+    cancelAnimationFrame(this.splashRaf);
+    if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
+    this.splashRaf = requestAnimationFrame(() => {
+      if (this.disposed) return;
+      this.splashTimer = window.setTimeout(() => {
+        if (this.disposed) return;
+        this.splashVisible = false;
+        this.emitSnapshot();
+      }, durationMs);
     });
   }
 
@@ -1068,7 +1115,7 @@ export class FlightChessEngine {
         : null;
 
     this.diceRig.diceHint.visible =
-      this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget === null && !this.itemBusy;
+      !this.stage4CampfireActive && this.phase === 'awaitRoll' && !this.isAI() && this.pendingItemTarget === null && !this.itemBusy;
     this.world.courtFences.forEach((cf, j) => {
       const pl = this.slotPlayer(j);
       const on = !!pl && this.turn === this.players.indexOf(pl) && this.phase !== 'over';
@@ -1137,6 +1184,7 @@ export class FlightChessEngine {
       winnerPid: this.winnerPid,
       rankings: this.getRankings(),
       gmDie: this.gmNextDie,
+      gmAutoPlay: this.gmAutoPlay,
       turnUsedAtkDef: this.turnUsedAtkDef,
       turnUsedDef: this.turnUsedDef,
       armedSixDie: this.armedSixDie,
@@ -2797,6 +2845,21 @@ export class FlightChessEngine {
     this.emitSnapshot();
   }
 
+  private onEnterTimeOfDay(tod: TimeOfDay): void {
+    if ((tod === 'noon' || tod === 'afternoon') && this.mapConfig.enableCritterSpawns) {
+      this.after(3500, () => {
+        if (this.disposed || (this.timeOfDay !== 'noon' && this.timeOfDay !== 'afternoon')) return;
+        this.world.spawnCritter?.('bird', { species: 'seagull', perch: true });
+      });
+    }
+    if (tod === 'evening') {
+      const nowT = this.clock.elapsedTime;
+      if (this.nextGlobalCakeEatAt - nowT > 18) {
+        this.nextGlobalCakeEatAt = nowT + 6 + Math.random() * 8;
+      }
+    }
+  }
+
   public setGmTimeOfDay(tod: TimeOfDay): void {
     if (this.disposed) return;
     if (this.timeOfDay === tod && this.todBlend >= 1) return;
@@ -2804,7 +2867,35 @@ export class FlightChessEngine {
     this.todTo = this.mapConfig.timePresets[tod];
     this.timeOfDay = tod;
     this.todBlend = 0;
+    this.onEnterTimeOfDay(tod);
     this.emitSnapshot();
+  }
+
+  public toggleGmAutoPlay(): void {
+    if (this.disposed) return;
+    this.gmAutoPlay = !this.gmAutoPlay;
+    this.emitSnapshot();
+    if (!this.gmAutoPlay || this.paused || this.isAI() || this.itemBusy) return;
+    if (this.phase === 'awaitRoll') {
+      this.after(450, () => {
+        if (!this.disposed && this.gmAutoPlay && this.phase === 'awaitRoll' && !this.isAI() && !this.itemBusy) {
+          ensureAudio();
+          if (this.pendingItemTarget !== null) this.cancelItemTarget();
+          this.doRoll();
+        }
+      });
+    } else if (this.phase === 'awaitMove' && this.movable.length > 0 && this.die !== null) {
+      const d = this.die;
+      const picked = this.aiPick(this.movable);
+      this.after(450, () => {
+        if (!this.disposed && this.gmAutoPlay && this.phase === 'awaitMove' && !this.isAI()) {
+          void this.performMove(picked.plane, d);
+        }
+      });
+    } else if (this.phase === 'shopChoice' && this.shopOffer && this.shopOffer.length > 0) {
+      const chosen = this.aiChooseShopItem(this.shopOffer, this.shopPid ?? this.turn);
+      this.pickShopItem(chosen);
+    }
   }
 
   public setQuality(q: GraphicsQuality): void {
@@ -3338,8 +3429,8 @@ export class FlightChessEngine {
   private async animTwinDice(d1: number, d2: number): Promise<void> {
     sndRoll();
     const { dice, dice2, diceShadow, dice2Shadow } = this.diceRig;
-    dice2.visible = true;
-    dice2Shadow.visible = true;
+    dice2.visible = !this.stage4CampfireActive;
+    dice2Shadow.visible = !this.stage4CampfireActive;
     dice.scale.setScalar(0.47);
     dice2.scale.setScalar(0.47);
     this.hudDieRolling = true;
@@ -3509,8 +3600,14 @@ export class FlightChessEngine {
             ? '⚠️ 累计已达 3 个 6！本次可移动，但不再触发连投'
             : '🎲 掷出 6 点（本回合道具效果，不额外送连投）',
         );
+        if (this.sixChain >= 3 && !this.isAI()) {
+          this.showTurnEndSplash(this.cur(), '⚠️ 连 6 已达上限，本次移动后回合结束', 2300);
+        }
       } else if (this.sixChain >= 3) {
         this.setMsg('⚠️ 连续三个 6！本次可移动，但不再掷');
+        if (!this.isAI()) {
+          this.showTurnEndSplash(this.cur(), '⚠️ 连 6 已达上限，本次移动后回合结束', 2300);
+        }
       }
     } else if (!this.pendingExtraRoll) {
       this.sixChain = 0;
@@ -3538,10 +3635,19 @@ export class FlightChessEngine {
     if (this.disposed) return;
     const cands = this.movablePlanes(this.turn, die, allowTakeoff);
     if (cands.length === 0) {
-      this.setMsg(`🎲 掷出 ${die} 点，暂无可移动飞机`);
-      await this.sleep(1000);
+      const willRollAgain = this.consumeExtraRoll(die);
+      this.setMsg(`🎲 掷出 ${die} 点，暂无可移动小熊`);
+      if (!this.isAI()) {
+        this.showTurnEndSplash(
+          this.cur(),
+          willRollAgain
+            ? `🎲 掷出 ${die} 点无棋可走 · 奖励再掷一次！`
+            : `🎲 掷出 ${die} 点无棋可走 · 回合结束`,
+          1900,
+        );
+      }
+      await this.sleep(!this.isAI() ? 1600 : 1000);
       if (!this.disposed) {
-        const willRollAgain = this.consumeExtraRoll(die);
         this.endTurn(willRollAgain);
       }
       return;
@@ -3590,6 +3696,14 @@ export class FlightChessEngine {
       this.deadline = this.timeMs + TIMEOUT;
       this.highlight(cands);
       this.emitSnapshot();
+      if (this.gmAutoPlay) {
+        const picked = this.aiPick(cands);
+        this.after(550, () => {
+          if (!this.disposed && this.gmAutoPlay && this.phase === 'awaitMove' && !this.isAI()) {
+            void this.performMove(picked.plane, die);
+          }
+        });
+      }
     }
   }
 
@@ -3703,7 +3817,7 @@ export class FlightChessEngine {
     pt.headPivot.rotation.y = Math.sin(v * 0.5) * 0.18;
   }
 
-  /** 终点到达庆祝：红围巾飘扬 + 胸前摆手左右摇摆跳舞动作 */
+  /** 终点到达庆祝：舒缓节奏双手执红绸左右挥甩跳舞动作 */
   private async celebrateGoal(plane: PlaneData): Promise<void> {
     plane.animating = true;
     const m = plane.mesh;
@@ -3715,30 +3829,46 @@ export class FlightChessEngine {
       faceParts.mouthOpen.visible = true;
     }
     if (pt.redScarf) pt.redScarf.visible = true;
+    if (pt.leftRibbonPivot) pt.leftRibbonPivot.visible = true;
+    if (pt.rightRibbonPivot) pt.rightRibbonPivot.visible = true;
     this.spawnImpact(m.position.x, m.position.z);
-    await this.tween(1450, (t) => {
-      const beat = t * Math.PI * 6;
+    await this.tween(1700, (t) => {
+      const beat = t * Math.PI * 2.5;
       const sway = Math.sin(beat);
       const bounce = Math.abs(Math.sin(beat));
-      m.position.y = 0.12 + bounce * 0.2;
-      m.rotation.y = baseYaw + sway * 0.34;
-      pt.animRoot.rotation.z = sway * 0.23;
-      pt.animRoot.scale.set(1 + (1 - bounce) * 0.05, 1 + bounce * 0.08, 1 + (1 - bounce) * 0.05);
-      pt.leftArm.rotation.x = -1.12 + Math.sin(beat * 2) * 0.16;
-      pt.leftArm.rotation.z = 0.56 + sway * 0.42;
-      pt.rightArm.rotation.x = -1.12 - Math.sin(beat * 2) * 0.16;
-      pt.rightArm.rotation.z = -0.56 + sway * 0.42;
-      pt.leftFoot.rotation.x = sway * 0.52;
-      pt.rightFoot.rotation.x = -sway * 0.52;
-      pt.headPivot.rotation.z = -sway * 0.24;
-      pt.headPivot.rotation.y = sway * 0.26;
-      pt.headPivot.rotation.x = bounce * 0.09;
-      if (pt.scarfTailPivot) {
-        pt.scarfTailPivot.rotation.z = -0.32 + Math.sin(beat - 0.65) * 0.56;
-        pt.scarfTailPivot.rotation.y = Math.cos(beat - 0.4) * 0.42;
+      m.position.y = 0.12 + bounce * 0.14;
+      m.rotation.y = baseYaw + sway * 0.24;
+      pt.animRoot.rotation.z = sway * 0.16;
+      pt.animRoot.scale.set(1 + (1 - bounce) * 0.035, 1 + bounce * 0.06, 1 + (1 - bounce) * 0.035);
+      // 双手微向前伸并同向左右挥舞红绸（外偏防穿模）
+      pt.leftArm.rotation.x = -0.78;
+      pt.leftArm.rotation.y = sway * 0.32;
+      pt.leftArm.rotation.z = 0.22 + sway * 0.32;
+      pt.rightArm.rotation.x = -0.78;
+      pt.rightArm.rotation.y = sway * 0.32;
+      pt.rightArm.rotation.z = -0.22 + sway * 0.32;
+      pt.leftFoot.rotation.x = sway * 0.36;
+      pt.rightFoot.rotation.x = -sway * 0.36;
+      pt.headPivot.rotation.z = -sway * 0.16;
+      pt.headPivot.rotation.y = sway * 0.18;
+      pt.headPivot.rotation.x = bounce * 0.06;
+      const lag1 = Math.sin(beat - 0.65);
+      const lag2 = Math.sin(beat - 1.25);
+      if (pt.leftRibbonPivot) {
+        pt.leftRibbonPivot.rotation.z = -0.18 + lag1 * 0.42;
+        pt.leftRibbonPivot.rotation.y = -0.22 + lag1 * 0.22;
       }
-      if (pt.scarfTailTip) {
-        pt.scarfTailTip.rotation.z = Math.sin(beat - 1.35) * 0.48;
+      if (pt.leftRibbonTip) {
+        pt.leftRibbonTip.rotation.z = lag2 * 0.46;
+        pt.leftRibbonTip.rotation.y = -0.12 + lag2 * 0.22;
+      }
+      if (pt.rightRibbonPivot) {
+        pt.rightRibbonPivot.rotation.z = 0.18 + lag1 * 0.42;
+        pt.rightRibbonPivot.rotation.y = 0.22 + lag1 * 0.22;
+      }
+      if (pt.rightRibbonTip) {
+        pt.rightRibbonTip.rotation.z = lag2 * 0.46;
+        pt.rightRibbonTip.rotation.y = 0.12 + lag2 * 0.22;
       }
     });
     m.position.y = 0.12;
@@ -4581,7 +4711,7 @@ export class FlightChessEngine {
       // 直接踩到商店格子时：先打开商店选购，选购完成后再继续触发同色 +4 大跳/飞行
       if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
         const offer = this.pickUniqueShopOffer();
-        if (this.isAI()) {
+        if (this.isAI() || this.gmAutoPlay) {
           const chosen = this.aiChooseShopItem(offer, plane.pid);
           this.grantItem(plane.pid, chosen);
           const def = ITEM_DEFS[chosen];
@@ -4680,7 +4810,7 @@ export class FlightChessEngine {
     // 踩中商店格子：15 秒内从 3 张不重复随机道具卡中选择 1 张
     if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
       const offer = this.pickUniqueShopOffer();
-      if (this.isAI()) {
+      if (this.isAI() || this.gmAutoPlay) {
         const chosen = this.aiChooseShopItem(offer, plane.pid);
         this.grantItem(plane.pid, chosen);
         const def = ITEM_DEFS[chosen];
@@ -4861,6 +4991,14 @@ export class FlightChessEngine {
       this.deadline = this.timeMs + TIMEOUT;
       sndYourTurn();
       this.showTurnSplash(this.cur(), isBonus);
+      if (this.gmAutoPlay) {
+        this.after(700, () => {
+          if (!this.disposed && this.gmAutoPlay && this.phase === 'awaitRoll' && !this.isAI() && !this.itemBusy) {
+            ensureAudio();
+            this.doRoll();
+          }
+        });
+      }
       // 玩家思考期间，旁观 AI 按性格概率延后或分批闲聊/催促
       const aiWatchers = this.players
         .map((pl, idx) => ({ pl, idx }))
@@ -5167,6 +5305,10 @@ export class FlightChessEngine {
       0,
       ...this.players.map((_, pid) => this.planesOf(pid).filter((p) => p.pos === HOME_END).length),
     );
+    if (maxDone >= 4 && !this.stage4CampfireActive) {
+      this.stage4CampfireActive = true;
+      this.setMsg('🔥 有人全员完赛！中央骰台升起了温暖篝火~');
+    }
     const stage = Math.min(3, maxDone);
     if (stage <= this.maxDoneStage) return;
     this.maxDoneStage = stage;
@@ -5176,8 +5318,7 @@ export class FlightChessEngine {
     this.todTo = this.mapConfig.timePresets[nextTod];
     this.timeOfDay = nextTod;
     this.todBlend = 0;
-
-
+    this.onEnterTimeOfDay(nextTod);
     this.emitSnapshot();
   }
 
@@ -5262,6 +5403,17 @@ export class FlightChessEngine {
       this.world.starMat.opacity = starOp;
       this.world.moonMat.opacity = starOp * 0.92;
       this.world.nightSkyGroup.visible = starOp > 0.015;
+    }
+
+    const htn = this.world.heartTreeNight;
+    if (htn) {
+      const active = nightScale > 0.02;
+      htn.heartMat.opacity = nightScale * 0.92;
+      htn.heartPoints.visible = active;
+      htn.groundHaloMat.opacity = nightScale * 0.78;
+      htn.groundHalo.visible = active;
+      htn.spotLight.intensity = nightScale * 6.6;
+      htn.dioramaGroup.visible = nightScale > 0.15;
     }
 
     if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
@@ -5358,6 +5510,344 @@ export class FlightChessEngine {
         this.world.nightSkyGroup.rotation.y = t * 0.006;
       }
 
+      if (this.stage4CampfireActive) {
+        if (this.campfireBlend < 1) {
+          this.campfireBlend = Math.min(1, this.campfireBlend + dt / 2.6);
+          const ease = 1 - Math.pow(1 - this.campfireBlend, 2.2);
+          const diceScale = 0.52 * (1 - ease);
+          if (diceScale <= 0.015) {
+            this.diceRig.dice.visible = false;
+            this.diceRig.diceShadow.visible = false;
+            this.diceRig.diceHint.visible = false;
+          } else {
+            this.diceRig.dice.scale.setScalar(diceScale);
+            this.diceRig.dice.position.y = DICE_REST_Y + ease * 0.35;
+            this.diceRig.dice.rotation.y += dt * 2.4;
+            this.diceRig.diceShadow.scale.setScalar(1 - ease);
+            this.diceRig.diceHint.scale.setScalar(1 - ease);
+          }
+          this.campfireRig.group.visible = true;
+          this.campfireRig.group.scale.setScalar(0.05 + 0.95 * ease);
+        }
+        // 篝火火焰与火星跳动动画
+        this.campfireRig.light.intensity =
+          (2.6 + Math.sin(t * 9.5) * 0.35 + Math.cos(t * 15.2) * 0.2) * this.campfireBlend;
+        this.campfireRig.flames.forEach((fm, fi) => {
+          const sy = 0.86 + Math.sin(t * (7.5 + fi * 2.1) + fi * 1.4) * 0.22;
+          const sx = 0.92 + Math.cos(t * (6.2 + fi * 1.7) + fi) * 0.12;
+          fm.scale.set(sx, sy, sx);
+          fm.rotation.z = Math.sin(t * 5.2 + fi * 1.7) * 0.14;
+        });
+        const spAttr = this.campfireRig.sparks.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const spArr = spAttr.array as Float32Array;
+        for (let i = 0; i < this.campfireRig.sparkBase.length; i++) {
+          const sb = this.campfireRig.sparkBase[i];
+          const life = (t * sb.speed + sb.phase) % 1;
+          const ang = sb.angle + life * 1.4;
+          const rad = sb.radius * (1 - life * 0.35);
+          spArr[i * 3] = Math.cos(ang) * rad;
+          spArr[i * 3 + 1] = 0.22 + life * 0.92;
+          spArr[i * 3 + 2] = Math.sin(ang) * rad;
+        }
+        spAttr.needsUpdate = true;
+      }
+
+      const htn = this.world.heartTreeNight;
+      if (htn && htn.heartPoints.visible) {
+        // 1) 4 组树冠红灯笼波浪流光呼吸
+        const baseLant = this.mapConfig.timePresets[this.timeOfDay].lanternEmissive;
+        htn.waveMats.forEach((wm, wi) => {
+          wm.emissiveIntensity = baseLant * (0.72 + 0.36 * Math.sin(t * 2.8 - wi * 1.45));
+        });
+
+        // 2) 树冠小爱心粒子漂浮上升
+        const hAttr = htn.heartPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const hArr = hAttr.array as Float32Array;
+        for (let i = 0; i < htn.heartBase.length; i++) {
+          const hb = htn.heartBase[i];
+          const ph = t * hb.speed + hb.phase;
+          hArr[i * 3] = hb.x + Math.cos(ph * 0.8) * 0.14;
+          hArr[i * 3 + 1] = hb.y + ((ph * 0.25) % 0.65);
+          hArr[i * 3 + 2] = hb.z + Math.sin(ph * 0.8) * 0.14;
+        }
+        hAttr.needsUpdate = true;
+
+        // 3) 树池地面光环旋转呼吸
+        htn.groundHalo.rotation.z = t * 0.28;
+        const gs = 1 + Math.sin(t * 2.1) * 0.05;
+        htn.groundHalo.scale.set(gs, gs, 1);
+
+        // 4) 树冠投影秀（并排一二 & 布布手指比耶动画，15fps 刷新 512x512 SpotLight.map）
+        if (t - htn.lastProjDraw >= 0.066) {
+          htn.lastProjDraw = t;
+          const pg = htn.projCanvas.getContext('2d');
+          if (pg) {
+            pg.fillStyle = '#000000';
+            pg.fillRect(0, 0, 512, 512);
+
+            const drawPeaceBear = (
+              cx: number,
+              cy: number,
+              isPanda: boolean,
+              phaseOffset: number,
+            ) => {
+              const bob = Math.sin(t * 3.4 + phaseOffset) * 5;
+              const tilt = Math.sin(t * 2.4 + phaseOffset) * 0.045;
+              const pawBob = Math.sin(t * 5.6 + phaseOffset) * 5.5;
+              const pawRot = Math.sin(t * 5.2 + phaseOffset) * 0.16;
+              const blinkCycle = (t + phaseOffset * 0.7) % 4.2;
+              const isBlinking = blinkCycle > 4.02;
+
+              const outline = '#3b251c';
+              const bodyCol = isPanda ? '#ffffff' : '#cc9978';
+              const blushCol = isPanda ? '#fab8bf' : '#f4cc86';
+
+              pg.save();
+              pg.translate(cx, cy + bob);
+              pg.rotate(tilt);
+
+              // 柔和白色外发光轮廓，模拟投影灯亮边
+              pg.shadowColor = 'rgba(255, 246, 240, 0.92)';
+              pg.shadowBlur = 18;
+
+              // 1) 圆耳（熊猫实心深棕；布布外棕内深棕）
+              for (const sx of [-1, 1]) {
+                pg.fillStyle = isPanda ? outline : bodyCol;
+                pg.strokeStyle = '#ffffff';
+                pg.lineWidth = 10;
+                pg.beginPath();
+                pg.arc(sx * 70, -68, 25, 0, Math.PI * 2);
+                pg.stroke();
+                pg.fill();
+
+                pg.strokeStyle = outline;
+                pg.lineWidth = 6;
+                pg.beginPath();
+                pg.arc(sx * 70, -68, 24, 0, Math.PI * 2);
+                pg.fill();
+                pg.stroke();
+
+                if (!isPanda) {
+                  pg.fillStyle = outline;
+                  pg.beginPath();
+                  pg.arc(sx * 70, -68, 13, 0, Math.PI * 2);
+                  pg.fill();
+                }
+              }
+
+              // 2) 奶白一二胸前深棕小领结
+              if (isPanda) {
+                pg.fillStyle = outline;
+                pg.strokeStyle = '#ffffff';
+                pg.lineWidth = 8;
+                pg.beginPath();
+                pg.ellipse(-10, 84, 15, 11, -0.35, 0, Math.PI * 2);
+                pg.ellipse(10, 84, 15, 11, 0.35, 0, Math.PI * 2);
+                pg.stroke();
+                pg.fill();
+              }
+
+              // 3) 软萌麻糬大脸轮廓（上圆下微鼓腮帮）
+              const traceHead = () => {
+                pg.beginPath();
+                pg.moveTo(0, -82);
+                pg.bezierCurveTo(64, -82, 92, -46, 94, -2);
+                pg.bezierCurveTo(96, 44, 80, 74, 0, 74);
+                pg.bezierCurveTo(-80, 74, -96, 44, -94, -2);
+                pg.bezierCurveTo(-92, -46, -64, -82, 0, -82);
+                pg.closePath();
+              };
+
+              // 白色贴纸外描边
+              traceHead();
+              pg.strokeStyle = '#ffffff';
+              pg.lineWidth = 12;
+              pg.stroke();
+
+              // 脸部底色 + 深棕描边
+              pg.shadowBlur = 0;
+              traceHead();
+              pg.fillStyle = bodyCol;
+              pg.fill();
+              pg.strokeStyle = outline;
+              pg.lineWidth = 6.5;
+              pg.stroke();
+
+              // 4) 大圆腮红
+              pg.fillStyle = blushCol;
+              for (const sx of [-1, 1]) {
+                pg.beginPath();
+                pg.ellipse(sx * 64, 30, 21, 18, 0, 0, Math.PI * 2);
+                pg.fill();
+              }
+
+              // 5) 低位圆眼睛（带偶尔眨眼）
+              pg.fillStyle = outline;
+              pg.strokeStyle = outline;
+              pg.lineWidth = 4.5;
+              pg.lineCap = 'round';
+              for (const sx of [-1, 1]) {
+                if (isBlinking) {
+                  pg.beginPath();
+                  pg.moveTo(sx * 45 - 8, 8);
+                  pg.quadraticCurveTo(sx * 45, 2, sx * 45 + 8, 8);
+                  pg.stroke();
+                } else {
+                  pg.beginPath();
+                  pg.arc(sx * 45, 8, 10, 0, Math.PI * 2);
+                  pg.fill();
+                }
+              }
+
+              // 6) 经典 w 嘴 + 开心小舌头
+              pg.fillStyle = '#f4848c';
+              pg.beginPath();
+              pg.ellipse(0, 23, 8.5, 13, 0, 0, Math.PI * 2);
+              pg.fill();
+              pg.strokeStyle = outline;
+              pg.lineWidth = 4;
+              pg.stroke();
+
+              pg.fillStyle = bodyCol;
+              pg.beginPath();
+              pg.rect(-18, 0, 36, 15);
+              pg.fill();
+
+              pg.strokeStyle = outline;
+              pg.lineWidth = 4.2;
+              pg.lineCap = 'round';
+              pg.beginPath();
+              pg.moveTo(-12, 7);
+              pg.quadraticCurveTo(-6, 18, 0, 9);
+              pg.quadraticCurveTo(6, 18, 12, 7);
+              pg.stroke();
+
+              // 7) 招牌「手指比耶 ✌️」小爪子（带上下摆动动画）
+              pg.save();
+              pg.translate(-44, 54 + pawBob);
+              pg.rotate(-0.18 + pawRot);
+
+              // 两根比耶手指 + 圆润手掌
+              pg.fillStyle = bodyCol;
+              pg.strokeStyle = outline;
+              pg.lineWidth = 5.5;
+              pg.lineJoin = 'round';
+
+              // 手指 1（竖起）
+              pg.beginPath();
+              pg.ellipse(-6, -24, 9.5, 16, -0.22, 0, Math.PI * 2);
+              pg.fill();
+              pg.stroke();
+              // 手指 2（斜起成 V）
+              pg.beginPath();
+              pg.ellipse(12, -20, 9.5, 15.5, 0.36, 0, Math.PI * 2);
+              pg.fill();
+              pg.stroke();
+              // 圆润手掌底座
+              pg.beginPath();
+              pg.ellipse(2, 2, 24, 21, 0, 0, Math.PI * 2);
+              pg.fill();
+              pg.stroke();
+              // 弯曲拇指小弧线
+              pg.lineWidth = 4.2;
+              pg.beginPath();
+              pg.arc(4, 3, 9.5, -0.4, Math.PI * 0.95);
+              pg.stroke();
+              pg.restore();
+
+              pg.restore();
+            };
+
+            // 左：奶白一二，右：焦糖布布（并排投影）
+            drawPeaceBear(146, 266, true, 0);
+            drawPeaceBear(366, 266, false, 1.35);
+
+            // 上方点缀两颗缓缓闪烁的小星星与爱心
+            const spAlpha = 0.65 + 0.35 * Math.sin(t * 3.8);
+            pg.fillStyle = `rgba(255, 188, 212, ${spAlpha})`;
+            pg.beginPath();
+            pg.moveTo(256, 152);
+            pg.bezierCurveTo(234, 136, 232, 114, 246, 112);
+            pg.bezierCurveTo(254, 110, 256, 120, 256, 120);
+            pg.bezierCurveTo(256, 120, 258, 110, 266, 112);
+            pg.bezierCurveTo(280, 114, 278, 136, 256, 152);
+            pg.fill();
+
+            htn.projTex.needsUpdate = true;
+          }
+        }
+
+        // 5) 树下「一二 & 布布」10 秒许愿拍照小剧场
+        if (htn.dioramaGroup.visible) {
+          const cyc = t % 10.0;
+          const yPt = htn.yierMesh.userData.parts as PlaneParts | undefined;
+          const bPt = htn.bubuMesh.userData.parts as PlaneParts | undefined;
+          const setPose = (
+            mesh: THREE.Group,
+            pt: PlaneParts | undefined,
+            sideSign: number,
+          ) => {
+            if (!pt) return;
+            const fp = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
+            if (cyc < 4.0) {
+              // 阶段1：转身仰望爱心树许愿（双手合十）
+              mesh.rotation.y = Math.PI - sideSign * 0.18;
+              pt.animRoot.position.y = Math.sin(t * 2.2) * 0.015;
+              pt.headPivot.rotation.x = -0.34;
+              pt.headPivot.rotation.z = sideSign * 0.08;
+              pt.leftArm.rotation.x = -1.05;
+              pt.leftArm.rotation.z = 0.45;
+              pt.rightArm.rotation.x = -1.05;
+              pt.rightArm.rotation.z = -0.45;
+              if (fp) { fp.mouthW.visible = true; fp.mouthOpen.visible = false; }
+            } else if (cyc < 7.2) {
+              // 阶段2：面向三脚架相机比耶贴脸合影
+              mesh.rotation.y = -sideSign * 0.16;
+              pt.animRoot.position.y = 0;
+              pt.headPivot.rotation.x = 0.04;
+              pt.headPivot.rotation.z = sideSign * 0.14;
+              if (sideSign < 0) {
+                pt.leftArm.rotation.x = -0.5;
+                pt.leftArm.rotation.z = 1.35 + Math.sin(t * 7) * 0.18;
+                pt.rightArm.rotation.x = -0.3;
+                pt.rightArm.rotation.z = -0.4;
+              } else {
+                pt.rightArm.rotation.x = -0.5;
+                pt.rightArm.rotation.z = -1.35 - Math.sin(t * 7) * 0.18;
+                pt.leftArm.rotation.x = -0.3;
+                pt.leftArm.rotation.z = 0.4;
+              }
+              if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
+            } else {
+              // 阶段3：拍完开心蹦跳
+              const jump = Math.abs(Math.sin((cyc - 7.2) * Math.PI * 2.5));
+              mesh.rotation.y = -sideSign * 0.12;
+              pt.animRoot.position.y = jump * 0.11;
+              pt.headPivot.rotation.x = 0;
+              pt.headPivot.rotation.z = Math.sin(t * 8) * 0.12;
+              pt.leftArm.rotation.x = 0;
+              pt.leftArm.rotation.z = 1.2 + jump * 0.3;
+              pt.rightArm.rotation.x = 0;
+              pt.rightArm.rotation.z = -1.2 - jump * 0.3;
+              if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
+            }
+          };
+          setPose(htn.yierMesh, yPt, -1);
+          setPose(htn.bubuMesh, bPt, 1);
+
+          // 相机闪光灯在 cyc = 6.1s 触发脉冲
+          if (cyc >= 6.1 && cyc < 6.6) {
+            const fp = 1 - (cyc - 6.1) / 0.5;
+            htn.flashLight.intensity = fp * fp * 4.5;
+            htn.flashHaloMat.opacity = fp * 0.95;
+            htn.flashHalo.scale.setScalar(0.6 + (1 - fp) * 1.4);
+          } else {
+            htn.flashLight.intensity = 0;
+            htn.flashHaloMat.opacity = 0;
+          }
+        }
+      }
+
       if (t >= this.nextWeatherAudioAt) {
         playWeatherAmbientPulse(this.timeOfDay);
         this.nextWeatherAudioAt = t + (this.timeOfDay === 'evening' ? 5.2 : 6.8) + Math.random() * 4.5;
@@ -5399,7 +5889,8 @@ export class FlightChessEngine {
           const picked = cakePool[(Math.random() * cakePool.length) | 0];
           picked.cakeEat!.eatStart = t;
         }
-        this.nextGlobalCakeEatAt = t + 50 + Math.random() * 20;
+        const baseGap = this.timeOfDay === 'evening' ? 25 + Math.random() * 10 : 50 + Math.random() * 20;
+        this.nextGlobalCakeEatAt = t + baseGap;
       }
 
       for (const rt of this.world.rideToys) {
@@ -5552,8 +6043,16 @@ export class FlightChessEngine {
             eqRing.rotation.z = t * 1.45 + p.phase;
             eqRing.position.y = 0.34 + Math.sin(t * 3.1 + p.phase) * 0.02;
           }
-          const sTotal = p.pos >= 1 ? ((p.mesh.userData.stackTotal as number) || 1) : 1;
-          const sIdx = p.pos >= 1 ? ((p.mesh.userData.stackIdx as number) || 0) : 0;
+          let sTotal = 1;
+          let sIdx = 0;
+          if (p.pos >= 1 && p.pos < HOME_END) {
+            const liveStack = this.planes
+              .filter((q) => q.pid === p.pid && q.pos === p.pos)
+              .sort((a, b) => a.idx - b.idx);
+            sTotal = Math.max(1, liveStack.length);
+            const foundIdx = liveStack.indexOf(p);
+            sIdx = foundIdx >= 0 ? foundIdx : 0;
+          }
           const pulse = 1 + Math.sin(t * 2.6 + p.phase) * 0.02;
           if (sTotal >= 2) {
             const centerOffsetY = ((sTotal - 1) * 0.5 - sIdx) * (STACK_STEP_Y / 0.92);
@@ -5699,13 +6198,14 @@ export class FlightChessEngine {
           p.mesh.rotation.set(0, baseYaw, 0);
         }
 
-        if (pt.redScarf) {
-          pt.redScarf.visible = p.pos === HOME_END;
-        }
+        const showRibbon = p.pos === HOME_END;
+        if (pt.redScarf) pt.redScarf.visible = showRibbon;
+        if (pt.leftRibbonPivot) pt.leftRibbonPivot.visible = showRibbon;
+        if (pt.rightRibbonPivot) pt.rightRibbonPivot.visible = showRibbon;
 
         if (p.pos === HOME_END) {
-          // 终点方阵持续跳「红围巾甩尾 + 胸前摆手小碎步」舞，张开开心小嘴
-          const v = t * 5.6 + p.pid * 0.65;
+          // 终点方阵舒缓跳「双手执红绸左右甩」舞，张开开心小嘴
+          const v = t * 3.1 + p.pid * 0.65;
           const sway = Math.sin(v);
           const bounce = Math.abs(Math.sin(v));
           const faceParts = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
@@ -5714,25 +6214,38 @@ export class FlightChessEngine {
             faceParts.mouthOpen.visible = true;
           }
           p.mesh.scale.setScalar(baseScale);
-          pt.animRoot.position.y = bounce * 0.115;
-          pt.animRoot.rotation.z = sway * 0.21;
-          pt.animRoot.rotation.y = sway * 0.16;
-          pt.animRoot.scale.set(1 + (1 - bounce) * 0.04, 1 + bounce * 0.06, 1 + (1 - bounce) * 0.04);
-          pt.leftArm.rotation.x = -1.1 + Math.sin(v * 2) * 0.14;
-          pt.leftArm.rotation.z = 0.54 + sway * 0.4;
-          pt.rightArm.rotation.x = -1.1 - Math.sin(v * 2) * 0.14;
-          pt.rightArm.rotation.z = -0.54 + sway * 0.4;
-          pt.leftFoot.rotation.x = sway * 0.48;
-          pt.rightFoot.rotation.x = -sway * 0.48;
-          pt.headPivot.rotation.z = -sway * 0.2;
-          pt.headPivot.rotation.y = sway * 0.22;
-          pt.headPivot.rotation.x = bounce * 0.08;
-          if (pt.scarfTailPivot) {
-            pt.scarfTailPivot.rotation.z = -0.3 + Math.sin(v - 0.65) * 0.52;
-            pt.scarfTailPivot.rotation.y = Math.cos(v - 0.4) * 0.38;
+          pt.animRoot.position.y = bounce * 0.09;
+          pt.animRoot.rotation.z = sway * 0.15;
+          pt.animRoot.rotation.y = sway * 0.14;
+          pt.animRoot.scale.set(1 + (1 - bounce) * 0.03, 1 + bounce * 0.05, 1 + (1 - bounce) * 0.03);
+          pt.leftArm.rotation.x = -0.76;
+          pt.leftArm.rotation.y = sway * 0.3;
+          pt.leftArm.rotation.z = 0.22 + sway * 0.3;
+          pt.rightArm.rotation.x = -0.76;
+          pt.rightArm.rotation.y = sway * 0.3;
+          pt.rightArm.rotation.z = -0.22 + sway * 0.3;
+          pt.leftFoot.rotation.x = sway * 0.34;
+          pt.rightFoot.rotation.x = -sway * 0.34;
+          pt.headPivot.rotation.z = -sway * 0.14;
+          pt.headPivot.rotation.y = sway * 0.16;
+          pt.headPivot.rotation.x = bounce * 0.06;
+          const lag1 = Math.sin(v - 0.65);
+          const lag2 = Math.sin(v - 1.25);
+          if (pt.leftRibbonPivot) {
+            pt.leftRibbonPivot.rotation.z = -0.18 + lag1 * 0.4;
+            pt.leftRibbonPivot.rotation.y = -0.22 + lag1 * 0.22;
           }
-          if (pt.scarfTailTip) {
-            pt.scarfTailTip.rotation.z = Math.sin(v - 1.35) * 0.45;
+          if (pt.leftRibbonTip) {
+            pt.leftRibbonTip.rotation.z = lag2 * 0.44;
+            pt.leftRibbonTip.rotation.y = -0.12 + lag2 * 0.22;
+          }
+          if (pt.rightRibbonPivot) {
+            pt.rightRibbonPivot.rotation.z = 0.18 + lag1 * 0.4;
+            pt.rightRibbonPivot.rotation.y = 0.22 + lag1 * 0.22;
+          }
+          if (pt.rightRibbonTip) {
+            pt.rightRibbonTip.rotation.z = lag2 * 0.44;
+            pt.rightRibbonTip.rotation.y = 0.12 + lag2 * 0.22;
           }
         } else if (movableSet && movableSet.has(p)) {
           const syncPhase = p.pos === 0 || stackTotal >= 2 ? p.pid * 1.37 : p.phase;
@@ -5968,62 +6481,64 @@ export class FlightChessEngine {
         }
       });
 
-      const showingTwin = this.twinDice !== null || (this.phase === 'rolling' && this.twinDiceUsedForRoll);
-      const targetDiceScale = showingTwin
-        ? 0.47
-        : this.phase === 'awaitRoll' && !this.isAI() && this.diceHovered
-          ? 0.58
-          : 0.52;
-      _scratchDiceScale.set(targetDiceScale, targetDiceScale, targetDiceScale);
-      this.diceRig.dice.scale.lerp(_scratchDiceScale, Math.min(1, dt * 12));
-      if (!showingTwin && this.phase !== 'rolling') {
-        this.diceRig.dice2.visible = false;
-        this.diceRig.dice2Shadow.visible = false;
-        this.diceRig.dice.position.x = THREE.MathUtils.lerp(
-          this.diceRig.dice.position.x,
-          0,
-          Math.min(1, dt * 10),
-        );
-        this.diceRig.diceShadow.position.x = this.diceRig.dice.position.x;
-      }
+      if (!this.stage4CampfireActive) {
+        const showingTwin = this.twinDice !== null || (this.phase === 'rolling' && this.twinDiceUsedForRoll);
+        const targetDiceScale = showingTwin
+          ? 0.47
+          : this.phase === 'awaitRoll' && !this.isAI() && this.diceHovered
+            ? 0.58
+            : 0.52;
+        _scratchDiceScale.set(targetDiceScale, targetDiceScale, targetDiceScale);
+        this.diceRig.dice.scale.lerp(_scratchDiceScale, Math.min(1, dt * 12));
+        if (!showingTwin && this.phase !== 'rolling') {
+          this.diceRig.dice2.visible = false;
+          this.diceRig.dice2Shadow.visible = false;
+          this.diceRig.dice.position.x = THREE.MathUtils.lerp(
+            this.diceRig.dice.position.x,
+            0,
+            Math.min(1, dt * 10),
+          );
+          this.diceRig.diceShadow.position.x = this.diceRig.dice.position.x;
+        }
 
-      if (this.diceRig.diceHint.visible) {
-        const pulse = 0.5 + 0.5 * Math.sin(t * 3.4);
-        const rippleCycle = (t * 0.72) % 1;
-        this.diceRig.dhRing.scale.setScalar(
-          (this.diceHovered ? 1.24 : 1.12) + pulse * 0.1,
-        );
-        (this.diceRig.dhRing.material as THREE.MeshBasicMaterial).opacity =
-          (this.diceHovered ? 0.98 : 0.84) + pulse * 0.16;
-        this.diceRig.dhRipple.scale.setScalar(1 + rippleCycle * 0.95);
-        (this.diceRig.dhRipple.material as THREE.MeshBasicMaterial).opacity =
-          (1 - rippleCycle) * (this.diceHovered ? 0.78 : 0.58);
+        if (this.diceRig.diceHint.visible) {
+          const pulse = 0.5 + 0.5 * Math.sin(t * 3.4);
+          const rippleCycle = (t * 0.72) % 1;
+          this.diceRig.dhRing.scale.setScalar(
+            (this.diceHovered ? 1.24 : 1.12) + pulse * 0.1,
+          );
+          (this.diceRig.dhRing.material as THREE.MeshBasicMaterial).opacity =
+            (this.diceHovered ? 0.98 : 0.84) + pulse * 0.16;
+          this.diceRig.dhRipple.scale.setScalar(1 + rippleCycle * 0.95);
+          (this.diceRig.dhRipple.material as THREE.MeshBasicMaterial).opacity =
+            (1 - rippleCycle) * (this.diceHovered ? 0.78 : 0.58);
 
-        const idleFloatY =
-          DICE_REST_Y + (this.diceHovered ? 0.24 : 0.16) + Math.sin(t * 3.2) * 0.055;
-        this.diceRig.dice.position.y = THREE.MathUtils.lerp(
-          this.diceRig.dice.position.y,
-          idleFloatY,
-          Math.min(1, dt * 10),
-        );
-        const shadowScale = Math.max(0.68, 1 - (this.diceRig.dice.position.y - DICE_REST_Y) * 0.85);
-        this.diceRig.diceShadow.scale.setScalar(shadowScale);
-        this.diceRig.diceMaterials.forEach((m) => {
-          m.emissive.setHex(0xffeaa8);
-          m.emissiveIntensity = (this.diceHovered ? 0.26 : 0.14) + pulse * 0.1;
-        });
-      } else {
-        if (this.phase !== 'rolling') {
+          const idleFloatY =
+            DICE_REST_Y + (this.diceHovered ? 0.24 : 0.16) + Math.sin(t * 3.2) * 0.055;
           this.diceRig.dice.position.y = THREE.MathUtils.lerp(
             this.diceRig.dice.position.y,
-            DICE_REST_Y,
-            Math.min(1, dt * 12),
+            idleFloatY,
+            Math.min(1, dt * 10),
           );
+          const shadowScale = Math.max(0.68, 1 - (this.diceRig.dice.position.y - DICE_REST_Y) * 0.85);
+          this.diceRig.diceShadow.scale.setScalar(shadowScale);
+          this.diceRig.diceMaterials.forEach((m) => {
+            m.emissive.setHex(0xffeaa8);
+            m.emissiveIntensity = (this.diceHovered ? 0.26 : 0.14) + pulse * 0.1;
+          });
+        } else {
+          if (this.phase !== 'rolling') {
+            this.diceRig.dice.position.y = THREE.MathUtils.lerp(
+              this.diceRig.dice.position.y,
+              DICE_REST_Y,
+              Math.min(1, dt * 12),
+            );
+          }
+          this.diceRig.diceShadow.scale.setScalar(1);
+          this.diceRig.diceMaterials.forEach((m) => {
+            m.emissiveIntensity = 0;
+          });
         }
-        this.diceRig.diceShadow.scale.setScalar(1);
-        this.diceRig.diceMaterials.forEach((m) => {
-          m.emissiveIntensity = 0;
-        });
       }
 
       const fencePulse = 0.5 + 0.5 * Math.sin(t * 5.2);
@@ -6687,11 +7202,28 @@ export class FlightChessEngine {
         }
       }
 
-      // 两船相逢对诗状态机（渐停 -> 对诗 -> 渐启航）
+      // 护城河游船阶段控制：阶段 0~1 仅青衣男子独舟巡游；阶段 2 及以后白衣女子泛舟登场并触发对诗
       const boats = this.world.boats;
+      const maidenActive =
+        this.maxDoneStage >= 2 ||
+        this.timeOfDay === 'afternoon' ||
+        this.timeOfDay === 'evening';
       if (boats.length >= 2) {
         const bScholar = boats[0];
         const bMaiden = boats[1];
+        bMaiden.g.visible = maidenActive;
+        if (!maidenActive) {
+          bScholar.speedFactor = 1;
+          bScholar.targetLookYaw = 0;
+          bMaiden.speedFactor = 1;
+          bMaiden.targetLookYaw = 0;
+          this.poemState = 'cruising';
+          this.poemTimer = 0;
+          this.poemBubbles.scholar.visible = false;
+          this.poemBubbles.maiden.visible = false;
+          this.poemBubbles.scholar.root.style.opacity = '0';
+          this.poemBubbles.maiden.root.style.opacity = '0';
+        } else {
         const dTh = Math.atan2(
           Math.sin(bMaiden.th - bScholar.th),
           Math.cos(bMaiden.th - bScholar.th),
@@ -6759,9 +7291,11 @@ export class FlightChessEngine {
             this.poemCooldown = 14;
           }
         }
+        }
       }
 
       for (const b of boats) {
+        if (!b.g.visible) continue;
         const r = this.world.moatChannelR(b.th, b.rOff, 1.2);
         const px = Math.cos(b.th) * r;
         const pz = Math.sin(b.th) * r;
@@ -7030,6 +7564,10 @@ export class FlightChessEngine {
     this.badgeTexCache.forEach((tex) => {
       tex.needsUpdate = true;
     });
+    if (this.world.heartTreeNight) {
+      this.world.heartTreeNight.projTex.needsUpdate = true;
+      this.world.heartTreeNight.lastProjDraw = -1;
+    }
     this.applyTimeOfDayLerp(this.todBlend);
     this.renderer.shadowMap.needsUpdate = true;
     this.clock.getDelta();
@@ -7088,7 +7626,18 @@ export class FlightChessEngine {
       this.boundContextRestored,
     );
 
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+    }
+
     this.clearHL();
+    this.world.heartTreeNight?.projTex.dispose();
+    this.badgeTexCache.forEach((tex) => tex.dispose());
+    this.badgeTexCache.clear();
     this.world.onDispose?.();
     this.controls.dispose();
     this.envRT.dispose();

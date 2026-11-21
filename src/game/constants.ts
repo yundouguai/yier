@@ -519,6 +519,7 @@ export interface GameHudSnapshot {
   winnerPid: number | null;
   rankings: number[];
   gmDie: number | null;
+  gmAutoPlay: boolean;
   turnUsedAtkDef: boolean;
   turnUsedDef: boolean;
   armedSixDie: boolean;
