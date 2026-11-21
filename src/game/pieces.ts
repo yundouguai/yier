@@ -27,6 +27,9 @@ export interface PlaneParts {
   rightArm: THREE.Group;
   leftFoot: THREE.Group;
   rightFoot: THREE.Group;
+  redScarf?: THREE.Group;
+  scarfTailPivot?: THREE.Group;
+  scarfTailTip?: THREE.Group;
 }
 
 export interface PlaneData {
@@ -755,6 +758,42 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   shieldMesh.userData.eqRing = eqRing;
   g.add(shieldMesh);
 
+  // 跳舞庆祝专属红围巾（含胸前围脖与双节飘逸甩尾，默认隐藏，到达终点跳舞时佩戴）
+  const redScarf = new THREE.Group();
+  const scarfMat = new THREE.MeshStandardMaterial({
+    color: 0xef5350,
+    roughness: 0.48,
+    metalness: 0.02,
+  });
+  const scarfCollar = new THREE.Mesh(new THREE.TorusGeometry(0.168, 0.032, 10, 26), scarfMat);
+  scarfCollar.rotation.x = Math.PI / 2 + 0.06;
+  scarfCollar.position.set(0, 0.295, 0.012);
+  redScarf.add(scarfCollar);
+
+  const scarfFront = new THREE.Mesh(new THREE.CapsuleGeometry(0.028, 0.13, 6, 10), scarfMat);
+  scarfFront.rotation.z = Math.PI / 2 - 0.14;
+  scarfFront.position.set(0.01, 0.275, 0.155);
+  redScarf.add(scarfFront);
+
+  const scarfTailPivot = new THREE.Group();
+  scarfTailPivot.position.set(-0.155, 0.285, 0.045);
+  const tailSeg1 = new THREE.Mesh(new THREE.CapsuleGeometry(0.024, 0.11, 6, 10), scarfMat);
+  tailSeg1.rotation.z = Math.PI / 2;
+  tailSeg1.position.set(-0.065, 0, 0);
+  scarfTailPivot.add(tailSeg1);
+
+  const scarfTailTip = new THREE.Group();
+  scarfTailTip.position.set(-0.125, 0, 0);
+  const tailSeg2 = new THREE.Mesh(new THREE.CapsuleGeometry(0.022, 0.095, 6, 10), scarfMat);
+  tailSeg2.rotation.z = Math.PI / 2;
+  tailSeg2.position.set(-0.055, 0, 0);
+  scarfTailTip.add(tailSeg2);
+  scarfTailPivot.add(scarfTailTip);
+  redScarf.add(scarfTailPivot);
+
+  redScarf.visible = false;
+  animRoot.add(redScarf);
+
   g.scale.setScalar(0.92);
   g.userData.shieldMesh = shieldMesh;
   g.userData.parts = {
@@ -766,6 +805,9 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
     rightArm: armPivots[1],
     leftFoot: footPivots[0],
     rightFoot: footPivots[1],
+    redScarf,
+    scarfTailPivot,
+    scarfTailTip,
   } satisfies PlaneParts;
 
   return g;

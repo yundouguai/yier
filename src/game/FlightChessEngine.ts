@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   ensureAudio,
   beep,
+  playWeatherAmbientPulse,
   sndCap,
   sndHop,
   sndRoll,
@@ -239,6 +240,7 @@ export class FlightChessEngine {
   private emoteKeySeq = 0;
   private lastAiEmoteAt: number[] = [];
   private turnSeq = 0;
+  private totalCompletedTurns = 0;
 
   private message: string | null = null;
   private messageColor: string | null = null;
@@ -283,6 +285,7 @@ export class FlightChessEngine {
   private diceHovered = false;
   private lastHoverRaycast = 0;
   private nextGlobalCakeEatAt = 24 + Math.random() * 18;
+  private nextWeatherAudioAt = 4.5;
 
   private boundResize: () => void;
   private boundPointerDown: (e: PointerEvent) => void;
@@ -956,7 +959,7 @@ export class FlightChessEngine {
         this.splashVisible = false;
         this.splashItem = null;
         this.emitSnapshot();
-      }, durationMs);
+      }, P.type !== 'human' ? durationMs + 2000 : durationMs);
     });
   }
 
@@ -994,7 +997,7 @@ export class FlightChessEngine {
         this.splashTargetCharKey = null;
         this.splashTargetName = null;
         this.emitSnapshot();
-      }, durationMs);
+      }, P.type !== 'human' ? durationMs + 2000 : durationMs);
     });
   }
 
@@ -1318,7 +1321,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.giftQuestEvent = null;
         this.emitSnapshot();
-      }, 5400);
+      }, pl.type !== 'human' ? 7400 : 5400);
     }
     this.emitSnapshot();
   }
@@ -1349,7 +1352,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.giftQuestEvent = null;
         this.emitSnapshot();
-      }, 5400);
+      }, pl.type !== 'human' ? 7400 : 5400);
     }
     this.emitSnapshot();
   }
@@ -1530,6 +1533,7 @@ export class FlightChessEngine {
     },
   ): void {
     if (this.disposed) return;
+    if (this.totalCompletedTurns < this.players.length) return;
     const pl = this.players[pid];
     if (!pl || pl.type !== 'ai') return;
 
@@ -1590,6 +1594,7 @@ export class FlightChessEngine {
           `😠 ${targetName ?? '你'}，我记小本本上了！`,
           '💢 敢踩我？走着瞧！',
           '📝 这笔账先记下，待会儿算！',
+          '📝 拿小本本记录下来！',
         ],
         gotMissiled: [
           `🥧 好啊 ${targetName ?? ''}，这记奶油派我记下了！`,
@@ -1816,43 +1821,55 @@ export class FlightChessEngine {
       roughness: 0.18,
     });
 
-    // 头顶主奶油盖帽
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.185, 18, 12), creamMat);
-    cap.scale.set(1.18, 0.56, 1.05);
-    cap.position.set(0, 0.255, 0.015);
+    // 厚实蓬松的奶油大盖帽（全角度清晰可见）
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.255, 22, 16), creamMat);
+    cap.scale.set(1.18, 0.72, 1.15);
+    cap.position.set(0, 0.255, 0.01);
     splat.add(cap);
 
-    // 一圈垂挂在额头和头侧的 7 颗滴落奶油球
+    // 顶部奶油螺旋尖
+    const swirl = new THREE.Mesh(new THREE.ConeGeometry(0.115, 0.145, 18), creamMat);
+    swirl.position.set(-0.01, 0.435, 0.01);
+    swirl.rotation.z = 0.12;
+    splat.add(swirl);
+
+    // 360° 环绕整颗脑袋的 10 坨厚奶油垂边（正面、脸侧、后脑全覆盖）
     const blobSpecs: [number, number, number, number, number][] = [
-      [-0.14, 0.21, 0.12, 0.068, 1.35],
-      [-0.04, 0.19, 0.175, 0.062, 1.45],
-      [0.08, 0.20, 0.155, 0.072, 1.3],
-      [0.16, 0.22, 0.08, 0.065, 1.25],
-      [-0.17, 0.23, -0.02, 0.06, 1.2],
-      [0.12, 0.24, -0.10, 0.064, 1.15],
-      [-0.04, 0.25, -0.13, 0.068, 1.1],
+      [0.0, 0.19, 0.225, 0.088, 1.4],
+      [-0.145, 0.205, 0.175, 0.085, 1.38],
+      [0.145, 0.20, 0.175, 0.088, 1.35],
+      [-0.225, 0.215, 0.03, 0.086, 1.3],
+      [0.225, 0.215, 0.03, 0.086, 1.3],
+      [-0.19, 0.22, -0.13, 0.084, 1.28],
+      [0.19, 0.22, -0.13, 0.084, 1.28],
+      [-0.075, 0.225, -0.22, 0.088, 1.25],
+      [0.075, 0.225, -0.22, 0.088, 1.25],
+      [0.0, 0.28, -0.14, 0.092, 1.15],
     ];
     for (const [bx, by, bz, r, sy] of blobSpecs) {
-      const blob = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), creamMat);
-      blob.scale.set(1.0, sy, 0.92);
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 12), creamMat);
+      blob.scale.set(1.04, sy, 0.96);
       blob.position.set(bx, by, bz);
       splat.add(blob);
     }
 
-    // 额前两颗滑落的奶油小液滴
-    const drip1 = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), creamMat);
-    drip1.scale.set(0.85, 1.5, 0.85);
-    drip1.position.set(-0.07, 0.125, 0.185);
-    splat.add(drip1);
+    // 脸上与头侧滑落的 4 颗明显奶油液滴
+    const dripSpecs: [number, number, number, number][] = [
+      [-0.085, 0.085, 0.235, 0.044],
+      [0.105, 0.095, 0.225, 0.04],
+      [-0.235, 0.11, 0.06, 0.038],
+      [0.235, 0.115, -0.04, 0.038],
+    ];
+    for (const [dx, dy, dz, dr] of dripSpecs) {
+      const drip = new THREE.Mesh(new THREE.SphereGeometry(dr, 12, 10), creamMat);
+      drip.scale.set(0.85, 1.65, 0.85);
+      drip.position.set(dx, dy, dz);
+      splat.add(drip);
+    }
 
-    const drip2 = new THREE.Mesh(new THREE.SphereGeometry(0.028, 10, 8), creamMat);
-    drip2.scale.set(0.85, 1.45, 0.85);
-    drip2.position.set(0.095, 0.135, 0.175);
-    splat.add(drip2);
-
-    // 歪在奶油堆上的俏皮小红樱桃
-    const cherry = new THREE.Mesh(new THREE.SphereGeometry(0.048, 12, 10), cherryMat);
-    cherry.position.set(0.065, 0.355, 0.045);
+    // 奶油尖上的大红樱桃
+    const cherry = new THREE.Mesh(new THREE.SphereGeometry(0.062, 14, 12), cherryMat);
+    cherry.position.set(0.055, 0.485, 0.035);
     splat.add(cherry);
 
     splat.scale.setScalar(0.01);
@@ -2011,7 +2028,7 @@ export class FlightChessEngine {
         targetStack.forEach((p) => {
           p.pos = finalPos;
           p.animating = true;
-          this.attachCreamSplat(p, 3000);
+          this.attachCreamSplat(p, 4200);
         });
         const c = this.posToCell(T, finalPos);
         const yaw = this.faceTravelDir(target);
@@ -2043,6 +2060,12 @@ export class FlightChessEngine {
             }).then(() => {
               m.position.set(c[0], landY, c[1]);
               m.rotation.set(0, yaw, 0);
+              m.userData.stackBaseX = c[0];
+              m.userData.stackBaseY = landY;
+              m.userData.stackBaseZ = c[1];
+              m.userData.stackBaseYaw = yaw;
+              m.userData.stackIdx = baseCount + i;
+              m.userData.stackTotal = baseCount + targetStack.length;
               pt.animRoot.rotation.set(0, 0, 0);
               pt.leftArm.rotation.set(0, 0, 0);
               pt.rightArm.rotation.set(0, 0, 0);
@@ -2061,7 +2084,7 @@ export class FlightChessEngine {
         await this.captureAt(target);
       } else {
         targetStack.forEach((p) => {
-          this.attachCreamSplat(p, 3000);
+          this.attachCreamSplat(p, 4200);
         });
         this.setMsg(`🥧 奶油派命中 ${T.name}（已在第 1 格，糊了一头奶油啦~）`, P.uiColor);
       }
@@ -3597,7 +3620,9 @@ export class FlightChessEngine {
     plane.animating = false;
   }
 
-  private async celebrateGoal(plane: PlaneData): Promise<void> {
+  /** 保留原版终点转圈高跳欢呼动画，供后续其他场景复用 */
+  /** 保留原版终点转圈高跳欢呼动画（备用） */
+  public async celebrateGoalCheer(plane: PlaneData): Promise<void> {
     plane.animating = true;
     const m = plane.mesh;
     const pt = m.userData.parts as PlaneParts;
@@ -3615,6 +3640,68 @@ export class FlightChessEngine {
     m.position.y = 0.12;
     m.rotation.y = baseYaw;
     pt.animRoot.scale.set(1, 1, 1);
+    pt.headPivot.rotation.set(0, 0, 0);
+    plane.animating = false;
+  }
+
+  /** 保留原版终点举手欢呼待机姿势（备用） */
+  public applyGoalCheerIdle(p: PlaneData, pt: PlaneParts, t: number, baseScale: number): void {
+    const v = t * 4.2 + p.phase;
+    p.mesh.scale.setScalar(baseScale);
+    pt.animRoot.position.y = Math.abs(Math.sin(v)) * 0.09;
+    pt.animRoot.rotation.z = Math.sin(v * 0.5) * 0.08;
+    pt.leftArm.rotation.z = 1.35 + Math.sin(v * 1.5) * 0.28;
+    pt.rightArm.rotation.z = -1.35 - Math.sin(v * 1.5) * 0.28;
+    pt.headPivot.rotation.z = Math.sin(v) * 0.12;
+    pt.headPivot.rotation.y = Math.sin(v * 0.5) * 0.18;
+  }
+
+  /** 终点到达庆祝：红围巾飘扬 + 胸前摆手左右摇摆跳舞动作 */
+  private async celebrateGoal(plane: PlaneData): Promise<void> {
+    plane.animating = true;
+    const m = plane.mesh;
+    const pt = m.userData.parts as PlaneParts;
+    const baseYaw = this.players[plane.pid].finalYaw;
+    const faceParts = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
+    if (faceParts) {
+      faceParts.mouthW.visible = false;
+      faceParts.mouthOpen.visible = true;
+    }
+    if (pt.redScarf) pt.redScarf.visible = true;
+    this.spawnImpact(m.position.x, m.position.z);
+    await this.tween(1450, (t) => {
+      const beat = t * Math.PI * 6;
+      const sway = Math.sin(beat);
+      const bounce = Math.abs(Math.sin(beat));
+      m.position.y = 0.12 + bounce * 0.2;
+      m.rotation.y = baseYaw + sway * 0.34;
+      pt.animRoot.rotation.z = sway * 0.23;
+      pt.animRoot.scale.set(1 + (1 - bounce) * 0.05, 1 + bounce * 0.08, 1 + (1 - bounce) * 0.05);
+      pt.leftArm.rotation.x = -1.12 + Math.sin(beat * 2) * 0.16;
+      pt.leftArm.rotation.z = 0.56 + sway * 0.42;
+      pt.rightArm.rotation.x = -1.12 - Math.sin(beat * 2) * 0.16;
+      pt.rightArm.rotation.z = -0.56 + sway * 0.42;
+      pt.leftFoot.rotation.x = sway * 0.52;
+      pt.rightFoot.rotation.x = -sway * 0.52;
+      pt.headPivot.rotation.z = -sway * 0.24;
+      pt.headPivot.rotation.y = sway * 0.26;
+      pt.headPivot.rotation.x = bounce * 0.09;
+      if (pt.scarfTailPivot) {
+        pt.scarfTailPivot.rotation.z = -0.32 + Math.sin(beat - 0.65) * 0.56;
+        pt.scarfTailPivot.rotation.y = Math.cos(beat - 0.4) * 0.42;
+      }
+      if (pt.scarfTailTip) {
+        pt.scarfTailTip.rotation.z = Math.sin(beat - 1.35) * 0.48;
+      }
+    });
+    m.position.y = 0.12;
+    m.rotation.y = baseYaw;
+    pt.animRoot.rotation.set(0, 0, 0);
+    pt.animRoot.scale.set(1, 1, 1);
+    pt.leftArm.rotation.set(0, 0, 0);
+    pt.rightArm.rotation.set(0, 0, 0);
+    pt.leftFoot.rotation.set(0, 0, 0);
+    pt.rightFoot.rotation.set(0, 0, 0);
     pt.headPivot.rotation.set(0, 0, 0);
     plane.animating = false;
   }
@@ -4570,6 +4657,7 @@ export class FlightChessEngine {
       this.beginRollPhase(true);
       return;
     }
+    this.totalCompletedTurns += 1;
     let steps = 0;
     do {
       this.turn = (this.turn + 1) % this.players.length;
@@ -4809,7 +4897,7 @@ export class FlightChessEngine {
     const threatMult =
       personality === 'rusher' ? 0.45 : personality === 'chill' ? 1.75 : personality === 'vengeful' ? 0.85 : 1.05;
     const stompBase =
-      personality === 'rusher' ? 118 : personality === 'chill' ? 22 : personality === 'vengeful' ? 75 : 92;
+      personality === 'rusher' ? 24 : personality === 'chill' ? 22 : personality === 'vengeful' ? 75 : 16;
     const flyKillBonus =
       personality === 'rusher' ? 138 : personality === 'chill' ? 45 : personality === 'vengeful' ? 105 : 125;
 
@@ -4861,15 +4949,15 @@ export class FlightChessEngine {
             : personality === 'chill'
               ? 0.35
               : personality === 'tactician'
-                ? 0.68
-                : 0.85;
+                ? 0.95
+                : 1.15;
         const threatWeight =
           personality === 'vengeful'
             ? 128
             : personality === 'tactician'
-              ? 95
+              ? 105
               : personality === 'rusher'
-                ? 65
+                ? 75
                 : 40;
         const capturedSet = new Set<PlaneData>();
         for (const stopPos of L.ringStops) {
@@ -4902,8 +4990,8 @@ export class FlightChessEngine {
           s += flyVictims * (flyKillBonus + flyThreatBonus);
         }
 
-        if (L.fly) s += personality === 'rusher' ? 72 : 48;
-        else if (L.jump) s += personality === 'rusher' ? 36 : 20;
+        if (L.fly) s += personality === 'rusher' ? 76 : 48;
+        else if (L.jump) s += personality === 'rusher' ? 42 : personality === 'tactician' ? 30 : 20;
 
         if (np >= 51) {
           // 冲入终点前安全通道
@@ -5086,6 +5174,31 @@ export class FlightChessEngine {
       this.world.fireflyPoints.visible = ffOp > 0.015;
     }
 
+    const mistOp = THREE.MathUtils.lerp(A.mistOpacity, B.mistOpacity, ease);
+    if (this.world.mistMat && this.world.mistGroup) {
+      this.world.mistMat.opacity = mistOp;
+      this.world.mistGroup.visible = mistOp > 0.015;
+    }
+
+    const cloudOp = THREE.MathUtils.lerp(A.cloudOpacity, B.cloudOpacity, ease);
+    if (this.world.cloudMat && this.world.cloudGroup) {
+      this.world.cloudMat.opacity = cloudOp;
+      this.world.cloudGroup.visible = cloudOp > 0.015;
+    }
+
+    const leafOp = THREE.MathUtils.lerp(A.leafOpacity, B.leafOpacity, ease);
+    if (this.world.leafMat && this.world.leafPoints) {
+      this.world.leafMat.opacity = leafOp;
+      this.world.leafPoints.visible = leafOp > 0.015;
+    }
+
+    const starOp = THREE.MathUtils.lerp(A.starOpacity, B.starOpacity, ease);
+    if (this.world.nightSkyGroup && this.world.starMat && this.world.moonMat) {
+      this.world.starMat.opacity = starOp;
+      this.world.moonMat.opacity = starOp * 0.92;
+      this.world.nightSkyGroup.visible = starOp > 0.015;
+    }
+
     if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
       this._todColA.setHex(A.waterTintHex);
       this._todColB.setHex(B.waterTintHex);
@@ -5117,7 +5230,7 @@ export class FlightChessEngine {
     if (!this.paused) {
       this.timeMs += dt * 1000;
       if (this.todBlend < 1) {
-        this.todBlend = Math.min(1, this.todBlend + dt / 3.0);
+        this.todBlend = Math.min(1, this.todBlend + dt / 6.0);
         this.applyTimeOfDayLerp(this.todBlend);
       }
       if (this.world.fireflyPoints?.visible && this.world.fireflyBase) {
@@ -5132,6 +5245,57 @@ export class FlightChessEngine {
           arr[i * 3 + 2] = b.z + Math.sin(ph * 0.9) * b.radius;
         }
         posAttr.needsUpdate = true;
+      }
+
+      if (this.world.mistGroup?.visible && this.world.mistData) {
+        for (const md of this.world.mistData) {
+          md.ang += dt * md.speed;
+          md.mesh.position.x = Math.cos(md.ang) * md.rad;
+          md.mesh.position.z = Math.sin(md.ang) * md.rad;
+          md.mesh.position.y = md.yBase + Math.sin(t * 0.65 + md.phase) * 0.04;
+          md.mesh.rotation.z = md.ang;
+        }
+      }
+
+      if (this.world.cloudGroup?.visible && this.world.cloudData) {
+        for (const cd of this.world.cloudData) {
+          const span = 56;
+          const x = (((cd.xBase + t * cd.speed + 28) % span) + span) % span - 28;
+          cd.g.position.x = x;
+          cd.g.position.y = cd.yBase + Math.sin(t * 0.4 + cd.phase) * 0.16;
+        }
+      }
+
+      if (this.world.leafPoints?.visible && this.world.leafData) {
+        const posAttr = this.world.leafPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const arr = posAttr.array as Float32Array;
+        const ld = this.world.leafData;
+        for (let i = 0; i < ld.length; i++) {
+          const p = ld[i];
+          p.x += (p.vx + Math.sin(t * 1.6 + p.phase) * 0.35) * dt;
+          p.z += (p.vz + Math.cos(t * 1.3 + p.phase) * 0.25) * dt;
+          p.y -= p.vy * dt;
+          if (p.y < 0.15) {
+            p.y = 6.8 + Math.random() * 1.2;
+            p.x = (Math.random() - 0.5) * 28;
+            p.z = (Math.random() - 0.5) * 28;
+          }
+          if (p.x > 16) p.x = -16;
+          if (p.z > 16) p.z = -16;
+          arr[i * 3] = p.x;
+          arr[i * 3 + 1] = p.y;
+          arr[i * 3 + 2] = p.z;
+        }
+        posAttr.needsUpdate = true;
+      }
+
+      if (this.world.nightSkyGroup?.visible) {
+        this.world.nightSkyGroup.rotation.y = t * 0.006;
+      }
+
+      if (t >= this.nextWeatherAudioAt) {
+        playWeatherAmbientPulse(this.timeOfDay);
+        this.nextWeatherAudioAt = t + (this.timeOfDay === 'evening' ? 5.2 : 6.8) + Math.random() * 4.5;
       }
       if (this.deadline !== null && this.timeMs >= this.deadline && !this.itemBusy) {
         this.deadline = null;
@@ -5470,15 +5634,41 @@ export class FlightChessEngine {
           p.mesh.rotation.set(0, baseYaw, 0);
         }
 
+        if (pt.redScarf) {
+          pt.redScarf.visible = p.pos === HOME_END;
+        }
+
         if (p.pos === HOME_END) {
-          const v = t * 4.2 + p.phase;
+          // 终点方阵持续跳「红围巾甩尾 + 胸前摆手小碎步」舞，张开开心小嘴
+          const v = t * 5.6 + p.pid * 0.65;
+          const sway = Math.sin(v);
+          const bounce = Math.abs(Math.sin(v));
+          const faceParts = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
+          if (faceParts) {
+            faceParts.mouthW.visible = false;
+            faceParts.mouthOpen.visible = true;
+          }
           p.mesh.scale.setScalar(baseScale);
-          pt.animRoot.position.y = Math.abs(Math.sin(v)) * 0.09;
-          pt.animRoot.rotation.z = Math.sin(v * 0.5) * 0.08;
-          pt.leftArm.rotation.z = 1.35 + Math.sin(v * 1.5) * 0.28;
-          pt.rightArm.rotation.z = -1.35 - Math.sin(v * 1.5) * 0.28;
-          pt.headPivot.rotation.z = Math.sin(v) * 0.12;
-          pt.headPivot.rotation.y = Math.sin(v * 0.5) * 0.18;
+          pt.animRoot.position.y = bounce * 0.115;
+          pt.animRoot.rotation.z = sway * 0.21;
+          pt.animRoot.rotation.y = sway * 0.16;
+          pt.animRoot.scale.set(1 + (1 - bounce) * 0.04, 1 + bounce * 0.06, 1 + (1 - bounce) * 0.04);
+          pt.leftArm.rotation.x = -1.1 + Math.sin(v * 2) * 0.14;
+          pt.leftArm.rotation.z = 0.54 + sway * 0.4;
+          pt.rightArm.rotation.x = -1.1 - Math.sin(v * 2) * 0.14;
+          pt.rightArm.rotation.z = -0.54 + sway * 0.4;
+          pt.leftFoot.rotation.x = sway * 0.48;
+          pt.rightFoot.rotation.x = -sway * 0.48;
+          pt.headPivot.rotation.z = -sway * 0.2;
+          pt.headPivot.rotation.y = sway * 0.22;
+          pt.headPivot.rotation.x = bounce * 0.08;
+          if (pt.scarfTailPivot) {
+            pt.scarfTailPivot.rotation.z = -0.3 + Math.sin(v - 0.65) * 0.52;
+            pt.scarfTailPivot.rotation.y = Math.cos(v - 0.4) * 0.38;
+          }
+          if (pt.scarfTailTip) {
+            pt.scarfTailTip.rotation.z = Math.sin(v - 1.35) * 0.45;
+          }
         } else if (movableSet && movableSet.has(p)) {
           const syncPhase = p.pos === 0 || stackTotal >= 2 ? p.pid * 1.37 : p.phase;
           const ex = t * 5.5 + syncPhase;

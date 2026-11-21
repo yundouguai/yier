@@ -138,3 +138,30 @@ export function sndYourTurn(): void {
   beep(523.25, 0.09, 'sine', 0.1, undefined, 0);
   beep(659.25, 0.14, 'triangle', 0.11, undefined, 0.085);
 }
+
+/** 轻柔天气环境音效脉冲（仅在音频已激活且未静音时触发，绝不打扰主音效） */
+export function playWeatherAmbientPulse(tod: 'morning' | 'noon' | 'afternoon' | 'evening'): void {
+  if (muted || !actx || actx.state !== 'running') return;
+  if (tod === 'morning') {
+    // 清晨清脆小鸟短鸣
+    const base = 1850 + Math.random() * 450;
+    beep(base, 0.075, 'sine', 0.022, base * 1.24, 0);
+    beep(base * 1.18, 0.09, 'sine', 0.02, base * 0.94, 0.11);
+    if (Math.random() < 0.55) {
+      beep(base * 1.32, 0.07, 'sine', 0.018, base * 1.48, 0.24);
+    }
+  } else if (tod === 'noon') {
+    // 正午轻风拂过树梢
+    playFilteredNoise(0.24, 2400, 1.4, 0.016, 'bandpass', 0);
+  } else if (tod === 'afternoon') {
+    // 下午微风吹动落叶沙沙声
+    playFilteredNoise(0.22, 920, 1.1, 0.02, 'bandpass', 0);
+    playFilteredNoise(0.18, 1280, 1.5, 0.014, 'bandpass', 0.14);
+  } else {
+    // 夜晚虫鸣三连音
+    const f = 3750 + Math.random() * 350;
+    beep(f, 0.038, 'sine', 0.017, f * 0.97, 0);
+    beep(f, 0.038, 'sine', 0.017, f * 0.97, 0.07);
+    beep(f, 0.045, 'sine', 0.015, f * 0.95, 0.14);
+  }
+}

@@ -72,7 +72,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [partyExpanded, setPartyExpanded] = useState(true);
-  const [questExpanded, setQuestExpanded] = useState(true);
+  const [questExpanded, setQuestExpanded] = useState(false);
   const [bottomDockExpanded, setBottomDockExpanded] = useState(true);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
@@ -284,40 +284,30 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           >
             <div className="hud-gift-toast-inner flex max-w-[calc(100vw-24px)] flex-col items-center">
               <div
-                className="anim-gift-float mb-1.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 max-w-[calc(100vw-28px)] rounded-full bg-white/65 px-4 py-1.5 text-sm sm:text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
+                className="anim-gift-float mb-1.5 flex flex-col items-center justify-center gap-0.5 max-w-[calc(100vw-28px)] rounded-3xl bg-white/68 px-5 py-2 text-center text-sm sm:text-base md:text-lg font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm"
                 style={{
                   border: `1.5px solid ${snap.giftQuestEvent.playerColor}99`,
                   textShadow: '0 1px 2px rgba(255,255,255,0.85)',
                 }}
               >
-                {snap.giftQuestEvent.questType === 'bubu' ? (
-                  <>
-                    <span>恭喜</span>
-                    <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
-                    <span>{snap.giftQuestEvent.playerName} 完成任务布布不烦恼，获得道具</span>
-                    <span
-                      className="inline-flex items-center gap-1.5"
-                      style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
-                    >
-                      <ItemIcon item={snap.giftQuestEvent.item} size={22} />
-                      <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span>恭喜</span>
-                    <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={26} />
-                    <span>{snap.giftQuestEvent.playerName} 完成 一二宝的馈赠，获得</span>
-                    <span
-                      className="inline-flex items-center gap-1.5"
-                      style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
-                    >
-                      <ItemIcon item={snap.giftQuestEvent.item} size={22} />
-                      <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
-                    </span>
-                    <span>奖励</span>
-                  </>
-                )}
+                <div className="flex flex-wrap items-center justify-center gap-x-1.5">
+                  <span>恭喜</span>
+                  <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={24} />
+                  <span>
+                    {snap.giftQuestEvent.playerName} 完成
+                    {snap.giftQuestEvent.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-x-1.5">
+                  <span>获得</span>
+                  <span
+                    className="inline-flex items-center gap-1"
+                    style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
+                  >
+                    <ItemIcon item={snap.giftQuestEvent.item} size={22} />
+                    <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
+                  </span>
+                </div>
               </div>
               <img
                 src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
@@ -351,8 +341,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         )
       )}
 
-      {/* Turn / Item splash：本地玩家居中展示表情包+提示（缩小20%），非本地AI仅顶部弱化文字提示 */}
-      {snap.splashIsHuman ? (
+      {/* Turn / Item splash：本地玩家居中展示表情包+提示；非本地AI使用奶油派炸弹时同规格大提示但不显示表情包，其余仅顶部弱化提示 */}
+      {snap.splashIsHuman || snap.splashItem === 'missile' ? (
         <div
           className={`pointer-events-none fixed inset-0 z-[20] flex items-center justify-center p-4 transition-opacity duration-200 ${
             snap.splashVisible ? 'opacity-100' : 'opacity-0'
@@ -363,7 +353,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               snap.splashVisible ? 'scale-100' : 'scale-90'
             }`}
           >
-            {snap.splashVisible && snap.splashItem && (
+            {snap.splashVisible && snap.splashItem && snap.splashIsHuman && (
               <img
                 key={`item-sticker-${snap.splashKey}`}
                 src={`./assets/item_${snap.splashItem}.webp`}
@@ -554,7 +544,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         className="mt-0.5 flex items-center gap-1 text-[9px] font-semibold text-slate-500 tabular-nums leading-tight"
                         title={`踩人 ${pl.kda?.stomps ?? 0} / 被踩 ${pl.kda?.stomped ?? 0} / 击破护盾 ${pl.kda?.shieldBreaks ?? 0}`}
                       >
-                        <span className="text-slate-400">KDA</span>
+                        <span className="text-slate-400">K/D/A</span>
                         <span>
                           {pl.kda?.stomps ?? 0}/{pl.kda?.stomped ?? 0}/{pl.kda?.shieldBreaks ?? 0}
                         </span>
@@ -758,101 +748,103 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           ) : (
             <>
           {gmOpen && (
-            <div className="anim-card-pop mb-0.5 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-1.5 text-xs text-white shadow-2xl backdrop-blur-md">
-              <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 border border-emerald-400/30">
-                GM 控骰
-              </span>
-              <button
-                type="button"
-                onClick={() => onSetGmDie(null)}
-                className={`rounded-lg px-2 py-1 text-[11px] font-bold transition cursor-pointer ${
-                  snap.gmDie === null
-                    ? 'bg-emerald-500 text-white shadow-sm'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                随机
-              </button>
-              {[1, 2, 3, 4, 5, 6].map((n) => (
+            <div className="anim-card-pop mb-0.5 flex flex-col gap-1.5 rounded-2xl border border-emerald-400/40 bg-slate-900/92 px-3 py-2 text-xs text-white shadow-2xl backdrop-blur-md">
+              <div className="flex items-center gap-1.5">
+                <span className="w-[58px] shrink-0 text-center rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-emerald-300 border border-emerald-400/30">
+                  GM 控骰
+                </span>
                 <button
-                  key={n}
                   type="button"
-                  onClick={() => onSetGmDie(n)}
-                  className={`h-7 w-7 rounded-lg font-mono text-xs font-extrabold transition cursor-pointer ${
-                    snap.gmDie === n
-                      ? 'bg-emerald-500 text-white ring-2 ring-emerald-300 shadow-sm'
-                      : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-
-              <span className="mx-0.5 h-4 w-px bg-slate-700" aria-hidden="true" />
-
-              <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-amber-300 border border-amber-400/30">
-                道具
-              </span>
-              {ITEM_ORDER.map((itemKey) => {
-                const def = ITEM_DEFS[itemKey];
-                return (
-                  <button
-                    key={itemKey}
-                    type="button"
-                    onClick={() => onGmGrantItem(itemKey)}
-                    title={`GM 获得 +1「${def.name}」`}
-                    aria-label={`GM 获得 ${def.name}`}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 transition hover:bg-slate-700 hover:scale-105 active:scale-95 cursor-pointer"
-                  >
-                    <ItemIcon item={itemKey} size={18} />
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={onGmClearItems}
-                title="清空当前玩家所有道具"
-                className="rounded-lg border border-rose-400/35 bg-rose-500/20 px-2 py-1 text-[11px] font-bold text-rose-200 transition hover:bg-rose-500/35 hover:text-white active:scale-95 cursor-pointer"
-              >
-                清空
-              </button>
-
-              <span className="mx-0.5 h-4 w-px bg-slate-700" aria-hidden="true" />
-
-              <span className="rounded-md bg-sky-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-sky-300 border border-sky-400/30">
-                天气
-              </span>
-              {(
-                [
-                  ['morning', '🌅', '清晨'],
-                  ['noon', '☀️', '中午'],
-                  ['afternoon', '🌇', '下午'],
-                  ['evening', '🌙', '夜晚'],
-                ] as [TimeOfDay, string, string][]
-              ).map(([tod, icon, label]) => (
-                <button
-                  key={tod}
-                  type="button"
-                  onClick={() => onSetGmTimeOfDay(tod)}
-                  title={`切换天气：${label}`}
-                  className={`rounded-lg px-1.5 py-1 text-[11px] font-bold transition cursor-pointer ${
-                    snap.timeOfDay === tod
-                      ? 'bg-sky-500 text-white shadow-sm'
+                  onClick={() => onSetGmDie(null)}
+                  className={`rounded-lg px-2 py-1 text-[11px] font-bold transition cursor-pointer ${
+                    snap.gmDie === null
+                      ? 'bg-emerald-500 text-white shadow-sm'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
                 >
-                  {icon}
+                  随机
                 </button>
-              ))}
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => onSetGmDie(n)}
+                    className={`h-7 w-7 rounded-lg font-mono text-xs font-extrabold transition cursor-pointer ${
+                      snap.gmDie === n
+                        ? 'bg-emerald-500 text-white ring-2 ring-emerald-300 shadow-sm'
+                        : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setGmOpen(false)}
+                  className="ml-auto flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white cursor-pointer"
+                  title="关闭 GM 面板"
+                >
+                  ✕
+                </button>
+              </div>
 
-              <button
-                type="button"
-                onClick={() => setGmOpen(false)}
-                className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white cursor-pointer"
-                title="关闭 GM 面板"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-1.5">
+                <span className="w-[58px] shrink-0 text-center rounded-md bg-amber-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-amber-300 border border-amber-400/30">
+                  道具
+                </span>
+                {ITEM_ORDER.map((itemKey) => {
+                  const def = ITEM_DEFS[itemKey];
+                  return (
+                    <button
+                      key={itemKey}
+                      type="button"
+                      onClick={() => onGmGrantItem(itemKey)}
+                      title={`GM 获得 +1「${def.name}」`}
+                      aria-label={`GM 获得 ${def.name}`}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 transition hover:bg-slate-700 hover:scale-105 active:scale-95 cursor-pointer"
+                    >
+                      <ItemIcon item={itemKey} size={18} />
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={onGmClearItems}
+                  title="清空当前玩家所有道具"
+                  className="ml-auto rounded-lg border border-rose-400/35 bg-rose-500/20 px-2.5 py-1 text-[11px] font-bold text-rose-200 transition hover:bg-rose-500/35 hover:text-white active:scale-95 cursor-pointer"
+                >
+                  清空
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="w-[58px] shrink-0 text-center rounded-md bg-sky-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-sky-300 border border-sky-400/30">
+                  天气
+                </span>
+                {(
+                  [
+                    ['morning', '🌅', '清晨'],
+                    ['noon', '☀️', '中午'],
+                    ['afternoon', '🌇', '下午'],
+                    ['evening', '🌙', '夜晚'],
+                  ] as [TimeOfDay, string, string][]
+                ).map(([tod, icon, label]) => (
+                  <button
+                    key={tod}
+                    type="button"
+                    onClick={() => onSetGmTimeOfDay(tod)}
+                    title={`切换天气：${label}`}
+                    className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition cursor-pointer ${
+                      snap.timeOfDay === tod
+                        ? 'bg-sky-500 text-white shadow-sm'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    <span>{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

@@ -213,6 +213,18 @@ export interface WorldRefs {
   fireflyPoints?: THREE.Points;
   fireflyMat?: THREE.PointsMaterial;
   fireflyBase?: { x: number; y: number; z: number; phase: number; speed: number; radius: number }[];
+  mistGroup?: THREE.Group;
+  mistMat?: THREE.MeshBasicMaterial;
+  mistData?: { mesh: THREE.Mesh; ang: number; rad: number; speed: number; yBase: number; phase: number }[];
+  cloudGroup?: THREE.Group;
+  cloudMat?: THREE.MeshStandardMaterial;
+  cloudData?: { g: THREE.Group; xBase: number; zBase: number; yBase: number; speed: number; phase: number }[];
+  leafPoints?: THREE.Points;
+  leafMat?: THREE.PointsMaterial;
+  leafData?: { x: number; y: number; z: number; vx: number; vy: number; vz: number; phase: number }[];
+  nightSkyGroup?: THREE.Group;
+  starMat?: THREE.PointsMaterial;
+  moonMat?: THREE.MeshBasicMaterial;
   waterY: number;
   rideToys: RideToyAnim[];
   planeMarks: THREE.Group[];
@@ -2820,6 +2832,7 @@ export function buildAncientWorld(
       if (idx === 3 && hasOppFlight) {
         const dangerMark = new THREE.Mesh(new THREE.CircleGeometry(0.245, 32), crossDangerMat);
         dangerMark.rotation.x = -Math.PI / 2;
+        dangerMark.rotation.z = -(Math.PI / 2) * (P.slotId + 1);
         dangerMark.position.set(c[0], 0.1235, c[1]);
         dangerMark.receiveShadow = true;
         scene.add(dangerMark);
@@ -5286,6 +5299,189 @@ export function buildAncientWorld(
   fireflyPoints.visible = false;
   scene.add(fireflyPoints);
 
+  // 1) 清晨护城河水雾轻纱
+  const mistCanvas = document.createElement('canvas');
+  mistCanvas.width = mistCanvas.height = 128;
+  const mg = mistCanvas.getContext('2d')!;
+  const mGrad = mg.createRadialGradient(64, 64, 6, 64, 64, 60);
+  mGrad.addColorStop(0, 'rgba(255, 248, 236, 0.55)');
+  mGrad.addColorStop(0.55, 'rgba(250, 242, 232, 0.22)');
+  mGrad.addColorStop(1, 'rgba(250, 242, 232, 0)');
+  mg.fillStyle = mGrad;
+  mg.fillRect(0, 0, 128, 128);
+  const mistTex = new THREE.CanvasTexture(mistCanvas);
+  const mistMat = new THREE.MeshBasicMaterial({
+    map: mistTex,
+    transparent: true,
+    opacity: 0.45,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const mistGroup = new THREE.Group();
+  const mistData: { mesh: THREE.Mesh; ang: number; rad: number; speed: number; yBase: number; phase: number }[] = [];
+  const mistGeo = new THREE.PlaneGeometry(3.4, 2.2);
+  for (let i = 0; i < 14; i++) {
+    const ang = (i / 14) * Math.PI * 2 + Math.random() * 0.3;
+    const rad = 11.4 + Math.random() * 3.8;
+    const mm = new THREE.Mesh(mistGeo, mistMat);
+    mm.rotation.x = -Math.PI / 2;
+    mm.rotation.z = ang;
+    const yb = WATER_Y + 0.14 + Math.random() * 0.12;
+    mm.position.set(Math.cos(ang) * rad, yb, Math.sin(ang) * rad);
+    mistGroup.add(mm);
+    mistData.push({
+      mesh: mm,
+      ang,
+      rad,
+      speed: 0.015 + Math.random() * 0.015,
+      yBase: yb,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+  scene.add(mistGroup);
+
+  // 2) 中午高空立体棉花糖云朵
+  const cloudGroup = new THREE.Group();
+  const cloudMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.92,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.28,
+    depthWrite: false,
+  });
+  const cloudData: { g: THREE.Group; xBase: number; zBase: number; yBase: number; speed: number; phase: number }[] = [];
+  const puffGeo = new THREE.SphereGeometry(1, 14, 12);
+  for (let i = 0; i < 5; i++) {
+    const cg = new THREE.Group();
+    const puffs: [number, number, number, number][] = [
+      [0, 0, 0, 1.15],
+      [-0.95, -0.18, 0.1, 0.88],
+      [0.95, -0.15, -0.08, 0.92],
+      [-0.45, 0.32, -0.15, 0.78],
+      [0.48, 0.28, 0.15, 0.74],
+    ];
+    for (const [px, py, pz, ps] of puffs) {
+      const pm = new THREE.Mesh(puffGeo, cloudMat);
+      pm.scale.set(ps * 1.15, ps * 0.72, ps * 0.95);
+      pm.position.set(px, py, pz);
+      cg.add(pm);
+    }
+    const xb = -24 + i * 12 + (Math.random() - 0.5) * 4;
+    const zb = -18 + (i % 2 === 0 ? -4 : 6) + (Math.random() - 0.5) * 6;
+    const yb = 11.8 + Math.random() * 2.4;
+    cg.position.set(xb, yb, zb);
+    cg.scale.setScalar(0.95 + Math.random() * 0.35);
+    cloudGroup.add(cg);
+    cloudData.push({
+      g: cg,
+      xBase: xb,
+      zBase: zb,
+      yBase: yb,
+      speed: 0.35 + Math.random() * 0.22,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+  scene.add(cloudGroup);
+
+  // 3) 下午随风飘落的银杏叶与花瓣雨
+  const leafCount = 84;
+  const leafPos = new Float32Array(leafCount * 3);
+  const leafCols = new Float32Array(leafCount * 3);
+  const leafData: { x: number; y: number; z: number; vx: number; vy: number; vz: number; phase: number }[] = [];
+  const leafPalette = [
+    new THREE.Color(0xffb84d),
+    new THREE.Color(0xf59e42),
+    new THREE.Color(0xf7a8b8),
+    new THREE.Color(0xffd269),
+  ];
+  for (let i = 0; i < leafCount; i++) {
+    const lx = (Math.random() - 0.5) * 28;
+    const lz = (Math.random() - 0.5) * 28;
+    const ly = 0.4 + Math.random() * 6.8;
+    leafData.push({
+      x: lx,
+      y: ly,
+      z: lz,
+      vx: 0.45 + Math.random() * 0.35,
+      vy: 0.52 + Math.random() * 0.38,
+      vz: 0.18 + Math.random() * 0.25,
+      phase: Math.random() * Math.PI * 2,
+    });
+    leafPos[i * 3] = lx;
+    leafPos[i * 3 + 1] = ly;
+    leafPos[i * 3 + 2] = lz;
+    const c = leafPalette[i % leafPalette.length];
+    leafCols[i * 3] = c.r;
+    leafCols[i * 3 + 1] = c.g;
+    leafCols[i * 3 + 2] = c.b;
+  }
+  const leafGeo = new THREE.BufferGeometry();
+  leafGeo.setAttribute('position', new THREE.BufferAttribute(leafPos, 3));
+  leafGeo.setAttribute('color', new THREE.BufferAttribute(leafCols, 3));
+  const leafCanvas = document.createElement('canvas');
+  leafCanvas.width = leafCanvas.height = 48;
+  const lg = leafCanvas.getContext('2d')!;
+  lg.translate(24, 24);
+  lg.rotate(0.4);
+  lg.fillStyle = '#ffffff';
+  lg.beginPath();
+  lg.ellipse(0, 0, 14, 8, 0, 0, Math.PI * 2);
+  lg.fill();
+  const leafTex = new THREE.CanvasTexture(leafCanvas);
+  const leafMat = new THREE.PointsMaterial({
+    map: leafTex,
+    vertexColors: true,
+    size: 0.28,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const leafPoints = new THREE.Points(leafGeo, leafMat);
+  leafPoints.visible = false;
+  scene.add(leafPoints);
+
+  // 4) 夜晚闪烁星空与暖白弯月
+  const nightSkyGroup = new THREE.Group();
+  const starCount = 115;
+  const starPos = new Float32Array(starCount * 3);
+  for (let i = 0; i < starCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = 0.2 + Math.random() * 0.72;
+    const r = 34 + Math.random() * 10;
+    starPos[i * 3] = Math.sin(phi) * Math.cos(theta) * r;
+    starPos[i * 3 + 1] = 10 + Math.cos(phi) * r * 0.65;
+    starPos[i * 3 + 2] = Math.sin(phi) * Math.sin(theta) * r;
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const starMat = new THREE.PointsMaterial({
+    map: ffTex,
+    color: 0xeaf2ff,
+    size: 0.42,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    sizeAttenuation: true,
+  });
+  const starPoints = new THREE.Points(starGeo, starMat);
+  nightSkyGroup.add(starPoints);
+
+  const moonMat = new THREE.MeshBasicMaterial({
+    color: 0xfff3c4,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const moonMesh = new THREE.Mesh(new THREE.CircleGeometry(1.75, 28), moonMat);
+  moonMesh.position.set(-16, 20.5, -24);
+  moonMesh.lookAt(0, 0, 0);
+  nightSkyGroup.add(moonMesh);
+  nightSkyGroup.visible = false;
+  scene.add(nightSkyGroup);
+
   return {
     waterMesh,
     moatTex,
@@ -5296,6 +5492,18 @@ export function buildAncientWorld(
     fireflyPoints,
     fireflyMat,
     fireflyBase,
+    mistGroup,
+    mistMat,
+    mistData,
+    cloudGroup,
+    cloudMat,
+    cloudData,
+    leafPoints,
+    leafMat,
+    leafData,
+    nightSkyGroup,
+    starMat,
+    moonMat,
     waterY: WATER_Y,
     rideToys,
     planeMarks,

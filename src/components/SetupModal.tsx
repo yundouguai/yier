@@ -64,7 +64,7 @@ export const SetupModal: React.FC<SetupModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="一二布布 · 3D 古城飞行棋设置"
+      aria-label="熊熊村 · 飞行棋大作战设置"
       onClick={() => {
         if (canResume) onResume();
       }}
@@ -76,7 +76,7 @@ export const SetupModal: React.FC<SetupModalProps> = ({
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-[22px] font-bold text-slate-900">一二布布 · 3D 古城飞行棋</h2>
+            <h2 className="text-[22px] font-bold text-slate-900">熊熊村 · 飞行棋大作战</h2>
             <p className="mt-1 text-[13px] text-slate-500">
               {canResume
                 ? '可继续当前对局，或调整本地玩家重新匹配开局'

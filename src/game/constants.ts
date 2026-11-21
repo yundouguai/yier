@@ -201,20 +201,22 @@ export type ProgressStage = 0 | 1 | 2 | 3;
 
 /** 按阶段（全场最多完赛棋子数 0/1/2/3）配置「一二的馈赠」各道具权重/概率 */
 export const GIFT_QUEST_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, number>> = {
-  // 阶段 0~1：奶油派 10%、泡泡罩 10%，其余 3 种平分剩余 80%
-  0: { sixDie: 80 / 3, twinDice: 80 / 3, refuel: 80 / 3, shield: 10, missile: 10 },
-  1: { sixDie: 80 / 3, twinDice: 80 / 3, refuel: 80 / 3, shield: 10, missile: 10 },
-  // 阶段 2~3：所有道具概率平均分配
-  2: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
-  3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+  // 阶段 0：奶油派 0%、泡泡罩 10%，其余 3 种平分剩余 90%
+  0: { sixDie: 30, twinDice: 30, refuel: 30, shield: 10, missile: 0 },
+  // 阶段 1：奶油派 5%、泡泡罩 10%，其余 3 种平分剩余 85%
+  1: { sixDie: 85 / 3, twinDice: 85 / 3, refuel: 85 / 3, shield: 10, missile: 5 },
+  // 阶段 2~3：奶油派 10%，其余 4 种平分剩余 90%
+  2: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
+  3: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
 };
 
 /** 按阶段（全场最多完赛棋子数 0/1/2/3）配置「道具商店」各道具出现权重/概率 */
 export const SHOP_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, number>> = {
   // 阶段 0：奶油派 0%，其余 4 种平均分配
   0: { sixDie: 25, twinDice: 25, refuel: 25, shield: 25, missile: 0 },
-  // 阶段 1~3：所有道具概率平均分配
-  1: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+  // 阶段 1：奶油派 10%，其余 4 种平分剩余 90%
+  1: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
+  // 阶段 2~3：所有道具概率平均分配
   2: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
   3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
 };
@@ -292,6 +294,10 @@ export interface TimeOfDayPreset {
   lanternEmissive: number;
   lanternLightScale: number;
   fireflyOpacity: number;
+  mistOpacity: number;
+  cloudOpacity: number;
+  leafOpacity: number;
+  starOpacity: number;
   waterTintHex: number;
 }
 
@@ -325,7 +331,7 @@ export const MAP_ORDER: MapId[] = ['ancient_city'];
 export const MAPS: Record<MapId, MapConfig> = {
   ancient_city: {
     id: 'ancient_city',
-    name: '古城地图',
+    name: '古城 · 熊熊坊',
     subtitle: '护城河 · 熊熊坊 · 江南庭院',
     icon: '🏯',
     skyBgHex: 0xdbe8df,
@@ -347,45 +353,53 @@ export const MAPS: Record<MapId, MapConfig> = {
       morning: {
         label: '清晨',
         icon: '🌅',
-        skyBgHex: 0xd8eef0,
-        fogHex: 0xdff0f1,
-        fogNear: 26,
-        fogFar: 74,
-        hemiSkyHex: 0xd8f1ff,
-        hemiGroundHex: 0x7c9c78,
-        hemiIntensity: 0.64,
-        sunColorHex: 0xffd7a0,
-        sunIntensity: 1.12,
-        sunPosition: [18, 7.5, 5],
-        fillColorHex: 0xb6dbf5,
-        fillIntensity: 0.34,
-        envIntensity: 0.26,
-        exposure: 0.98,
-        lanternEmissive: 0.22,
+        skyBgHex: 0xf7e7d4,
+        fogHex: 0xf6e6d5,
+        fogNear: 40,
+        fogFar: 98,
+        hemiSkyHex: 0xfff3de,
+        hemiGroundHex: 0x90aa74,
+        hemiIntensity: 0.78,
+        sunColorHex: 0xffd292,
+        sunIntensity: 1.38,
+        sunPosition: [16, 10.5, 6],
+        fillColorHex: 0xffe4c4,
+        fillIntensity: 0.36,
+        envIntensity: 0.36,
+        exposure: 1.05,
+        lanternEmissive: 0.35,
         lanternLightScale: 0.0,
         fireflyOpacity: 0.0,
-        waterTintHex: 0xc8ecea,
+        mistOpacity: 0.45,
+        cloudOpacity: 0.28,
+        leafOpacity: 0.0,
+        starOpacity: 0.0,
+        waterTintHex: 0xf2f7ef,
       },
       noon: {
         label: '中午',
         icon: '☀️',
-        skyBgHex: 0xbbe2ff,
-        fogHex: 0xcfebff,
+        skyBgHex: 0xc5e6fc,
+        fogHex: 0xd4ecfb,
         fogNear: 68,
         fogFar: 150,
-        hemiSkyHex: 0xffffff,
-        hemiGroundHex: 0xa2bf82,
-        hemiIntensity: 1.04,
-        sunColorHex: 0xfff8e6,
-        sunIntensity: 2.18,
+        hemiSkyHex: 0xf8fcff,
+        hemiGroundHex: 0x98b47c,
+        hemiIntensity: 0.84,
+        sunColorHex: 0xfff6e2,
+        sunIntensity: 1.62,
         sunPosition: [4, 24, 3],
-        fillColorHex: 0xdcf0ff,
-        fillIntensity: 0.48,
-        envIntensity: 0.54,
-        exposure: 1.22,
+        fillColorHex: 0xd6ebfa,
+        fillIntensity: 0.38,
+        envIntensity: 0.42,
+        exposure: 1.09,
         lanternEmissive: 0.05,
         lanternLightScale: 0.0,
         fireflyOpacity: 0.0,
+        mistOpacity: 0.0,
+        cloudOpacity: 0.92,
+        leafOpacity: 0.0,
+        starOpacity: 0.0,
         waterTintHex: 0xffffff,
       },
       afternoon: {
@@ -408,6 +422,10 @@ export const MAPS: Record<MapId, MapConfig> = {
         lanternEmissive: 0.95,
         lanternLightScale: 0.38,
         fireflyOpacity: 0.16,
+        mistOpacity: 0.0,
+        cloudOpacity: 0.45,
+        leafOpacity: 0.9,
+        starOpacity: 0.1,
         waterTintHex: 0xffcfa4,
       },
       evening: {
@@ -430,6 +448,10 @@ export const MAPS: Record<MapId, MapConfig> = {
         lanternEmissive: 2.9,
         lanternLightScale: 1.0,
         fireflyOpacity: 1.0,
+        mistOpacity: 0.0,
+        cloudOpacity: 0.0,
+        leafOpacity: 0.14,
+        starOpacity: 0.96,
         waterTintHex: 0x5c7ca8,
       },
     },

@@ -233,7 +233,7 @@ export const Overlays: React.FC<OverlaysProps> = ({
               {winner.name} 夺冠！
             </h2>
             <p className="mb-4 text-xs text-slate-500">
-              本局完整排名与 KDA 战绩
+              本局完整排名与 K/D/A 战绩
             </p>
 
             <div className="mb-5 space-y-2 text-left">
@@ -308,20 +308,13 @@ export const Overlays: React.FC<OverlaysProps> = ({
               })}
             </div>
 
-            <div className="flex items-center justify-center gap-3">
+            <div className="flex items-center justify-center">
               <button
                 type="button"
                 onClick={onPlayAgain}
-                className="flex-1 rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-6 py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
+                className="w-full rounded-[14px] bg-gradient-to-b from-[#42b878] to-[#2c9a60] px-6 py-3 text-base font-bold text-white shadow-[0_4px_0_#1f7a49] cursor-pointer"
               >
                 再来一局
-              </button>
-              <button
-                type="button"
-                onClick={onReturnSetup}
-                className="flex-1 rounded-[14px] border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
-              >
-                修改阵容
               </button>
             </div>
           </div>
