@@ -611,9 +611,19 @@ export class FlightChessEngine {
     this.scheduleCritter('fly', 2500);
     this.scheduleCritter('fish', 4500);
 
-    // Pre-warm shaders
+    // Pre-warm shaders（临时显形所有延迟显示物体，避免对局中首次出现时主线程编译着色器卡顿）
     if (!this.isSoftwareGl) {
+      const hiddenObjs: THREE.Object3D[] = [];
+      this.scene.traverse((obj) => {
+        if (!obj.visible) {
+          hiddenObjs.push(obj);
+          obj.visible = true;
+        }
+      });
       this.renderer.compile(this.scene, this.camera);
+      for (let i = 0; i < hiddenObjs.length; i++) {
+        hiddenObjs[i].visible = false;
+      }
     }
 
     // Events
@@ -3350,8 +3360,6 @@ export class FlightChessEngine {
   }
 
   private clearHL(): void {
-    this.badgeTexCache.forEach((tex) => tex.dispose());
-    this.badgeTexCache.clear();
     this.hlRings.forEach((r) => {
       if (r.parent) r.parent.remove(r);
       r.geometry.dispose();

@@ -1172,18 +1172,18 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               aria-expanded={camMenuOpen}
               className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
                 camMenuOpen
-                  ? 'bg-slate-100 text-slate-900'
-                  : 'text-slate-700 hover:bg-slate-100'
+                  ? 'bg-white/55 text-slate-900 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]'
+                  : 'text-slate-700 hover:bg-white/40'
               }`}
             >
               <span>
                 {snap.camMode === 'follow' ? '跟随' : snap.camMode === 'top' ? '俯视' : '自由'}
               </span>
-              <span className="text-[10px] text-slate-400">{camMenuOpen ? '▴' : '▾'}</span>
+              <span className="text-[10px] text-slate-500">{camMenuOpen ? '▴' : '▾'}</span>
             </button>
 
             {camMenuOpen && (
-              <div className="anim-card-pop absolute right-0 top-full mt-2 w-28 rounded-2xl border border-white/80 bg-white/75 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)] backdrop-blur-md">
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-28 rounded-2xl border border-white/70 bg-white/75 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)] backdrop-blur-md">
                 {(
                   [
                     ['follow', '跟随视角'],
@@ -1200,19 +1200,34 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     }}
                     className={`flex w-full items-center justify-between rounded-xl px-2.5 py-2 text-xs font-bold transition-colors cursor-pointer ${
                       snap.camMode === mode
-                        ? 'bg-[#2c9a60] text-white'
-                        : 'text-slate-700 hover:bg-slate-100'
+                        ? 'bg-emerald-500/16 text-emerald-800 ring-1 ring-emerald-500/25'
+                        : 'text-slate-700 hover:bg-white/60'
                     }`}
                   >
                     <span>{label}</span>
-                    {snap.camMode === mode && <span>✓</span>}
+                    {snap.camMode === mode && (
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="text-emerald-600"
+                        aria-hidden="true"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    )}
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+          <span className="h-4 w-px bg-slate-700/15" aria-hidden="true" />
 
           {/* 游戏规则按钮 */}
           <button
@@ -1225,31 +1240,63 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             }}
             className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
               rulesOpen
-                ? 'bg-emerald-50 text-[#2c9a60]'
-                : 'text-slate-700 hover:bg-slate-100'
+                ? 'bg-emerald-500/16 text-emerald-800'
+                : 'text-slate-700 hover:bg-white/40'
             }`}
           >
             <span>规则</span>
           </button>
 
-          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+          <span className="h-4 w-px bg-slate-700/15" aria-hidden="true" />
 
-          {/* 声音按钮（仅保留图标） */}
+          {/* 声音按钮（统一矢量线框图标） */}
           <button
             type="button"
             onClick={onToggleMute}
             title={muted ? '开启全局音效' : '关闭全局音效'}
             aria-label={muted ? '开启音效' : '静音'}
-            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors cursor-pointer ${
+            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors cursor-pointer ${
               muted
-                ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-                : 'text-slate-700 hover:bg-slate-100'
+                ? 'bg-rose-500/14 text-rose-600 hover:bg-rose-500/20'
+                : 'text-slate-600 hover:bg-white/40 hover:text-slate-900'
             }`}
           >
-            <span>{muted ? '🔇' : '🔊'}</span>
+            {muted ? (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="22" y1="9" x2="16" y2="15" />
+                <line x1="16" y1="9" x2="22" y2="15" />
+              </svg>
+            ) : (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+              </svg>
+            )}
           </button>
 
-          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
+          <span className="h-4 w-px bg-slate-700/15" aria-hidden="true" />
 
           {/* 齿轮设置按钮（收纳返回设置与暂停） */}
           <div className="relative">
@@ -1264,8 +1311,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               aria-expanded={settingsMenuOpen}
               className={`flex h-8 w-8 items-center justify-center rounded-full transition-all cursor-pointer ${
                 settingsMenuOpen
-                  ? 'bg-[#2c9a60] text-white rotate-45'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  ? 'bg-white/55 text-emerald-700 rotate-45 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]'
+                  : 'text-slate-600 hover:bg-white/40 hover:text-slate-900'
               }`}
             >
               <svg
