@@ -93,6 +93,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   shopPid: null,
   latestEmote: null,
   giftQuestEvent: null,
+  killBanner: null,
   players: [],
 };
 

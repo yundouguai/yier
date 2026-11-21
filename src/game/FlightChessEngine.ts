@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   ensureAudio,
   beep,
+  announceKillStreak,
   playWeatherAmbientPulse,
   sndCap,
   sndHop,
@@ -27,6 +28,7 @@ import {
   GraphicsQuality,
   HOME_END,
   HudEmoteEvent,
+  KillBannerEvent,
   ITEM_DEFS,
   ITEM_ORDER,
   ItemTargetChoice,
@@ -237,6 +239,10 @@ export class FlightChessEngine {
   private giftQuestEvent: GiftQuestEvent | null = null;
   private giftQuestKey = 0;
   private giftQuestTimer: number | null = null;
+  private killBanner: KillBannerEvent | null = null;
+  private killBannerKey = 0;
+  private killBannerTimer: number | null = null;
+  private turnStompKills = 0;
   private emoteKeySeq = 0;
   private lastAiEmoteAt: number[] = [];
   private turnSeq = 0;
@@ -859,7 +865,8 @@ export class FlightChessEngine {
       if (this.disposed) return;
       const maxCritters = this.quality === 'high' ? 8 : this.quality === 'medium' ? 5 : 3;
       if (this.mapConfig.enableCritterSpawns && this.world.critters.length < maxCritters) this.world.spawnCritter?.(kind);
-      this.scheduleCritter(kind, rnd(5500, 12000));
+      const nextDelay = kind === 'bird' ? rnd(6100, 13300) : rnd(5500, 12000);
+      this.scheduleCritter(kind, nextDelay);
     });
   }
 
@@ -1001,6 +1008,45 @@ export class FlightChessEngine {
     });
   }
 
+  private recordTurnKillStreak(killerPid: number, addedKills: number): void {
+    if (addedKills <= 0) return;
+    this.turnStompKills += addedKills;
+    if (this.turnStompKills < 2) return;
+    const kills = this.turnStompKills;
+    const killer = this.players[killerPid];
+    if (!killer) return;
+
+    const map: Record<number, { title: string; cn: string; voice: string }> = {
+      2: { title: 'DOUBLE KILL!', cn: '双杀', voice: 'Double Kill!' },
+      3: { title: 'TRIPLE KILL!', cn: '三杀', voice: 'Triple Kill!' },
+      4: { title: 'QUADRA KILL!', cn: '四杀', voice: 'Quadra Kill!' },
+      5: { title: 'PENTA KILL!', cn: '五杀', voice: 'Penta Kill!' },
+    };
+    const info = map[kills] ?? {
+      title: 'LEGENDARY!',
+      cn: '超神暴走',
+      voice: 'Legendary!',
+    };
+
+    this.killBanner = {
+      key: ++this.killBannerKey,
+      kills,
+      title: info.title,
+      subtitle: `${killer.name} · ${info.cn}（单回合连踩 ${kills} 只）`,
+      playerName: killer.name,
+      playerCharKey: killer.key,
+      playerColor: killer.uiColor,
+    };
+    announceKillStreak(kills, info.voice);
+    this.emitSnapshot();
+    if (this.killBannerTimer !== null) window.clearTimeout(this.killBannerTimer);
+    this.killBannerTimer = window.setTimeout(() => {
+      if (this.disposed) return;
+      this.killBanner = null;
+      this.emitSnapshot();
+    }, 3400);
+  }
+
   private triggerShake(): void {
     this.shakeKey++;
     this.emitSnapshot();
@@ -1113,6 +1159,7 @@ export class FlightChessEngine {
       shopSecondsLeft,
       shopPid: this.shopPid,
       giftQuestEvent: this.giftQuestEvent,
+      killBanner: this.killBanner,
       players: this.players.map((pl, i) => {
         const rankIdx = this.finishedOrder.indexOf(i);
         return {
@@ -4174,6 +4221,7 @@ export class FlightChessEngine {
       } else {
         this.setMsg(`💥 撞掉 ${toSendHome.length} 架敌机，送回基地！`);
       }
+      this.recordTurnKillStreak(plane.pid, toSendHome.length);
       this.spawnImpact(c[0], c[1]);
       this.triggerShake();
       await Promise.all(
@@ -4220,6 +4268,7 @@ export class FlightChessEngine {
 
     if (this.playerKda[flyingPid]) this.playerKda[flyingPid].stomps += victims.length;
     if (this.playerKda[oppPid]) this.playerKda[oppPid].stomped += victims.length;
+    this.recordTurnKillStreak(flyingPid, victims.length);
     sndCap();
     this.setMsg(`💥 飞越航线，击落 ${oppPlayer.name} 航道敌机！`);
     this.spawnImpact(c[0], c[1]);
@@ -4276,12 +4325,22 @@ export class FlightChessEngine {
     const sync = (fn: (p: PlaneData, idx: number) => Promise<void>) =>
       Promise.all(stack.map((p, i) => fn(p, i)));
     const setPos = (v: number) => stack.forEach((p) => (p.pos = v));
-    const countExistingAt = (pos: number) =>
-      pos <= 0
-        ? 0
-        : this.planes.filter(
-            (q) => !stack.includes(q) && q.pid === plane.pid && q.pos === pos,
-          ).length;
+    const countExistingAt = (pos: number, includeOthers = false) => {
+      if (pos <= 0) return 0;
+      if (includeOthers && pos <= 50) {
+        const targetRing = (P.start + 2 + pos) % 52;
+        return this.planes.filter(
+          (q) =>
+            !stack.includes(q) &&
+            q.pos >= 1 &&
+            q.pos <= 50 &&
+            this.ringIndexOf(q) === targetRing,
+        ).length;
+      }
+      return this.planes.filter(
+        (q) => !stack.includes(q) && q.pid === plane.pid && q.pos === pos,
+      ).length;
+    };
     const hopAll = (
       c: Point2D,
       yaw: number,
@@ -4291,8 +4350,12 @@ export class FlightChessEngine {
       targetPos?: number,
       flipMode: 'none' | 'frontFlip' | 'spinLeft' | 'spinRight' = 'none',
       onImpact?: () => void,
+      isPassThrough = false,
     ) => {
-      const baseStackCount = targetPos !== undefined && targetPos !== HOME_END ? countExistingAt(targetPos) : 0;
+      const baseStackCount =
+        targetPos !== undefined && targetPos !== HOME_END
+          ? countExistingAt(targetPos, isPassThrough)
+          : 0;
       return sync((p, idx) =>
         this.hopTo(
           p,
@@ -4398,6 +4461,7 @@ export class FlightChessEngine {
                 stepCapturePromise = this.captureAt(plane);
               }
             : undefined,
+          i < die - 1,
         );
         if (this.disposed) return;
         if (i < die - 1) {
@@ -4667,6 +4731,7 @@ export class FlightChessEngine {
       this.finishedOrder.includes(this.turn)
     );
     this.sixChain = 0;
+    this.turnStompKills = 0;
     this.turnUsedAtkDef = false;
     this.turnUsedDef = false;
     this.armedSixDie = false;
@@ -7008,6 +7073,7 @@ export class FlightChessEngine {
     if (this.msgTimer !== null) window.clearTimeout(this.msgTimer);
     if (this.splashTimer !== null) window.clearTimeout(this.splashTimer);
     if (this.giftQuestTimer !== null) window.clearTimeout(this.giftQuestTimer);
+    if (this.killBannerTimer !== null) window.clearTimeout(this.killBannerTimer);
 
     window.removeEventListener('resize', this.boundResize);
     document.removeEventListener('visibilitychange', this.boundVisibilityChange);

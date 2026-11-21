@@ -431,20 +431,20 @@ export const MAPS: Record<MapId, MapConfig> = {
       evening: {
         label: '夜晚',
         icon: '🌙',
-        skyBgHex: 0x0b1224,
-        fogHex: 0x101932,
-        fogNear: 26,
-        fogFar: 78,
-        hemiSkyHex: 0x2e467c,
-        hemiGroundHex: 0x13172a,
-        hemiIntensity: 0.32,
-        sunColorHex: 0x7ba4f0,
-        sunIntensity: 0.55,
+        skyBgHex: 0x0f182e,
+        fogHex: 0x14203d,
+        fogNear: 28,
+        fogFar: 82,
+        hemiSkyHex: 0x3b5896,
+        hemiGroundHex: 0x191e36,
+        hemiIntensity: 0.40,
+        sunColorHex: 0x89b0f5,
+        sunIntensity: 0.68,
         sunPosition: [-12, 16, -10],
-        fillColorHex: 0x243663,
-        fillIntensity: 0.2,
-        envIntensity: 0.08,
-        exposure: 0.86,
+        fillColorHex: 0x2c4175,
+        fillIntensity: 0.25,
+        envIntensity: 0.12,
+        exposure: 0.93,
         lanternEmissive: 2.9,
         lanternLightScale: 1.0,
         fireflyOpacity: 1.0,
@@ -457,6 +457,16 @@ export const MAPS: Record<MapId, MapConfig> = {
     },
   },
 };
+
+export interface KillBannerEvent {
+  key: number;
+  kills: number;
+  title: string;
+  subtitle: string;
+  playerName: string;
+  playerCharKey: CharKey;
+  playerColor: string;
+}
 
 export interface GiftQuestEvent {
   questType?: 'gift' | 'bubu';
@@ -520,6 +530,7 @@ export interface GameHudSnapshot {
   shopSecondsLeft: number | null;
   shopPid: number | null;
   giftQuestEvent: GiftQuestEvent | null;
+  killBanner: KillBannerEvent | null;
   players: HudPlayerSnapshot[];
 }
 

@@ -165,3 +165,34 @@ export function playWeatherAmbientPulse(tod: 'morning' | 'noon' | 'afternoon' | 
     beep(f, 0.045, 'sine', 0.015, f * 0.95, 0.14);
   }
 }
+
+/** 连踩播报：合成音效号角 + 浏览器语音播报 (Double Kill ~ Legendary) */
+export function announceKillStreak(kills: number, speechText: string): void {
+  if (muted) return;
+  // 1) 气势号角和弦
+  const base = kills >= 5 ? 587 : kills >= 4 ? 523 : kills >= 3 ? 494 : 440;
+  beep(base, 0.12, 'triangle', 0.14, base * 1.02, 0);
+  beep(base * 1.25, 0.14, 'triangle', 0.15, base * 1.26, 0.09);
+  beep(base * 1.5, 0.24, 'sawtooth', 0.11, base * 1.52, 0.18);
+
+  // 2) Web Speech 英文语音播报
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const utter = new SpeechSynthesisUtterance(speechText);
+      utter.lang = 'en-US';
+      utter.rate = 0.94;
+      utter.pitch = 0.86;
+      utter.volume = 0.95;
+      const voices = synth.getVoices();
+      const enVoice =
+        voices.find((v) => v.lang.startsWith('en') && /Daniel|Alex|Google US English|Microsoft/i.test(v.name)) ??
+        voices.find((v) => v.lang.startsWith('en'));
+      if (enVoice) utter.voice = enVoice;
+      synth.speak(utter);
+    } catch {
+      // Ignore speech synthesis errors
+    }
+  }
+}

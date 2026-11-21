@@ -275,6 +275,31 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         }}
       />
 
+      {/* 单回合连踩击杀播报（Double Kill / Triple Kill ...） */}
+      {snap.killBanner && !showSetup && (
+        <div
+          key={snap.killBanner.key}
+          className="pointer-events-none fixed left-1/2 top-24 md:top-28 z-[24] -translate-x-1/2 max-w-[calc(100vw-24px)]"
+        >
+          <div
+            className="anim-card-pop flex items-center gap-2.5 rounded-2xl border-2 border-amber-300/90 bg-gradient-to-r from-slate-900/92 via-rose-950/92 to-slate-900/92 px-4 py-2 text-white shadow-[0_14px_34px_rgba(0,0,0,0.35)] backdrop-blur-md"
+            style={{
+              boxShadow: `0 12px 32px rgba(0,0,0,0.36), 0 0 0 3px ${snap.killBanner.playerColor}55`,
+            }}
+          >
+            <CharacterAvatar charKey={snap.killBanner.playerCharKey} size={34} />
+            <div className="leading-tight">
+              <div className="bg-gradient-to-r from-amber-200 via-yellow-300 to-rose-300 bg-clip-text text-base md:text-xl font-black tracking-wider text-transparent drop-shadow-sm">
+                {snap.killBanner.title}
+              </div>
+              <div className="text-[11px] md:text-xs font-bold text-amber-100/95">
+                {snap.killBanner.subtitle}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 一二的馈赠 / 布布不烦恼：本地玩家显示居中表情包+提示（缩小20%），AI仅显示弱化顶部小提示 */}
       {snap.giftQuestEvent && !showSetup && (
         snap.giftQuestEvent.isLocalHuman ? (
@@ -1109,7 +1134,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
         {/* Top-Right Pill Bar: 天色时段 | 视角下拉 | 游戏规则 | 声音 | 设置齿轮 */}
         <div
-          className="hud-right-corner pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-full bg-white/95 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.14)] backdrop-blur-sm"
+          className="hud-right-corner pointer-events-auto absolute right-2.5 top-2.5 md:right-3.5 md:top-3.5 flex items-center gap-1 rounded-full border border-white/55 bg-white/52 p-1 shadow-[0_6px_18px_rgba(30,40,55,0.12)] backdrop-blur-md"
           style={{ paddingTop: 'env(safe-area-inset-top)', paddingRight: 'env(safe-area-inset-right)' }}
           role="group"
           aria-label="天色、视角、规则、声音与设置"
@@ -1138,7 +1163,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </button>
 
             {camMenuOpen && (
-              <div className="anim-card-pop absolute right-0 top-full mt-2 w-28 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-28 rounded-2xl border border-white/80 bg-white/75 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)] backdrop-blur-md">
                 {(
                   [
                     ['follow', '跟随视角'],
@@ -1184,7 +1209,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 : 'text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span>📖 规则</span>
+            <span>规则</span>
           </button>
 
           <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
@@ -1370,40 +1395,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </section>
 
                 <section className="border-t border-slate-100 pt-4">
-                  <h4 className="mb-2.5 text-xs font-bold tracking-wide text-emerald-700">
-                    03. 快捷操控与视角
-                  </h4>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs text-slate-600">
-                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                      <span>掷骰 / 单子直走</span>
-                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                        空格 / 回车
-                      </kbd>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                      <span>快速选棋子</span>
-                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                        数字键 1~4
-                      </kbd>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                      <span>切换 / 回正视角</span>
-                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                        V / R
-                      </kbd>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
-                      <span>暂停或继续</span>
-                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                        P
-                      </kbd>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="border-t border-slate-100 pt-4">
                   <h4 className="mb-2 text-xs font-bold tracking-wide text-emerald-700">
-                    04. 道具、商店与悬赏任务
+                    03. 道具、商店与悬赏任务
                   </h4>
                   <ul className="space-y-2 text-slate-600">
                     <li className="flex gap-2.5">
@@ -1460,6 +1453,38 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </div>
                   <ul className="hidden">
                   </ul>
+                </section>
+
+                <section className="border-t border-slate-100 pt-4">
+                  <h4 className="mb-2.5 text-xs font-bold tracking-wide text-emerald-700">
+                    04. 快捷操控与视角
+                  </h4>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs text-slate-600">
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>掷骰 / 单子直走</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        空格 / 回车
+                      </kbd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>快速选棋子</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        数字键 1~4
+                      </kbd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>切换 / 回正视角</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        V / R
+                      </kbd>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span>暂停或继续</span>
+                      <kbd className="rounded border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                        P
+                      </kbd>
+                    </div>
+                  </div>
                 </section>
               </div>
 
