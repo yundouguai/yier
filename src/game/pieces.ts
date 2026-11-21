@@ -765,38 +765,75 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
     side: THREE.DoubleSide,
   });
 
-  // 1) 背后绕过的半弧红绸带（严格留足外廓间距 r>=0.225，不穿入躯干）
+  // 1) 背后绕过并精确衔接至双掌的扁平宽绸带（高度 0.052、厚度 0.011，与手持飘带完全一致）
   const backCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-0.225, 0.23, 0.07),
-    new THREE.Vector3(-0.24, 0.23, -0.105),
-    new THREE.Vector3(0.0, 0.23, -0.225),
-    new THREE.Vector3(0.24, 0.23, -0.105),
-    new THREE.Vector3(0.225, 0.23, 0.07),
+    new THREE.Vector3(-0.197, 0.258, 0.077),
+    new THREE.Vector3(-0.238, 0.242, -0.055),
+    new THREE.Vector3(-0.175, 0.234, -0.195),
+    new THREE.Vector3(0.0, 0.232, -0.228),
+    new THREE.Vector3(0.175, 0.234, -0.195),
+    new THREE.Vector3(0.238, 0.242, -0.055),
+    new THREE.Vector3(0.197, 0.258, 0.077),
   ]);
-  const backGeo = new THREE.TubeGeometry(backCurve, 24, 0.022, 8, false);
+  const backSegs = 36;
+  const halfH = 0.026; // 总高 0.052
+  const halfT = 0.0055; // 总厚 0.011
+  const backPos: number[] = [];
+  const backIdx: number[] = [];
+  for (let i = 0; i <= backSegs; i++) {
+    const u = i / backSegs;
+    const pt = backCurve.getPoint(u);
+    const tan = backCurve.getTangent(u).normalize();
+    // 水平面内法线（径向朝外）
+    let nx = -tan.z;
+    let nz = tan.x;
+    const nLen = Math.hypot(nx, nz) || 1;
+    nx /= nLen;
+    nz /= nLen;
+    // 确保法线朝外（背离中心）
+    if (pt.x * nx + pt.z * nz < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+    // 4 个截面角点：外上、外下、内下、内上
+    backPos.push(
+      pt.x + nx * halfT, pt.y + halfH, pt.z + nz * halfT,
+      pt.x + nx * halfT, pt.y - halfH, pt.z + nz * halfT,
+      pt.x - nx * halfT, pt.y - halfH, pt.z - nz * halfT,
+      pt.x - nx * halfT, pt.y + halfH, pt.z - nz * halfT,
+    );
+    if (i < backSegs) {
+      const b = i * 4;
+      const n = (i + 1) * 4;
+      for (let f = 0; f < 4; f++) {
+        const f2 = (f + 1) % 4;
+        backIdx.push(b + f, b + f2, n + f2, b + f, n + f2, n + f);
+      }
+    }
+  }
+  const backGeo = new THREE.BufferGeometry();
+  backGeo.setAttribute('position', new THREE.Float32BufferAttribute(backPos, 3));
+  backGeo.setIndex(backIdx);
+  backGeo.computeVertexNormals();
   const backRibbon = new THREE.Mesh(backGeo, ribbonMat);
   redScarf.add(backRibbon);
 
-  // 2) 左右手各自抓握的宽扁飘带（位于手掌外侧偏前，向身体外侧延展，不穿帮）
+  // 2) 左右手连续多段柔顺红绸（24 分段整条变形，无分段接缝，紧贴手掌并向正面大弧度飘甩）
   const makeHandRibbon = (sideSign: number) => {
     const pivot = new THREE.Group();
-    pivot.position.set(0.048 * sideSign, -0.045, 0.065);
+    pivot.position.set(0.032 * sideSign, -0.055, 0.022);
 
-    const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.052, 0.014), ribbonMat);
-    wrap.position.set(0.028 * sideSign, 0, 0.008);
-    pivot.add(wrap);
+    const geo = new THREE.BoxGeometry(0.46, 0.052, 0.011, 24, 1, 1);
+    geo.translate(0.22 * sideSign, 0, 0);
+    const posAttr = geo.attributes.position as THREE.BufferAttribute;
+    geo.userData.restPos = (posAttr.array as Float32Array).slice();
+    geo.userData.sideSign = sideSign;
 
-    const seg1 = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.054, 0.012), ribbonMat);
-    seg1.position.set(0.105 * sideSign, 0.004, 0.012);
-    pivot.add(seg1);
+    const strip = new THREE.Mesh(geo, ribbonMat);
+    pivot.add(strip);
+    pivot.userData.ribbonMesh = strip;
 
     const tip = new THREE.Group();
-    tip.position.set(0.17 * sideSign, 0.005, 0.014);
-    const seg2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.01), ribbonMat);
-    seg2.position.set(0.06 * sideSign, 0.006, 0.006);
-    tip.add(seg2);
-    pivot.add(tip);
-
     pivot.visible = false;
     return { pivot, tip };
   };

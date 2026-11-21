@@ -228,6 +228,13 @@ export interface WorldRefs {
   moonMat?: THREE.MeshBasicMaterial;
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
+    waveHaloMats: THREE.MeshBasicMaterial[];
+    canopyGlowLight: THREE.PointLight;
+    baseLampMat: THREE.MeshStandardMaterial;
+    baseHaloMats: THREE.MeshBasicMaterial[];
+    basePointLights: THREE.PointLight[];
+    plaqueMat: THREE.MeshStandardMaterial;
+    wishingPlaques: { group: THREE.Group; phase: number; baseRotZ: number }[];
     heartPoints: THREE.Points;
     heartMat: THREE.PointsMaterial;
     heartBase: { x: number; y: number; z: number; phase: number; speed: number }[];
@@ -2245,16 +2252,16 @@ export function buildAncientWorld(
         heartTree.add(rootStrand);
       });
 
-      // 3. 高大饱满、上瓣圆润且底部两侧内收的清晰大爱心树冠
+      // 3. 平整饱满的雕塑级大爱心树冠（正反面平整利落，边缘辅以柔和叶簇）
       let rngSeed = 73856093;
       const nextRand = () => {
         rngSeed = (rngSeed * 1664525 + 1013904223) >>> 0;
         return rngSeed / 4294967296;
       };
 
-      const heartCenterY = 2.88;
-      const heartScaleX = 1.95;
-      const heartScaleY = 1.88;
+      const heartCenterY = 2.94;
+      const heartScaleX = 1.98;
+      const heartScaleY = 1.90;
       const heartPos = (t: number, s: number): [number, number, number] => {
         const rawX = heartScaleX * s * Math.pow(Math.sin(t), 3);
         const hy =
@@ -2263,31 +2270,36 @@ export function buildAncientWorld(
             s *
             ((13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) /
               16);
-        // 底部两侧叶子向内收拢，收出饱满挺拔的 V 形爱心下弧（避免下腮外鼓）
         const lowFrac = THREE.MathUtils.clamp((heartCenterY + 0.14 - hy) / (heartScaleY * 1.18), 0, 1);
         const sideTuck = 1 - 0.28 * Math.sin(lowFrac * Math.PI * 0.85);
         return [rawX * sideTuck, hy, lowFrac];
       };
 
-      // 内层深绿实心叶芯（避开顶部心窝凹槽，下端内收）
-      const coreLeafMat = mat(0x1f5522, 0.86);
-      const corePuffGeo = new THREE.IcosahedronGeometry(1, 2);
-      const coreBlobs: [number, number, number, number, number, number][] = [
-        [-0.88, heartCenterY + 0.44, 0, 0.78, 0.74, 0.7],
-        [0.88, heartCenterY + 0.44, 0, 0.78, 0.74, 0.7],
-        [0, heartCenterY - 0.12, 0, 0.72, 0.68, 0.68],
-        [0, heartCenterY - 0.82, 0, 0.38, 0.48, 0.42],
-      ];
-      coreBlobs.forEach(([px, py, pz, rx, ry, rz]) => {
-        const cm = new THREE.Mesh(corePuffGeo, coreLeafMat);
-        cm.position.set(px, py, pz);
-        cm.scale.set(rx, ry, rz);
-        cm.castShadow = true;
-        cm.receiveShadow = true;
-        heartTree.add(cm);
+      // 平整饱满的爱心立体主冠（ExtrudeGeometry + 圆润倒角，正反面平顺不凹凸，投影清晰）
+      const heartShape = new THREE.Shape();
+      const shapeSegs = 64;
+      for (let i = 0; i <= shapeSegs; i++) {
+        const t = (i / shapeSegs) * Math.PI * 2;
+        const [sx, sy] = heartPos(t, 0.78);
+        if (i === 0) heartShape.moveTo(sx, sy);
+        else heartShape.lineTo(sx, sy);
+      }
+      const canopyBodyGeo = new THREE.ExtrudeGeometry(heartShape, {
+        depth: 0.24,
+        bevelEnabled: true,
+        bevelThickness: 0.42,
+        bevelSize: 0.34,
+        bevelSegments: 10,
+        curveSegments: 40,
       });
+      canopyBodyGeo.translate(0, 0, -0.12);
+      const canopyBodyMat = mat(0x286a2a, 0.80);
+      const canopyBodyMesh = new THREE.Mesh(canopyBodyGeo, canopyBodyMat);
+      canopyBodyMesh.castShadow = true;
+      canopyBodyMesh.receiveShadow = true;
+      heartTree.add(canopyBodyMesh);
 
-      // 密实蓬松榕叶簇 InstancedMesh（上丰下收、爱心轮廓清晰）
+      // 外缘柔和叶簇 & 正反面修平的浅层叶片（削弱颗粒球感，保留自然树叶层次）
       interface LeafTuft {
         x: number;
         y: number;
@@ -2301,53 +2313,57 @@ export function buildAncientWorld(
         colHex: number;
       }
       const tufts: LeafTuft[] = [];
-      const leafPalette = [0x1f5623, 0x286729, 0x32772f, 0x3d8836, 0x48963e];
+      const leafPalette = [0x225e26, 0x2a6e2b, 0x337d31, 0x3d8d37, 0x489a3f];
 
-      const pushTuft = (x: number, y: number, z: number, sizeBias = 1) => {
+      const pushTuft = (
+        x: number,
+        y: number,
+        z: number,
+        sizeBias = 1,
+        zFlat = 0.55,
+      ) => {
         const heightNorm = THREE.MathUtils.clamp((y - (heartCenterY - 1.85)) / 3.4, 0, 1);
         const shadeIdx = Math.min(
           leafPalette.length - 1,
-          Math.max(0, Math.floor(heightNorm * 3.7 + nextRand() * 1.2)),
+          Math.max(0, Math.floor(heightNorm * 3.7 + nextRand() * 1.1)),
         );
-        const baseR = (0.28 + nextRand() * 0.11) * sizeBias;
+        const baseR = (0.22 + nextRand() * 0.08) * sizeBias;
         tufts.push({
           x,
           y,
           z,
-          sx: baseR * (0.98 + nextRand() * 0.2),
-          sy: baseR * (0.86 + nextRand() * 0.18),
-          sz: baseR * (0.94 + nextRand() * 0.2),
-          rx: (nextRand() - 0.5) * 0.6,
-          ry: nextRand() * Math.PI * 2,
-          rz: (nextRand() - 0.5) * 0.6,
+          sx: baseR * (1.02 + nextRand() * 0.16),
+          sy: baseR * (0.90 + nextRand() * 0.14),
+          sz: baseR * zFlat,
+          rx: (nextRand() - 0.5) * 0.25,
+          ry: (nextRand() - 0.5) * 0.35,
+          rz: (nextRand() - 0.5) * 0.35,
           colHex: leafPalette[shadeIdx],
         });
       };
 
-      const layers: { s: number; tCount: number; zRings: number[] }[] = [
-        { s: 1.0, tCount: 38, zRings: [-0.32, 0, 0.32] },
-        { s: 0.84, tCount: 32, zRings: [-0.64, -0.22, 0.22, 0.64] },
-        { s: 0.62, tCount: 24, zRings: [-0.84, -0.44, 0.44, 0.84] },
-        { s: 0.36, tCount: 14, zRings: [-0.94, 0.94] },
+      // 外圈轮廓柔和叶簇（扁平化 Z 轴，告别大圆球）
+      const rimLayers: { s: number; tCount: number; zRings: number[]; zFlat: number; size: number }[] = [
+        { s: 0.96, tCount: 40, zRings: [-0.16, 0.16], zFlat: 0.55, size: 0.92 },
+        { s: 0.84, tCount: 30, zRings: [-0.36, 0.36], zFlat: 0.42, size: 0.88 },
+        { s: 0.56, tCount: 16, zRings: [-0.50, 0.50], zFlat: 0.22, size: 0.78 },
       ];
-      for (const layer of layers) {
+      for (const layer of rimLayers) {
         for (let i = 0; i < layer.tCount; i++) {
-          const t = ((i + (nextRand() - 0.5) * 0.22) / layer.tCount) * Math.PI * 2;
+          const t = ((i + (nextRand() - 0.5) * 0.2) / layer.tCount) * Math.PI * 2;
           const [hx, hy, lowFrac] = heartPos(t, layer.s);
-          // 刻出清晰饱满的顶部心形凹槽，同时收紧底部两侧叶片大小与厚度
-          const inCleft = Math.abs(hx) < 0.44 && hy > heartCenterY + 0.22;
+          const inCleft = Math.abs(hx) < 0.42 && hy > heartCenterY + 0.24;
           const isTip = hy < heartCenterY - 1.5;
-          const zTaper = 1 - 0.38 * lowFrac;
-          const flankSizeScale = 1 - 0.24 * lowFrac;
+          const zTaper = 1 - 0.35 * lowFrac;
           for (const zr of layer.zRings) {
-            if (inCleft && Math.abs(zr) < 0.58 && layer.s > 0.65) continue;
-            if (isTip && Math.abs(zr) > 0.32) continue;
-            const jitter = isTip ? 0.035 : 0.08;
+            if (inCleft && Math.abs(zr) < 0.35 && layer.s > 0.75) continue;
+            if (isTip && Math.abs(zr) > 0.22) continue;
             pushTuft(
-              hx + (nextRand() - 0.5) * jitter,
-              hy + (nextRand() - 0.5) * jitter,
-              zr * zTaper + (nextRand() - 0.5) * 0.08,
-              (isTip ? 0.74 : layer.s === 1.0 ? 0.95 : 1.02) * flankSizeScale,
+              hx + (nextRand() - 0.5) * 0.05,
+              hy + (nextRand() - 0.5) * 0.05,
+              zr * zTaper,
+              (isTip ? 0.70 : layer.size) * (1 - 0.20 * lowFrac),
+              layer.zFlat,
             );
           }
         }
@@ -2356,7 +2372,7 @@ export function buildAncientWorld(
       const leafGeo = new THREE.IcosahedronGeometry(1, 2);
       const leafMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        roughness: 0.78,
+        roughness: 0.80,
         flatShading: false,
       });
       const leafMesh = new THREE.InstancedMesh(leafGeo, leafMat, tufts.length);
@@ -2378,24 +2394,34 @@ export function buildAncientWorld(
       if (leafMesh.instanceColor) leafMesh.instanceColor.needsUpdate = true;
       heartTree.add(leafMesh);
 
-      // 4. 沿收拢后的心形下缘 V 形弧线密密挂满 64 盏小巧暖红灯笼（4 组错峰呼吸波浪灯效）
+      // 4. 沿心形下缘挂满 64 盏呼吸流光灯笼（4 组错峰呼吸 + 外圈暖光晕）
       const treeWaveMats = [0, 1, 2, 3].map(() => {
         const m = new THREE.MeshStandardMaterial({
-          color: 0xec3422,
-          emissive: 0xd92512,
-          emissiveIntensity: 0.86,
-          roughness: 0.35,
+          color: 0xff4626,
+          emissive: 0xff5a1f,
+          emissiveIntensity: 1.0,
+          roughness: 0.32,
         });
         lanternMats.push(m);
         return m;
       });
+      const waveHaloMats = [0, 1, 2, 3].map(() =>
+        new THREE.MeshBasicMaterial({
+          color: 0xff8547,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
       const cordMat = mat(0x52341c, 0.7);
-      const lanternBodyGeo = new THREE.SphereGeometry(0.06, 12, 9);
-      const lanternCapGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.013, 8);
-      const lanternTasselGeo = new THREE.CylinderGeometry(0.01, 0.018, 0.056, 7);
+      const lanternBodyGeo = new THREE.SphereGeometry(0.082, 12, 9);
+      const lanternHaloGeo = new THREE.SphereGeometry(0.135, 10, 8);
+      const lanternCapGeo = new THREE.CylinderGeometry(0.032, 0.032, 0.015, 8);
+      const lanternTasselGeo = new THREE.CylinderGeometry(0.012, 0.02, 0.068, 7);
 
       const lanternSpecs: [number, number, number, number][] = [];
-      const zBandBase = [-0.58, -0.34, -0.14, 0.14, 0.34, 0.58];
+      const zBandBase = [-0.56, -0.34, -0.14, 0.14, 0.34, 0.56];
       for (let i = 0; i < 64; i++) {
         const isLeft = i < 32;
         const idxInSide = isLeft ? i : i - 32;
@@ -2430,57 +2456,197 @@ export function buildAncientWorld(
 
         const body = new THREE.Mesh(lanternBodyGeo, treeWaveMats[lIdx % 4]);
         body.scale.set(1, 0.84, 1);
-        body.position.y = -0.048;
+        body.position.y = -0.052;
         lg.add(body);
 
-        for (const cy of [-0.003, -0.092]) {
+        const halo = new THREE.Mesh(lanternHaloGeo, waveHaloMats[lIdx % 4]);
+        halo.position.y = -0.052;
+        lg.add(halo);
+
+        for (const cy of [-0.002, -0.104]) {
           const cap = new THREE.Mesh(lanternCapGeo, trimGold);
           cap.position.y = cy;
           lg.add(cap);
         }
 
         const tassel = new THREE.Mesh(lanternTasselGeo, trimGold);
-        tassel.position.y = -0.124;
+        tassel.position.y = -0.142;
         lg.add(tassel);
 
         lg.position.set(lx, ly, lz);
         heartTree.add(lg);
       });
 
-      // 5. 树冠粉金小爱心萤火粒子
-      const hCount = 20;
+      const canopyGlowLight = new THREE.PointLight(0xff7838, 0, 5.8, 1.5);
+      canopyGlowLight.position.set(0, 1.95, -0.45);
+      heartTree.add(canopyGlowLight);
+
+      // 4b. 树上悬挂 18 枚红色许愿牌（夜晚泛暖红微光，随风轻摆）
+      const plaqueCanvas = document.createElement('canvas');
+      plaqueCanvas.width = 128;
+      plaqueCanvas.height = 160;
+      const pqg = plaqueCanvas.getContext('2d')!;
+      pqg.fillStyle = '#c81e1e';
+      pqg.fillRect(0, 0, 128, 160);
+      pqg.strokeStyle = '#ffd166';
+      pqg.lineWidth = 8;
+      pqg.strokeRect(10, 10, 108, 140);
+      pqg.fillStyle = '#ffd166';
+      pqg.font = 'bold 54px serif';
+      pqg.textAlign = 'center';
+      pqg.textBaseline = 'middle';
+      pqg.fillText('愿', 64, 72);
+      pqg.beginPath();
+      pqg.moveTo(64, 128);
+      pqg.bezierCurveTo(48, 118, 48, 104, 57, 103);
+      pqg.bezierCurveTo(62, 102, 64, 108, 64, 108);
+      pqg.bezierCurveTo(64, 108, 66, 102, 71, 103);
+      pqg.bezierCurveTo(80, 104, 80, 118, 64, 128);
+      pqg.fill();
+      const plaqueTex = new THREE.CanvasTexture(plaqueCanvas);
+      const plaqueMat = new THREE.MeshStandardMaterial({
+        map: plaqueTex,
+        emissive: 0xa81c1c,
+        emissiveMap: plaqueTex,
+        emissiveIntensity: 0.2,
+        roughness: 0.45,
+      });
+      const plaqueGeo = new THREE.BoxGeometry(0.115, 0.15, 0.018);
+      const wishingPlaques: { group: THREE.Group; phase: number; baseRotZ: number }[] = [];
+      for (let i = 0; i < 18; i++) {
+        const side = i % 2 === 0 ? -1 : 1;
+        const frac = Math.floor(i / 2) / 8;
+        const t = side < 0
+          ? THREE.MathUtils.lerp(0.32 * Math.PI, 0.80 * Math.PI, frac)
+          : THREE.MathUtils.lerp(1.20 * Math.PI, 1.68 * Math.PI, frac);
+        const [px, py, lowFrac] = heartPos(t, 0.96);
+        const pz = (i % 3 === 0 ? -0.52 : i % 3 === 1 ? 0.52 : -0.34) * (1 - 0.3 * lowFrac);
+        const pg = new THREE.Group();
+        const cordLen = 0.22 + (i % 3) * 0.05;
+        const cord = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.004, 0.004, cordLen, 4),
+          trimGold,
+        );
+        cord.position.y = cordLen * 0.5;
+        pg.add(cord);
+
+        const board = new THREE.Mesh(plaqueGeo, plaqueMat);
+        board.position.y = -0.075;
+        pg.add(board);
+
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(0.125, 0.022, 0.024), trimGold);
+        cap.position.y = -0.004;
+        pg.add(cap);
+
+        const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.015, 0.06, 6), trimGold);
+        tassel.position.y = -0.18;
+        pg.add(tassel);
+
+        pg.position.set(px, py - cordLen * 0.65, pz);
+        const baseRotZ = (nextRand() - 0.5) * 0.12;
+        pg.rotation.z = baseRotZ;
+        heartTree.add(pg);
+        wishingPlaques.push({ group: pg, phase: nextRand() * Math.PI * 2, baseRotZ });
+      }
+
+      // 4c. 树池底座围一圈暖光小地灯（16 盏石座灯笼，夜晚亮起）
+      const baseLampPostMat = mat(0x3a2b22, 0.72);
+      const baseLampMat = new THREE.MeshStandardMaterial({
+        color: 0xffe6a3,
+        emissive: 0xffa834,
+        emissiveIntensity: 0,
+        roughness: 0.25,
+      });
+      const baseHaloMats: THREE.MeshBasicMaterial[] = [];
+      const basePostGeo = new THREE.CylinderGeometry(0.026, 0.036, 0.14, 8);
+      const baseOrbGeo = new THREE.SphereGeometry(0.046, 10, 8);
+      const baseCapGeo = new THREE.ConeGeometry(0.062, 0.042, 8);
+      const baseHaloGeo = new THREE.CircleGeometry(0.18, 14);
+      for (let i = 0; i < 16; i++) {
+        const ang = (i / 16) * Math.PI * 2;
+        const bx = Math.cos(ang) * 1.19;
+        const bz = Math.sin(ang) * 1.19;
+        const lamp = new THREE.Group();
+        lamp.position.set(bx, 0.02, bz);
+
+        const post = new THREE.Mesh(basePostGeo, baseLampPostMat);
+        post.position.y = 0.07;
+        lamp.add(post);
+
+        const orb = new THREE.Mesh(baseOrbGeo, baseLampMat);
+        orb.position.y = 0.16;
+        lamp.add(orb);
+
+        const cap = new THREE.Mesh(baseCapGeo, baseLampPostMat);
+        cap.position.y = 0.21;
+        lamp.add(cap);
+
+        const hMat = new THREE.MeshBasicMaterial({
+          color: 0xffc46b,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        baseHaloMats.push(hMat);
+        const halo = new THREE.Mesh(baseHaloGeo, hMat);
+        halo.rotation.x = -Math.PI / 2;
+        halo.position.y = 0.015;
+        lamp.add(halo);
+
+        heartTree.add(lamp);
+      }
+      const basePointLights: THREE.PointLight[] = [];
+      for (const lx of [-1.25, 1.25]) {
+        const bpl = new THREE.PointLight(0xffb454, 0, 4.4, 1.6);
+        bpl.position.set(lx, 0.34, -0.35);
+        heartTree.add(bpl);
+        basePointLights.push(bpl);
+      }
+
+      // 5. 沿爱心树边缘围成一圈的粉金小爱心萤火粒子（64 颗，清晰勾勒树冠爱心轮廓）
+      const hCount = 64;
       const hPos = new Float32Array(hCount * 3);
       const hBase: { x: number; y: number; z: number; phase: number; speed: number }[] = [];
       for (let i = 0; i < hCount; i++) {
-        const ang = (i / hCount) * Math.PI * 2;
-        const rad = 1.15 + Math.random() * 0.95;
-        const hx = Math.cos(ang) * rad;
-        const hz = Math.sin(ang) * rad;
-        const hy = 2.05 + Math.random() * 1.95;
-        hBase.push({ x: hx, y: hy, z: hz, phase: Math.random() * Math.PI * 2, speed: 0.7 + Math.random() * 0.7 });
+        const t = (i / hCount) * Math.PI * 2;
+        const edgeScale = 1.07 + (i % 3) * 0.045;
+        const [hx, hy, lowFrac] = heartPos(t, edgeScale);
+        const zLayer = ((i % 5) - 2) * 0.18 * (1 - 0.35 * lowFrac);
+        hBase.push({
+          x: hx,
+          y: hy,
+          z: zLayer,
+          phase: (i / hCount) * Math.PI * 4,
+          speed: 0.9 + (i % 4) * 0.22,
+        });
         hPos[i * 3] = hx;
         hPos[i * 3 + 1] = hy;
-        hPos[i * 3 + 2] = hz;
+        hPos[i * 3 + 2] = zLayer;
       }
       const hGeo = new THREE.BufferGeometry();
       hGeo.setAttribute('position', new THREE.BufferAttribute(hPos, 3));
       const hCanvas = document.createElement('canvas');
-      hCanvas.width = hCanvas.height = 64;
+      hCanvas.width = hCanvas.height = 128;
       const hg = hCanvas.getContext('2d')!;
-      hg.fillStyle = '#ff9ec4';
-      hg.shadowColor = '#ffd580';
-      hg.shadowBlur = 10;
+      const hGrad = hg.createRadialGradient(64, 58, 6, 64, 58, 44);
+      hGrad.addColorStop(0, '#fff2b2');
+      hGrad.addColorStop(0.45, '#ff99c8');
+      hGrad.addColorStop(1, '#ff5c9e');
+      hg.fillStyle = hGrad;
+      hg.shadowColor = '#ffd166';
+      hg.shadowBlur = 18;
       hg.beginPath();
-      hg.moveTo(32, 48);
-      hg.bezierCurveTo(14, 36, 12, 18, 24, 16);
-      hg.bezierCurveTo(30, 15, 32, 22, 32, 22);
-      hg.bezierCurveTo(32, 22, 34, 15, 40, 16);
-      hg.bezierCurveTo(52, 18, 50, 36, 32, 48);
+      hg.moveTo(64, 96);
+      hg.bezierCurveTo(26, 72, 22, 34, 48, 30);
+      hg.bezierCurveTo(60, 28, 64, 42, 64, 42);
+      hg.bezierCurveTo(64, 42, 68, 28, 80, 30);
+      hg.bezierCurveTo(106, 34, 102, 72, 64, 96);
       hg.fill();
       const hTex = new THREE.CanvasTexture(hCanvas);
       const heartMat = new THREE.PointsMaterial({
         map: hTex,
-        size: 0.24,
+        size: 0.38,
         transparent: true,
         opacity: 0,
         depthWrite: false,
@@ -2527,17 +2693,17 @@ export function buildAncientWorld(
       groundHalo.visible = false;
       heartTree.add(groundHalo);
 
-      // 7. 树冠动态光影投影秀（无阴影 SpotLight.map 投射至立体叶片）
+      // 7. 树冠动态光影投影秀（上移至树冠中上部平整区，投影更清晰）
       const projCanvas = document.createElement('canvas');
       projCanvas.width = projCanvas.height = 512;
       const projTex = new THREE.CanvasTexture(projCanvas);
       const spotTarget = new THREE.Object3D();
-      spotTarget.position.set(0, 2.75, 0.1);
+      spotTarget.position.set(0, 3.24, 0.0);
       heartTree.add(spotTarget);
-      const spotLight = new THREE.SpotLight(0xffd6ea, 0, 8.5, 0.54, 0.45, 1.0);
+      const spotLight = new THREE.SpotLight(0xffd6ea, 0, 8.5, 0.48, 0.38, 1.0);
       spotLight.castShadow = false;
       spotLight.map = projTex;
-      spotLight.position.set(0, 2.15, -3.5);
+      spotLight.position.set(0, 3.18, -3.7);
       spotLight.target = spotTarget;
       heartTree.add(spotLight);
 
@@ -2585,7 +2751,7 @@ export function buildAncientWorld(
       const camBody = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.11, 0.09), mat(0x2d343e, 0.4));
       camBody.position.set(0, 0.37, 0);
       camGrp.add(camBody);
-      const camLens = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.04, 0.055, 12), mat(0x94a3b8, 0.25));
+      const camLens = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.04, 0.055, 12), new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.25, metalness: 0.6 }));
       camLens.rotation.x = Math.PI / 2;
       camLens.position.set(0, 0.37, 0.06);
       camGrp.add(camLens);
@@ -2609,6 +2775,13 @@ export function buildAncientWorld(
 
       heartTreeNightData = {
         waveMats: treeWaveMats,
+        waveHaloMats,
+        canopyGlowLight,
+        baseLampMat,
+        baseHaloMats,
+        basePointLights,
+        plaqueMat,
+        wishingPlaques,
         heartPoints,
         heartMat,
         heartBase: hBase,

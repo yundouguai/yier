@@ -1788,7 +1788,7 @@ export class FlightChessEngine {
     };
 
     const followUpPools: Record<AiPersonality, string[]> = {
-      vengeful: ['💢 给我等着！', '📝 小本本又多一笔', '😠 下轮见！', '🔥 别以为结束了'],
+      vengeful: ['💢 给我等着！', '📝 记在小本本上！', '😠 下轮见！', '🔥 别以为结束了'],
       chill: ['🍵 开心最重要啦~', '🌸 慢慢飞~', '😌 问题不大哈哈', '✨ 喝口水继续'],
       rusher: ['⚡ 冲冲冲！', '🔥 别墨迹！', '💨 第一名预定！', '⚡ 速度拉满！'],
       tactician: ['📊 节奏很关键', '🧠 稳住能赢', '🎯 继续观察局势', '✨ 算好下一手'],
@@ -3818,6 +3818,31 @@ export class FlightChessEngine {
   }
 
   /** 终点到达庆祝：舒缓节奏双手执红绸左右挥甩跳舞动作 */
+  private animateSilkRibbon(pivot: THREE.Group | undefined, phase: number, sideSign: number): void {
+    if (!pivot) return;
+    // 向正面（+Z）大弧度挥甩，同时上下轻扬
+    pivot.rotation.y = -sideSign * (0.56 + Math.sin(phase - 0.35) * 0.48);
+    pivot.rotation.z = sideSign * (-0.1 + Math.cos(phase - 0.5) * 0.28);
+    const strip = pivot.userData.ribbonMesh as THREE.Mesh | undefined;
+    if (!strip) return;
+    const geo = strip.geometry as THREE.BufferGeometry;
+    const rest = geo.userData.restPos as Float32Array | undefined;
+    if (!rest) return;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const arr = pos.array as Float32Array;
+    for (let i = 0; i < pos.count; i++) {
+      const ix = i * 3;
+      const rx = rest[ix];
+      const ry = rest[ix + 1];
+      const rz = rest[ix + 2];
+      const u = Math.min(1, Math.abs(rx) / 0.46);
+      const env = Math.pow(u, 1.15);
+      arr[ix + 1] = ry + Math.cos(u * 3.8 - phase * 1.3) * env * 0.065;
+      arr[ix + 2] = rz + Math.sin(u * 4.4 - phase * 1.5) * env * 0.095;
+    }
+    pos.needsUpdate = true;
+  }
+
   private async celebrateGoal(plane: PlaneData): Promise<void> {
     plane.animating = true;
     const m = plane.mesh;
@@ -3832,7 +3857,7 @@ export class FlightChessEngine {
     if (pt.leftRibbonPivot) pt.leftRibbonPivot.visible = true;
     if (pt.rightRibbonPivot) pt.rightRibbonPivot.visible = true;
     this.spawnImpact(m.position.x, m.position.z);
-    await this.tween(1700, (t) => {
+    await this.tween(1420, (t) => {
       const beat = t * Math.PI * 2.5;
       const sway = Math.sin(beat);
       const bounce = Math.abs(Math.sin(beat));
@@ -3840,36 +3865,20 @@ export class FlightChessEngine {
       m.rotation.y = baseYaw + sway * 0.24;
       pt.animRoot.rotation.z = sway * 0.16;
       pt.animRoot.scale.set(1 + (1 - bounce) * 0.035, 1 + bounce * 0.06, 1 + (1 - bounce) * 0.035);
-      // 双手微向前伸并同向左右挥舞红绸（外偏防穿模）
-      pt.leftArm.rotation.x = -0.78;
-      pt.leftArm.rotation.y = sway * 0.32;
-      pt.leftArm.rotation.z = 0.22 + sway * 0.32;
-      pt.rightArm.rotation.x = -0.78;
-      pt.rightArm.rotation.y = sway * 0.32;
-      pt.rightArm.rotation.z = -0.22 + sway * 0.32;
+      // 双手向前伸展并挥舞红绸向正面大弧度摆动
+      pt.leftArm.rotation.x = -0.92;
+      pt.leftArm.rotation.y = sway * 0.36;
+      pt.leftArm.rotation.z = 0.22 + sway * 0.34;
+      pt.rightArm.rotation.x = -0.92;
+      pt.rightArm.rotation.y = sway * 0.36;
+      pt.rightArm.rotation.z = -0.22 + sway * 0.34;
       pt.leftFoot.rotation.x = sway * 0.36;
       pt.rightFoot.rotation.x = -sway * 0.36;
       pt.headPivot.rotation.z = -sway * 0.16;
       pt.headPivot.rotation.y = sway * 0.18;
       pt.headPivot.rotation.x = bounce * 0.06;
-      const lag1 = Math.sin(beat - 0.65);
-      const lag2 = Math.sin(beat - 1.25);
-      if (pt.leftRibbonPivot) {
-        pt.leftRibbonPivot.rotation.z = -0.18 + lag1 * 0.42;
-        pt.leftRibbonPivot.rotation.y = -0.22 + lag1 * 0.22;
-      }
-      if (pt.leftRibbonTip) {
-        pt.leftRibbonTip.rotation.z = lag2 * 0.46;
-        pt.leftRibbonTip.rotation.y = -0.12 + lag2 * 0.22;
-      }
-      if (pt.rightRibbonPivot) {
-        pt.rightRibbonPivot.rotation.z = 0.18 + lag1 * 0.42;
-        pt.rightRibbonPivot.rotation.y = 0.22 + lag1 * 0.22;
-      }
-      if (pt.rightRibbonTip) {
-        pt.rightRibbonTip.rotation.z = lag2 * 0.46;
-        pt.rightRibbonTip.rotation.y = 0.12 + lag2 * 0.22;
-      }
+      this.animateSilkRibbon(pt.leftRibbonPivot, beat, -1);
+      this.animateSilkRibbon(pt.rightRibbonPivot, beat + 0.35, 1);
     });
     m.position.y = 0.12;
     m.rotation.y = baseYaw;
@@ -5408,12 +5417,20 @@ export class FlightChessEngine {
     const htn = this.world.heartTreeNight;
     if (htn) {
       const active = nightScale > 0.02;
-      htn.heartMat.opacity = nightScale * 0.92;
+      htn.heartMat.opacity = nightScale * 0.98;
       htn.heartPoints.visible = active;
-      htn.groundHaloMat.opacity = nightScale * 0.78;
+      htn.groundHaloMat.opacity = nightScale * 0.85;
       htn.groundHalo.visible = active;
-      htn.spotLight.intensity = nightScale * 6.6;
+      htn.spotLight.intensity = nightScale * 7.6;
       htn.dioramaGroup.visible = nightScale > 0.15;
+      htn.baseLampMat.emissiveIntensity = nightScale * 2.6;
+      htn.baseHaloMats.forEach((hm) => { hm.opacity = nightScale * 0.58; });
+      htn.basePointLights.forEach((bpl) => { bpl.intensity = nightScale * 1.45; });
+      htn.plaqueMat.emissiveIntensity = 0.2 + nightScale * 0.95;
+      if (!active) {
+        htn.waveHaloMats.forEach((wh) => { wh.opacity = 0; });
+        htn.canopyGlowLight.intensity = 0;
+      }
     }
 
     if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
@@ -5553,22 +5570,36 @@ export class FlightChessEngine {
       }
 
       const htn = this.world.heartTreeNight;
+      if (htn) {
+        // 许愿牌全天随风轻摆
+        for (let i = 0; i < htn.wishingPlaques.length; i++) {
+          const wp = htn.wishingPlaques[i];
+          wp.group.rotation.z = wp.baseRotZ + Math.sin(t * 1.7 + wp.phase) * 0.065;
+          wp.group.rotation.x = Math.cos(t * 1.3 + wp.phase) * 0.04;
+        }
+      }
       if (htn && htn.heartPoints.visible) {
-        // 1) 4 组树冠红灯笼波浪流光呼吸
+        // 1) 4 组树冠红灯笼波浪流光呼吸 + 外圈光晕
         const baseLant = this.mapConfig.timePresets[this.timeOfDay].lanternEmissive;
+        const nightFactor = THREE.MathUtils.clamp(htn.heartMat.opacity / 0.98, 0, 1);
         htn.waveMats.forEach((wm, wi) => {
-          wm.emissiveIntensity = baseLant * (0.72 + 0.36 * Math.sin(t * 2.8 - wi * 1.45));
+          const wave = 0.5 + 0.5 * Math.sin(t * 2.9 - wi * 1.45);
+          wm.emissiveIntensity = baseLant * (0.45 + 1.15 * wave);
+          if (htn.waveHaloMats[wi]) {
+            htn.waveHaloMats[wi].opacity = nightFactor * (0.08 + 0.36 * wave);
+          }
         });
+        htn.canopyGlowLight.intensity = nightFactor * (1.1 + 0.45 * Math.sin(t * 2.4));
 
-        // 2) 树冠小爱心粒子漂浮上升
+        // 2) 沿树冠爱心边缘环绕的粉金小爱心微光律动
         const hAttr = htn.heartPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
         const hArr = hAttr.array as Float32Array;
         for (let i = 0; i < htn.heartBase.length; i++) {
           const hb = htn.heartBase[i];
           const ph = t * hb.speed + hb.phase;
-          hArr[i * 3] = hb.x + Math.cos(ph * 0.8) * 0.14;
-          hArr[i * 3 + 1] = hb.y + ((ph * 0.25) % 0.65);
-          hArr[i * 3 + 2] = hb.z + Math.sin(ph * 0.8) * 0.14;
+          hArr[i * 3] = hb.x + Math.cos(ph) * 0.075;
+          hArr[i * 3 + 1] = hb.y + Math.sin(ph * 1.15) * 0.095;
+          hArr[i * 3 + 2] = hb.z + Math.sin(ph * 0.85) * 0.075;
         }
         hAttr.needsUpdate = true;
 
@@ -5758,19 +5789,19 @@ export class FlightChessEngine {
               pg.restore();
             };
 
-            // 左：奶白一二，右：焦糖布布（并排投影）
-            drawPeaceBear(146, 266, true, 0);
-            drawPeaceBear(366, 266, false, 1.35);
+            // 左：奶白一二，右：焦糖布布（并排投影，整体上移至树冠中上部宽阔区）
+            drawPeaceBear(148, 236, true, 0);
+            drawPeaceBear(364, 236, false, 1.35);
 
-            // 上方点缀两颗缓缓闪烁的小星星与爱心
-            const spAlpha = 0.65 + 0.35 * Math.sin(t * 3.8);
+            // 上方点缀缓缓闪烁的爱心
+            const spAlpha = 0.72 + 0.28 * Math.sin(t * 3.8);
             pg.fillStyle = `rgba(255, 188, 212, ${spAlpha})`;
             pg.beginPath();
-            pg.moveTo(256, 152);
-            pg.bezierCurveTo(234, 136, 232, 114, 246, 112);
-            pg.bezierCurveTo(254, 110, 256, 120, 256, 120);
-            pg.bezierCurveTo(256, 120, 258, 110, 266, 112);
-            pg.bezierCurveTo(280, 114, 278, 136, 256, 152);
+            pg.moveTo(256, 126);
+            pg.bezierCurveTo(234, 110, 232, 88, 246, 86);
+            pg.bezierCurveTo(254, 84, 256, 94, 256, 94);
+            pg.bezierCurveTo(256, 94, 258, 84, 266, 86);
+            pg.bezierCurveTo(280, 88, 278, 110, 256, 126);
             pg.fill();
 
             htn.projTex.needsUpdate = true;
@@ -5782,6 +5813,11 @@ export class FlightChessEngine {
           const cyc = t % 10.0;
           const yPt = htn.yierMesh.userData.parts as PlaneParts | undefined;
           const bPt = htn.bubuMesh.userData.parts as PlaneParts | undefined;
+          const lerpYaw = (cur: number, target: number) => {
+            let diff = ((target - cur + Math.PI) % (Math.PI * 2)) - Math.PI;
+            if (diff < -Math.PI) diff += Math.PI * 2;
+            return cur + diff * Math.min(1, dt * 10);
+          };
           const setPose = (
             mesh: THREE.Group,
             pt: PlaneParts | undefined,
@@ -5790,8 +5826,8 @@ export class FlightChessEngine {
             if (!pt) return;
             const fp = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
             if (cyc < 4.0) {
-              // 阶段1：转身仰望爱心树许愿（双手合十）
-              mesh.rotation.y = Math.PI - sideSign * 0.18;
+              // 阶段1：面向爱心树（+Z）仰望许愿（双手合十）
+              mesh.rotation.y = lerpYaw(mesh.rotation.y, -sideSign * 0.18);
               pt.animRoot.position.y = Math.sin(t * 2.2) * 0.015;
               pt.headPivot.rotation.x = -0.34;
               pt.headPivot.rotation.z = sideSign * 0.08;
@@ -5801,8 +5837,8 @@ export class FlightChessEngine {
               pt.rightArm.rotation.z = -0.45;
               if (fp) { fp.mouthW.visible = true; fp.mouthOpen.visible = false; }
             } else if (cyc < 7.2) {
-              // 阶段2：面向三脚架相机比耶贴脸合影
-              mesh.rotation.y = -sideSign * 0.16;
+              // 阶段2：转身面向三脚架相机（-Z）比耶贴脸合影
+              mesh.rotation.y = lerpYaw(mesh.rotation.y, Math.PI + sideSign * 0.16);
               pt.animRoot.position.y = 0;
               pt.headPivot.rotation.x = 0.04;
               pt.headPivot.rotation.z = sideSign * 0.14;
@@ -5819,9 +5855,9 @@ export class FlightChessEngine {
               }
               if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
             } else {
-              // 阶段3：拍完开心蹦跳
+              // 阶段3：拍完面向相机开心蹦跳
               const jump = Math.abs(Math.sin((cyc - 7.2) * Math.PI * 2.5));
-              mesh.rotation.y = -sideSign * 0.12;
+              mesh.rotation.y = lerpYaw(mesh.rotation.y, Math.PI + sideSign * 0.12);
               pt.animRoot.position.y = jump * 0.11;
               pt.headPivot.rotation.x = 0;
               pt.headPivot.rotation.z = Math.sin(t * 8) * 0.12;
@@ -6204,8 +6240,8 @@ export class FlightChessEngine {
         if (pt.rightRibbonPivot) pt.rightRibbonPivot.visible = showRibbon;
 
         if (p.pos === HOME_END) {
-          // 终点方阵舒缓跳「双手执红绸左右甩」舞，张开开心小嘴
-          const v = t * 3.1 + p.pid * 0.65;
+          // 终点方阵欢快跳「双手执红绸向正面挥甩」舞（速度提升 20%），张开开心小嘴
+          const v = t * 3.75 + p.pid * 0.65;
           const sway = Math.sin(v);
           const bounce = Math.abs(Math.sin(v));
           const faceParts = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
@@ -6214,39 +6250,23 @@ export class FlightChessEngine {
             faceParts.mouthOpen.visible = true;
           }
           p.mesh.scale.setScalar(baseScale);
-          pt.animRoot.position.y = bounce * 0.09;
-          pt.animRoot.rotation.z = sway * 0.15;
-          pt.animRoot.rotation.y = sway * 0.14;
-          pt.animRoot.scale.set(1 + (1 - bounce) * 0.03, 1 + bounce * 0.05, 1 + (1 - bounce) * 0.03);
-          pt.leftArm.rotation.x = -0.76;
-          pt.leftArm.rotation.y = sway * 0.3;
-          pt.leftArm.rotation.z = 0.22 + sway * 0.3;
-          pt.rightArm.rotation.x = -0.76;
-          pt.rightArm.rotation.y = sway * 0.3;
-          pt.rightArm.rotation.z = -0.22 + sway * 0.3;
+          pt.animRoot.position.y = bounce * 0.095;
+          pt.animRoot.rotation.z = sway * 0.16;
+          pt.animRoot.rotation.y = sway * 0.16;
+          pt.animRoot.scale.set(1 + (1 - bounce) * 0.03, 1 + bounce * 0.055, 1 + (1 - bounce) * 0.03);
+          pt.leftArm.rotation.x = -0.92;
+          pt.leftArm.rotation.y = sway * 0.36;
+          pt.leftArm.rotation.z = 0.22 + sway * 0.32;
+          pt.rightArm.rotation.x = -0.92;
+          pt.rightArm.rotation.y = sway * 0.36;
+          pt.rightArm.rotation.z = -0.22 + sway * 0.32;
           pt.leftFoot.rotation.x = sway * 0.34;
           pt.rightFoot.rotation.x = -sway * 0.34;
           pt.headPivot.rotation.z = -sway * 0.14;
           pt.headPivot.rotation.y = sway * 0.16;
           pt.headPivot.rotation.x = bounce * 0.06;
-          const lag1 = Math.sin(v - 0.65);
-          const lag2 = Math.sin(v - 1.25);
-          if (pt.leftRibbonPivot) {
-            pt.leftRibbonPivot.rotation.z = -0.18 + lag1 * 0.4;
-            pt.leftRibbonPivot.rotation.y = -0.22 + lag1 * 0.22;
-          }
-          if (pt.leftRibbonTip) {
-            pt.leftRibbonTip.rotation.z = lag2 * 0.44;
-            pt.leftRibbonTip.rotation.y = -0.12 + lag2 * 0.22;
-          }
-          if (pt.rightRibbonPivot) {
-            pt.rightRibbonPivot.rotation.z = 0.18 + lag1 * 0.4;
-            pt.rightRibbonPivot.rotation.y = 0.22 + lag1 * 0.22;
-          }
-          if (pt.rightRibbonTip) {
-            pt.rightRibbonTip.rotation.z = lag2 * 0.44;
-            pt.rightRibbonTip.rotation.y = 0.12 + lag2 * 0.22;
-          }
+          this.animateSilkRibbon(pt.leftRibbonPivot, v, -1);
+          this.animateSilkRibbon(pt.rightRibbonPivot, v + 0.35, 1);
         } else if (movableSet && movableSet.has(p)) {
           const syncPhase = p.pos === 0 || stackTotal >= 2 ? p.pid * 1.37 : p.phase;
           const ex = t * 5.5 + syncPhase;
