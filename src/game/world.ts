@@ -209,7 +209,7 @@ export interface WorldRefs {
   waterMesh?: THREE.Mesh;
   moatTex?: THREE.CanvasTexture;
   waterNormalTex?: THREE.DataTexture;
-  waterUniforms?: { uTime: { value: number } };
+  waterUniforms?: { uTime: { value: number }; uWaveAmp: { value: number } };
   lanternMats?: THREE.MeshStandardMaterial[];
   nightLights?: { light: THREE.PointLight; baseIntensity: number }[];
   fireflyPoints?: THREE.Points;
@@ -956,7 +956,7 @@ export function buildAncientWorld(
     scene.add(meadow);
   }
 
-  const waterUniforms = { uTime: { value: 0 } };
+  const waterUniforms = { uTime: { value: 0 }, uWaveAmp: { value: 1 } };
 
   // 凹槽式天然卵石河床 + 水底阳光焦散光斑
   {
@@ -1074,11 +1074,13 @@ export function buildAncientWorld(
     });
     waterMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = waterUniforms.uTime;
+      shader.uniforms.uWaveAmp = waterUniforms.uWaveAmp;
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
           `#include <common>
           uniform float uTime;
+          uniform float uWaveAmp;
           varying vec2 vMoatUv;
           varying vec3 vWaterWorldPos;
           varying vec3 vRadView;
@@ -1090,7 +1092,7 @@ export function buildAncientWorld(
           vMoatUv = uv;
           float angW = atan(transformed.z, transformed.x);
           float envW = sin(clamp(uv.y, 0.0, 1.0) * 3.14159265);
-          transformed.y += envW * (
+          transformed.y += envW * uWaveAmp * (
             sin(angW * 10.0 - uTime * 1.9) * 0.009 +
             sin(angW * 18.0 - uTime * 2.6 + uv.y * 5.0) * 0.005 +
             cos(transformed.x * 0.55 + transformed.z * 0.45 - uTime * 1.4) * 0.003

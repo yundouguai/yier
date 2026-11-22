@@ -475,7 +475,7 @@ export class FlightChessEngine {
     );
     this.sunLight.position.set(...initTod.sunPosition);
     this.sunLight.castShadow = !this.isSoftwareGl;
-    const shadowDim = this.quality === 'high' ? 2048 : this.quality === 'medium' ? 1536 : 1024;
+    const shadowDim = this.quality === 'high' ? 2048 : this.quality === 'medium' ? 1024 : 512;
     this.sunLight.shadow.mapSize.set(shadowDim, shadowDim);
     this.sunLight.shadow.camera.left = -13;
     this.sunLight.shadow.camera.right = 13;
@@ -490,6 +490,7 @@ export class FlightChessEngine {
 
     // World & Pieces
     this.world = buildWorldByMapId(this.mapId, this.scene, this.players, this.anisotropy);
+    this.applyQualitySettings();
     this.applyTimeOfDayLerp(1);
     if (this.world.boats[1]) this.world.boats[1].g.visible = false;
     this.shopRingSet = new Set(this.world.shopRingIndices);
@@ -2923,13 +2924,60 @@ export class FlightChessEngine {
     }
   }
 
+  private applyQualitySettings(): void {
+    const q = this.quality;
+    // 1) 环境反射贴图（PMREM）：低画质关闭改用半球光补偿，高/中开启
+    if (this.envRT) {
+      this.scene.environment = q === 'low' ? null : this.envRT.texture;
+    }
+
+    // 2) 夜景动态点光源数量分级：高=全部，中=中央+爱心树（关城门对角2盏），低=仅中央主灯
+    this.world.nightLights?.forEach((nl, idx) => {
+      if (q === 'high') nl.light.visible = true;
+      else if (q === 'medium') nl.light.visible = idx === 0 || idx === 3;
+      else nl.light.visible = idx === 0;
+    });
+
+    // 3) 护城河水面：高=法线贴图+波浪，中=去法线贴图留波浪，低=静态渐变水色
+    if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
+      const wMat = this.world.waterMesh.material;
+      const wantNormal = q === 'high' ? (this.world.waterNormalTex ?? null) : null;
+      if (wMat.normalMap !== wantNormal) {
+        wMat.normalMap = wantNormal;
+        wMat.needsUpdate = true;
+      }
+    }
+    if (this.world.waterUniforms) {
+      this.world.waterUniforms.uWaveAmp.value = q === 'low' ? 0 : 1;
+    }
+
+    // 4) 粒子与装饰数量即时分级（setDrawRange）
+    this.world.fireflyPoints?.geometry.setDrawRange(0, q === 'high' ? 68 : q === 'medium' ? 34 : 16);
+    this.world.leafPoints?.geometry.setDrawRange(0, q === 'high' ? 60 : q === 'medium' ? 30 : 0);
+    if (this.world.heartTreeNight) {
+      this.world.heartTreeNight.heartPoints.geometry.setDrawRange(
+        0,
+        q === 'high' ? 64 : q === 'medium' ? 32 : 20,
+      );
+    }
+  }
+
   public setQuality(q: GraphicsQuality): void {
     this.quality = q;
     if (this.disposed || this.isSoftwareGl) return;
     const maxDpr = q === 'low' ? 1.5 : 2;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.shadowMap.autoUpdate = false;
-    this.shadowInterval = q === 'low' ? 4 : q === 'medium' ? 2 : 1;
+    this.renderer.shadowMap.type = q === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    const dim = q === 'high' ? 2048 : q === 'medium' ? 1024 : 512;
+    if (this.sunLight.shadow.mapSize.x !== dim) {
+      this.sunLight.shadow.mapSize.set(dim, dim);
+      this.sunLight.shadow.map?.dispose();
+      this.sunLight.shadow.map = null;
+    }
+    this.shadowInterval = q === 'low' ? 3 : q === 'medium' ? 2 : 1;
+    this.applyQualitySettings();
+    this.applyTimeOfDayLerp(this.todBlend);
     this.renderer.shadowMap.needsUpdate = true;
     if (!this.isContextLost) {
       this.renderer.render(this.scene, this.camera);
@@ -5387,7 +5435,9 @@ export class FlightChessEngine {
     this._todColA.setHex(A.hemiGroundHex);
     this._todColB.setHex(B.hemiGroundHex);
     this.hemiLight.groundColor.copy(this._todColA).lerp(this._todColB, ease);
-    this.hemiLight.intensity = THREE.MathUtils.lerp(A.hemiIntensity, B.hemiIntensity, ease);
+    this.hemiLight.intensity =
+      THREE.MathUtils.lerp(A.hemiIntensity, B.hemiIntensity, ease) +
+      (this.quality === 'low' ? 0.16 : 0);
 
     this._todColA.setHex(A.sunColorHex);
     this._todColB.setHex(B.sunColorHex);
@@ -5402,7 +5452,9 @@ export class FlightChessEngine {
     this.fillLight.color.copy(this._todColA).lerp(this._todColB, ease);
     this.fillLight.intensity = THREE.MathUtils.lerp(A.fillIntensity, B.fillIntensity, ease);
 
-    this.scene.environmentIntensity = THREE.MathUtils.lerp(A.envIntensity, B.envIntensity, ease);
+    this.scene.environmentIntensity =
+      THREE.MathUtils.lerp(A.envIntensity, B.envIntensity, ease) *
+      (this.quality === 'medium' ? 0.75 : 1);
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(A.exposure, B.exposure, ease);
 
     const lantVal = THREE.MathUtils.lerp(A.lanternEmissive, B.lanternEmissive, ease);
@@ -5424,19 +5476,19 @@ export class FlightChessEngine {
     const mistOp = THREE.MathUtils.lerp(A.mistOpacity, B.mistOpacity, ease);
     if (this.world.mistMat && this.world.mistGroup) {
       this.world.mistMat.opacity = mistOp;
-      this.world.mistGroup.visible = mistOp > 0.015;
+      this.world.mistGroup.visible = this.quality !== 'low' && mistOp > 0.015;
     }
 
     const cloudOp = THREE.MathUtils.lerp(A.cloudOpacity, B.cloudOpacity, ease);
     if (this.world.cloudMat && this.world.cloudGroup) {
       this.world.cloudMat.opacity = cloudOp;
-      this.world.cloudGroup.visible = cloudOp > 0.015;
+      this.world.cloudGroup.visible = this.quality !== 'low' && cloudOp > 0.015;
     }
 
     const leafOp = THREE.MathUtils.lerp(A.leafOpacity, B.leafOpacity, ease);
     if (this.world.leafMat && this.world.leafPoints) {
       this.world.leafMat.opacity = leafOp;
-      this.world.leafPoints.visible = leafOp > 0.015;
+      this.world.leafPoints.visible = this.quality !== 'low' && leafOp > 0.015;
     }
 
     const starOp = THREE.MathUtils.lerp(A.starOpacity, B.starOpacity, ease);
@@ -5496,10 +5548,14 @@ export class FlightChessEngine {
 
     if (!this.paused && !this.isSoftwareGl && !this.renderer.shadowMap.autoUpdate) {
       // 高画质静止思考时按 4 帧节流重绘阴影，仅在棋子/骰子动画或天色渐变时每帧刷新
-      const effInterval =
-        this.quality === 'high' && this.anims.length === 0 && this.todBlend >= 1
+      const isIdle = this.anims.length === 0 && this.todBlend >= 1;
+      const effInterval = isIdle
+        ? this.quality === 'high'
           ? 4
-          : this.shadowInterval;
+          : this.quality === 'medium'
+            ? 6
+            : 8
+        : this.shadowInterval;
       if (this.frameCounter % effInterval === 0) {
         this.renderer.shadowMap.needsUpdate = true;
       }
@@ -5659,7 +5715,8 @@ export class FlightChessEngine {
         htn.groundHalo.scale.set(gs, gs, 1);
 
         // 4) 树冠投影秀（并排一二 & 布布手指比耶动画，15fps 刷新 512x512 SpotLight.map）
-        if (t - htn.lastProjDraw >= 0.066) {
+        const projStep = this.quality === 'high' ? 0.066 : this.quality === 'medium' ? 0.10 : 0.166;
+        if (t - htn.lastProjDraw >= projStep) {
           htn.lastProjDraw = t;
           const pg = htn.projCanvas.getContext('2d');
           if (pg) {
@@ -5924,7 +5981,7 @@ export class FlightChessEngine {
           // 相机闪光灯在 cyc = 6.1s 触发脉冲
           if (cyc >= 6.1 && cyc < 6.6) {
             const fp = 1 - (cyc - 6.1) / 0.5;
-            htn.flashLight.intensity = fp * fp * 4.5;
+            htn.flashLight.intensity = this.quality === 'low' ? 0 : fp * fp * 4.5;
             htn.flashHaloMat.opacity = fp * 0.95;
             htn.flashHalo.scale.setScalar(0.6 + (1 - fp) * 1.4);
           } else {
