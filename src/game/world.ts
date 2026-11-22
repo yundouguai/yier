@@ -1487,11 +1487,11 @@ export function buildAncientWorld(
   /* ================= 2. 森林、垂柳、樱花、灌木、野花与小蘑菇 ================= */
   const petals: PetalAnim[] = [];
   const lanternMats: THREE.MeshStandardMaterial[] = [];
-  let heartTreeNightData: WorldRefs['heartTreeNight'];
   const honeyTreeAng = 0.72;
   const honeyTreeR = moatOuterR(honeyTreeAng) + 1.85;
   const htx = Math.cos(honeyTreeAng) * honeyTreeR;
   const htz = Math.sin(honeyTreeAng) * honeyTreeR;
+  let heartTreeNightData: WorldRefs['heartTreeNight'];
   {
     const barkMat = mat(0x6e4b35, 0.9);
     const darkBarkMat = mat(0x523626, 0.92);
