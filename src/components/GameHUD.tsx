@@ -49,6 +49,7 @@ interface GameHUDProps {
   onSetGmDie: (val: number | null) => void;
   onGmGrantItem: (item: ItemType) => void;
   onGmClearItems: () => void;
+  onGmTeleportPlane: (pid: number, idx: number, pos: number) => void;
   onSetGmTimeOfDay: (tod: TimeOfDay) => void;
   onToggleGmAutoPlay: () => void;
   onSetGameSpeed: (speed: number, gmMode?: boolean) => void;
@@ -74,6 +75,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onSetGmDie,
   onGmGrantItem,
   onGmClearItems,
+  onGmTeleportPlane,
   onSetGmTimeOfDay,
   onToggleGmAutoPlay,
   onSetGameSpeed,
@@ -91,6 +93,9 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [rulesOpen, setRulesOpen] = useState(false);
   const [camMenuOpen, setCamMenuOpen] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
+  const [gmTpPid, setGmTpPid] = useState(0);
+  const [gmTpIdx, setGmTpIdx] = useState(0);
+  const [gmTpPos, setGmTpPos] = useState(0);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [partyExpanded, setPartyExpanded] = useState(true);
   const [questExpanded, setQuestExpanded] = useState(false);
@@ -1153,6 +1158,78 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 <span className="w-10 shrink-0 text-right font-mono text-[11px] font-bold tabular-nums text-amber-300">
                   {snap.gameSpeed.toFixed(1)}x
                 </span>
+              </div>
+              <div className="flex flex-col gap-1.5 border-t border-slate-700/70 pt-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="w-[58px] shrink-0 text-center rounded-md bg-cyan-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-cyan-300 border border-cyan-400/30">
+                    瞬移
+                  </span>
+                  <select
+                    value={Math.min(gmTpPid, Math.max(0, snap.players.length - 1))}
+                    onChange={(e) => setGmTpPid(Number(e.target.value))}
+                    aria-label="选择玩家"
+                    className="h-7 rounded-lg bg-slate-800 px-1.5 text-[11px] font-bold text-slate-100 border border-slate-700 outline-none cursor-pointer"
+                  >
+                    {snap.players.map((pl, i) => (
+                      <option key={i} value={i}>
+                        {i + 1}P {pl.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={gmTpIdx}
+                    onChange={(e) => setGmTpIdx(Number(e.target.value))}
+                    aria-label="选择棋子编号"
+                    className="h-7 rounded-lg bg-slate-800 px-1.5 text-[11px] font-bold text-slate-100 border border-slate-700 outline-none cursor-pointer"
+                  >
+                    {[0, 1, 2, 3].map((k) => (
+                      <option key={k} value={k}>
+                        #{k + 1}号熊
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={-1}
+                    max={56}
+                    value={gmTpPos}
+                    onChange={(e) => setGmTpPos(Math.max(-1, Math.min(56, parseInt(e.target.value || '0', 10) || 0)))}
+                    aria-label="目标格子编号"
+                    title="-1基地 / 0起点 / 1~50外圈 / 51~55走廊 / 56终点"
+                    className="h-7 w-14 rounded-lg bg-slate-800 px-2 text-center font-mono text-[11px] font-bold text-cyan-200 border border-slate-700 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onGmTeleportPlane(Math.min(gmTpPid, Math.max(0, snap.players.length - 1)), gmTpIdx, gmTpPos)}
+                    className="ml-auto rounded-lg bg-cyan-500 px-2.5 py-1 text-[11px] font-extrabold text-slate-950 transition hover:bg-cyan-400 active:scale-95 cursor-pointer"
+                  >
+                    执行瞬移
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1 pl-[64px]">
+                  {(
+                    [
+                      ['基地', -1],
+                      ['起点', 0],
+                      ['航线18', 18],
+                      ['商店38', 38],
+                      ['入口50', 50],
+                      ['终点56', 56],
+                    ] as [string, number][]
+                  ).map(([lbl, pVal]) => (
+                    <button
+                      key={lbl}
+                      type="button"
+                      onClick={() => {
+                        setGmTpPos(pVal);
+                        onGmTeleportPlane(Math.min(gmTpPid, Math.max(0, snap.players.length - 1)), gmTpIdx, pVal);
+                      }}
+                      className="rounded-md bg-slate-800/90 px-1.5 py-0.5 text-[10px] font-bold text-slate-300 transition hover:bg-cyan-500/25 hover:text-cyan-200 cursor-pointer"
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}

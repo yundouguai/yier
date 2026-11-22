@@ -245,6 +245,26 @@ export interface WorldRefs {
     treeTrunkWorld: THREE.Vector3;
     treeAng: number;
   };
+  stage1FishEgg?: {
+    group: THREE.Group;
+    bubu: THREE.Group;
+    bubuSeatPos: THREE.Vector3;
+    bubuBankStandPos: THREE.Vector3;
+    bubuFaceYaw: number;
+    rodPivot: THREE.Group;
+    bobber: THREE.Group;
+    line: THREE.Mesh;
+    caughtFish: THREE.Group;
+    caughtFishBodyMat: THREE.MeshStandardMaterial;
+    giantFish: THREE.Group;
+    wetDrops: THREE.Mesh[];
+    bubuRipple: THREE.Mesh;
+    bucketPos: THREE.Vector3;
+    waterSpot: THREE.Vector3;
+    yier: THREE.Group;
+    honeyGlob: THREE.Mesh;
+    yierRipple: THREE.Mesh;
+  };
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
     waveHaloMats: THREE.MeshBasicMaterial[];
@@ -2729,19 +2749,19 @@ export function buildAncientWorld(
       ghCanvas.width = ghCanvas.height = 256;
       const ghg = ghCanvas.getContext('2d')!;
       const ghGrad = ghg.createRadialGradient(128, 128, 30, 128, 128, 124);
-      ghGrad.addColorStop(0, 'rgba(255, 92, 118, 0.32)');
-      ghGrad.addColorStop(0.6, 'rgba(255, 72, 102, 0.22)');
-      ghGrad.addColorStop(1, 'rgba(255, 72, 102, 0)');
+      ghGrad.addColorStop(0, 'rgba(232, 64, 52, 0.26)');
+      ghGrad.addColorStop(0.6, 'rgba(224, 52, 42, 0.18)');
+      ghGrad.addColorStop(1, 'rgba(224, 52, 42, 0)');
       ghg.fillStyle = ghGrad;
       ghg.fillRect(0, 0, 256, 256);
-      ghg.strokeStyle = 'rgba(255, 74, 104, 0.92)';
+      ghg.strokeStyle = 'rgba(232, 58, 48, 0.82)';
       ghg.lineWidth = 5;
       ghg.setLineDash([16, 10]);
       ghg.beginPath();
       ghg.arc(128, 128, 104, 0, Math.PI * 2);
       ghg.stroke();
       ghg.setLineDash([]);
-      ghg.strokeStyle = 'rgba(255, 108, 134, 0.78)';
+      ghg.strokeStyle = 'rgba(236, 76, 64, 0.68)';
       ghg.lineWidth = 3.5;
       ghg.beginPath();
       ghg.arc(128, 128, 86, 0, Math.PI * 2);
@@ -6288,6 +6308,257 @@ export function buildAncientWorld(
     treeAng: honeyTreeAng,
   };
 
+  // 8) 阶段 1 专属彩蛋：爱心树对面（南城门下）河边布布钓鱼 + 不远处一二抱蜂蜜罐坐河边玩水舔蜂蜜
+  const stage1FishGroup = new THREE.Group();
+  stage1FishGroup.visible = false;
+
+  // 南城门（爱心树反向，+Z 侧）石桥右侧紧贴内河岸边
+  const bubuAng = Math.PI / 2 - 0.20;
+  const bubuR = moatInnerR(bubuAng) - 0.34;
+  const bubuFishX = Math.cos(bubuAng) * bubuR;
+  const bubuFishZ = Math.sin(bubuAng) * bubuR;
+  const bubuFaceYaw = Math.atan2(bubuFishX, bubuFishZ);
+
+  // 小木墩坐凳与装鱼木桶
+  const stoolMat = mat(0x8c5a32, 0.78);
+  const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.21, 0.16, 12), stoolMat);
+  stool.position.set(bubuFishX, -0.58, bubuFishZ);
+  stool.castShadow = true;
+  stool.receiveShadow = true;
+  stage1FishGroup.add(stool);
+
+  const bucketPos = new THREE.Vector3(
+    bubuFishX - Math.cos(bubuFaceYaw) * 0.42,
+    -0.55,
+    bubuFishZ + Math.sin(bubuFaceYaw) * 0.42,
+  );
+  const fishBucket = new THREE.Group();
+  const bucketBody = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.12, 0.24, 12), mat(0xa16227, 0.72));
+  bucketBody.position.y = 0.12;
+  bucketBody.castShadow = true;
+  fishBucket.add(bucketBody);
+  const bucketWater = new THREE.Mesh(
+    new THREE.CircleGeometry(0.132, 12),
+    new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.75 }),
+  );
+  bucketWater.rotation.x = -Math.PI / 2;
+  bucketWater.position.y = 0.22;
+  fishBucket.add(bucketWater);
+  fishBucket.position.set(bucketPos.x, -0.66, bucketPos.z);
+  stage1FishGroup.add(fishBucket);
+
+  const bubuFisher = makeStage0Bear(CHARS.bubu);
+  bubuFisher.position.set(bubuFishX, -0.52, bubuFishZ);
+  bubuFisher.rotation.y = bubuFaceYaw;
+  const bfParts = bubuFisher.userData.parts as PlaneParts;
+  bfParts.leftFoot.rotation.x = -1.05;
+  bfParts.rightFoot.rotation.x = -1.05;
+  bfParts.leftArm.rotation.x = -0.88;
+  bfParts.rightArm.rotation.x = -0.88;
+
+  // 竹制钓鱼竿（挂在布布右前爪附近）
+  const rodPivot = new THREE.Group();
+  rodPivot.position.set(0.16, 0.24, 0.18);
+  const bambooMat = mat(0xb59449, 0.58);
+  const rodShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.022, 2.35, 8), bambooMat);
+  rodShaft.rotation.x = Math.PI / 2 - 0.34;
+  rodShaft.position.set(0, 0.42, 1.08);
+  rodPivot.add(rodShaft);
+  bfParts.animRoot.add(rodPivot);
+  stage1FishGroup.add(bubuFisher);
+
+  // 鱼漂落水点、鱼线、水波纹、活蹦乱跳小金鱼
+  const waterSpot = new THREE.Vector3(
+    bubuFishX + Math.sin(bubuFaceYaw) * 1.48,
+    WATER_Y + 0.02,
+    bubuFishZ + Math.cos(bubuFaceYaw) * 1.48,
+  );
+  const bobber = new THREE.Group();
+  const bobTop = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 8), mat(0xef4444, 0.35));
+  bobTop.position.y = 0.022;
+  bobber.add(bobTop);
+  const bobBot = new THREE.Mesh(new THREE.SphereGeometry(0.038, 10, 8), mat(0xf8fafc, 0.4));
+  bobBot.position.y = -0.018;
+  bobber.add(bobBot);
+  bobber.position.copy(waterSpot);
+  stage1FishGroup.add(bobber);
+
+  const lineGeo = new THREE.CylinderGeometry(0.004, 0.004, 1, 4);
+  const lineMesh = new THREE.Mesh(
+    lineGeo,
+    new THREE.MeshBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.78 }),
+  );
+  stage1FishGroup.add(lineMesh);
+
+  const makeDetailedFish = (bodyColor: number, finColor: number, scale = 1.0) => {
+    const fg = new THREE.Group();
+    const fBodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.28, metalness: 0.14 });
+    const fBellyMat = new THREE.MeshStandardMaterial({ color: 0xfff7ed, roughness: 0.38 });
+    const fFinMat = new THREE.MeshStandardMaterial({ color: finColor, roughness: 0.35, side: THREE.DoubleSide });
+    const fEyeWhite = mat(0xffffff, 0.2);
+    const fPupil = mat(0x111827, 0.25);
+
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.092, 12, 10), fBodyMat);
+    body.scale.set(0.58, 0.88, 1.72);
+    fg.add(body);
+
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.072, 10, 8), fBellyMat);
+    belly.scale.set(0.54, 0.56, 1.42);
+    belly.position.set(0, -0.038, 0.015);
+    fg.add(belly);
+
+    // 背鳍
+    const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.13, 4), fFinMat);
+    dorsal.scale.set(0.28, 1.0, 1.45);
+    dorsal.position.set(0, 0.095, -0.01);
+    dorsal.rotation.x = -0.35;
+    fg.add(dorsal);
+
+    // 双叉尾鳍
+    for (const sy of [-1, 1]) {
+      const lobe = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.13, 4), fFinMat);
+      lobe.scale.set(0.26, 1.0, 0.9);
+      lobe.position.set(0, sy * 0.036, -0.175);
+      lobe.rotation.x = Math.PI / 2 + sy * 0.42;
+      fg.add(lobe);
+    }
+
+    // 胸鳍、大眼睛与小鲤鱼须
+    for (const sx of [-1, 1]) {
+      const pFin = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.09, 4), fFinMat);
+      pFin.scale.set(0.28, 1.0, 0.85);
+      pFin.position.set(sx * 0.058, -0.025, 0.03);
+      pFin.rotation.set(0.4, 0, sx * 1.05);
+      fg.add(pFin);
+
+      const ew = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), fEyeWhite);
+      ew.position.set(sx * 0.042, 0.025, 0.098);
+      fg.add(ew);
+      const ep = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 5), fPupil);
+      ep.position.set(sx * 0.052, 0.026, 0.112);
+      fg.add(ep);
+
+      const whisk = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.002, 0.065, 4), fFinMat);
+      whisk.position.set(sx * 0.036, -0.012, 0.145);
+      whisk.rotation.set(0.5, 0, sx * 0.85);
+      fg.add(whisk);
+    }
+    fg.scale.setScalar(scale);
+    return { group: fg, bodyMat: fBodyMat };
+  };
+
+  const normalFishBuilt = makeDetailedFish(0xf97316, 0xfbbf24, 1.05);
+  const caughtFish = normalFishBuilt.group;
+  const caughtFishBodyMat = normalFishBuilt.bodyMat;
+  caughtFish.visible = false;
+  stage1FishGroup.add(caughtFish);
+
+  // 超大锦鲤河王（有概率咬钩把布布直接拉下河！）
+  const giantFishBuilt = makeDetailedFish(0xe11d48, 0xfde047, 2.55);
+  const giantFish = giantFishBuilt.group;
+  giantFish.visible = false;
+  stage1FishGroup.add(giantFish);
+
+  // 布布落水爬上岸后身上滴落的湿漉漉水珠
+  const wetDropMat = new THREE.MeshBasicMaterial({
+    color: 0x7dd3fc,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const wetDrops: THREE.Mesh[] = [];
+  const wetGeo = new THREE.SphereGeometry(0.024, 8, 6);
+  for (let wi = 0; wi < 6; wi++) {
+    const wd = new THREE.Mesh(wetGeo, wetDropMat);
+    wd.scale.set(0.75, 1.55, 0.75);
+    wd.visible = false;
+    bfParts.animRoot.add(wd);
+    wetDrops.push(wd);
+  }
+  const bubuSeatPos = new THREE.Vector3(bubuFishX, -0.52, bubuFishZ);
+  const bubuBankStandPos = new THREE.Vector3(
+    bubuFishX + Math.cos(bubuFaceYaw) * 0.36 - Math.sin(bubuFaceYaw) * 0.22,
+    -0.63,
+    bubuFishZ - Math.sin(bubuFaceYaw) * 0.36 - Math.cos(bubuFaceYaw) * 0.22,
+  );
+
+  const rippleGeo = new THREE.RingGeometry(0.08, 0.14, 24);
+  const bubuRippleMat = new THREE.MeshBasicMaterial({
+    color: 0xe0f2fe,
+    transparent: true,
+    opacity: 0.65,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const bubuRipple = new THREE.Mesh(rippleGeo, bubuRippleMat);
+  bubuRipple.rotation.x = -Math.PI / 2;
+  bubuRipple.position.set(waterSpot.x, WATER_Y + 0.015, waterSpot.z);
+  stage1FishGroup.add(bubuRipple);
+
+  // 一二坐在布布不远处河边玩水 + 抱蜂蜜罐舔蜂蜜
+  const yierAng = Math.PI / 2 - 0.31;
+  const yierR = moatInnerR(yierAng) - 0.16;
+  const yierSitX = Math.cos(yierAng) * yierR;
+  const yierSitZ = Math.sin(yierAng) * yierR;
+  const yierFaceYaw = Math.atan2(yierSitX, yierSitZ);
+
+  const yierSitter = makeStage0Bear(CHARS.yier);
+  yierSitter.position.set(yierSitX, -0.58, yierSitZ);
+  yierSitter.rotation.y = yierFaceYaw;
+  const ysParts = yierSitter.userData.parts as PlaneParts;
+
+  // 一二怀里抱着的蜂蜜罐（复用陶釉与金黄蜂蜜材质）
+  const s1HoneyPot = honeyPot.clone();
+  s1HoneyPot.visible = true;
+  s1HoneyPot.position.set(-0.06, 0.18, 0.25);
+  s1HoneyPot.rotation.z = 0.12;
+  ysParts.animRoot.add(s1HoneyPot);
+
+  // 右爪粘出的一团亮金蜂蜜（伸进罐子后出现，送到嘴边吃掉）
+  const honeyGlob = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 8), honeyGlazeMat);
+  honeyGlob.position.set(0, -0.14, 0.05);
+  honeyGlob.visible = false;
+  ysParts.rightArm.add(honeyGlob);
+  stage1FishGroup.add(yierSitter);
+
+  const yierRippleMat = new THREE.MeshBasicMaterial({
+    color: 0xe0f2fe,
+    transparent: true,
+    opacity: 0.6,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const yierRipple = new THREE.Mesh(rippleGeo, yierRippleMat);
+  yierRipple.rotation.x = -Math.PI / 2;
+  yierRipple.position.set(
+    yierSitX + Math.sin(yierFaceYaw) * 0.34,
+    WATER_Y + 0.015,
+    yierSitZ + Math.cos(yierFaceYaw) * 0.34,
+  );
+  stage1FishGroup.add(yierRipple);
+
+  scene.add(stage1FishGroup);
+
+  const stage1FishEgg = {
+    group: stage1FishGroup,
+    bubu: bubuFisher,
+    bubuSeatPos,
+    bubuBankStandPos,
+    bubuFaceYaw,
+    rodPivot,
+    bobber,
+    line: lineMesh,
+    caughtFish,
+    caughtFishBodyMat,
+    giantFish,
+    wetDrops,
+    bubuRipple,
+    bucketPos,
+    waterSpot,
+    yier: yierSitter,
+    honeyGlob,
+    yierRipple,
+  };
+
   return {
     waterMesh,
     moatTex,
@@ -6330,6 +6601,7 @@ export function buildAncientWorld(
     boats,
     critters,
     stage0RunEgg,
+    stage1FishEgg,
     moatInnerR,
     moatMid,
     moatOuterR,

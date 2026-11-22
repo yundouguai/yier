@@ -465,6 +465,7 @@ export default function App() {
           onSetGmDie={(val) => engineRef.current?.setGmDie(val)}
           onGmGrantItem={(item) => engineRef.current?.gmGrantItem(item)}
           onGmClearItems={() => engineRef.current?.gmClearItems()}
+          onGmTeleportPlane={(pid, idx, pos) => engineRef.current?.gmTeleportPlane(pid, idx, pos)}
           onSetGmTimeOfDay={(tod) => engineRef.current?.setGmTimeOfDay(tod)}
           onToggleGmAutoPlay={() => engineRef.current?.toggleGmAutoPlay()}
           onSetGameSpeed={(speed, gmMode) => engineRef.current?.setGameSpeed(speed, gmMode)}

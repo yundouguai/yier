@@ -319,6 +319,11 @@ export class FlightChessEngine {
     yierChatDelayAt: -1,
     lastEncounterAt: -99,
   };
+  private stage1FishState = {
+    cycleT: 20.0,
+    isGiant: false,
+    fishColorHex: 0xf97316,
+  };
 
   private ray = new THREE.Raycaster();
   private ptr = new THREE.Vector2();
@@ -3052,6 +3057,38 @@ export class FlightChessEngine {
     }
     ensureAudio();
     beep(420, 0.08, 'triangle', 0.1);
+    this.emitSnapshot();
+  }
+
+  public gmTeleportPlane(pid: number, idx: number, targetPos: number): void {
+    if (this.disposed) return;
+    const plane = this.planes.find((p) => p.pid === pid && p.idx === idx);
+    const P = this.players[pid];
+    if (!plane || !P) return;
+    const clamped = Math.max(-1, Math.min(HOME_END, Math.round(targetPos)));
+    plane.pos = clamped;
+    if (clamped < 0 || clamped === HOME_END) {
+      plane.shielded = false;
+    }
+    this.relayout();
+    this.syncShieldVisuals();
+    this.syncTimeOfDay();
+    if (this.phase === 'awaitMove') {
+      this.highlight(this.movable);
+    }
+    const posLabel =
+      clamped === -1
+        ? '基地 (-1)'
+        : clamped === 0
+          ? '起点 (0)'
+          : clamped === HOME_END
+            ? '终点 (56)'
+            : clamped >= 51
+              ? `终点走廊 ${clamped - 50} (${clamped})`
+              : `外圈第 ${clamped} 格`;
+    ensureAudio();
+    beep(760, 0.09, 'triangle', 0.12);
+    this.setMsg(`⚡ [GM] ${P.name} #${idx + 1} 已瞬移至 ${posLabel}`, P.uiColor);
     this.emitSnapshot();
   }
 
@@ -8328,6 +8365,364 @@ export class FlightChessEngine {
 
         this.stage0Bubbles.bubu.visible = t < st.bubuChatUntil;
         this.stage0Bubbles.yier.visible = t < st.yierChatUntil;
+      }
+    }
+    const s1 = this.world.stage1FishEgg;
+    if (s1) {
+      const showS1 = this.maxDoneStage === 1;
+      s1.group.visible = showS1;
+      if (showS1 && !this.paused) {
+        // A) 布布河边钓鱼（约 40 秒一次咬钩：普通彩鱼拉进木桶；35% 概率出现超大河王鱼直接把布布拉进河里，湿漉漉爬上岸站立 7.5 秒抖水后再坐下继续钓）
+        const fSt = this.stage1FishState;
+        fSt.cycleT += dt;
+        const cycleDur = fSt.isGiant ? 43.5 : 40.0;
+        if (fSt.cycleT >= cycleDur) {
+          fSt.cycleT = 0;
+          fSt.isGiant = Math.random() < 0.35;
+          const palette = [0xf97316, 0xfacc15, 0x0ea5e9, 0xec4899];
+          fSt.fishColorHex = palette[Math.floor(Math.random() * palette.length)];
+          s1.caughtFishBodyMat.color.setHex(fSt.fishColorHex);
+        }
+        const fc = fSt.cycleT;
+        const bfPt = s1.bubu.userData.parts as PlaneParts | undefined;
+        const bfFp = bfPt?.headMesh.userData.faceParts as HeadFaceParts | undefined;
+        let rodPitch = Math.sin(t * 1.4) * 0.035;
+        let showLine = true;
+        const tipWorld = new THREE.Vector3(0, 0.78, 2.22);
+        const lineTarget = s1.waterSpot.clone();
+        const resetSeatedBubu = () => {
+          s1.bubu.position.copy(s1.bubuSeatPos);
+          s1.bubu.rotation.set(0, s1.bubuFaceYaw, 0);
+          s1.rodPivot.visible = true;
+          s1.wetDrops.forEach((wd) => { wd.visible = false; });
+          if (bfPt) {
+            bfPt.animRoot.rotation.set(0.05, 0, 0);
+            bfPt.leftFoot.rotation.x = -1.05;
+            bfPt.rightFoot.rotation.x = -1.05;
+            bfPt.leftArm.rotation.set(-0.88, 0, 0);
+            bfPt.rightArm.rotation.set(-0.88, 0, 0);
+          }
+          if (bfFp) { bfFp.mouthW.visible = true; bfFp.mouthOpen.visible = false; }
+        };
+
+        if (fc < 26.5) {
+          resetSeatedBubu();
+          s1.bobber.visible = true;
+          s1.caughtFish.visible = false;
+          s1.giantFish.visible = false;
+          s1.bobber.position.set(
+            s1.waterSpot.x,
+            s1.waterSpot.y + Math.sin(t * 2.6) * 0.018,
+            s1.waterSpot.z,
+          );
+          lineTarget.copy(s1.bobber.position);
+          const rp = (t * 0.5) % 1;
+          s1.bubuRipple.scale.setScalar(0.7 + rp * 1.8);
+          (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.42;
+          if (bfPt) {
+            bfPt.animRoot.rotation.x = 0.05 + Math.sin(t * 1.1) * 0.025;
+            bfPt.headPivot.rotation.x = 0.12;
+            bfPt.headPivot.rotation.y = Math.sin(t * 0.55) * 0.16;
+          }
+        } else if (fc < 29.0) {
+          // 鱼咬钩剧烈拉扯
+          resetSeatedBubu();
+          const nibble = Math.sin((fc - 26.5) * (fSt.isGiant ? 24 : 18));
+          rodPitch = fSt.isGiant ? 0.18 + nibble * 0.14 : -0.06 + nibble * 0.08;
+          s1.bobber.visible = true;
+          s1.caughtFish.visible = false;
+          s1.giantFish.visible = false;
+          s1.bobber.position.set(
+            s1.waterSpot.x + Math.sin(t * 16) * (fSt.isGiant ? 0.11 : 0.05),
+            s1.waterSpot.y - (fSt.isGiant ? 0.065 : 0.035) + Math.abs(nibble) * 0.04,
+            s1.waterSpot.z + Math.cos(t * 14) * (fSt.isGiant ? 0.11 : 0.05),
+          );
+          lineTarget.copy(s1.bobber.position);
+          const rp = ((fc - 26.5) * 2.4) % 1;
+          s1.bubuRipple.scale.setScalar(0.9 + rp * (fSt.isGiant ? 4.4 : 3.0));
+          (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.85;
+          if (bfPt) {
+            bfPt.animRoot.rotation.x = fSt.isGiant ? 0.22 + nibble * 0.1 : -0.06 + nibble * 0.06;
+            bfPt.headPivot.rotation.x = 0.06;
+          }
+        } else if (!fSt.isGiant) {
+          // 普通彩鱼分支：扬竿入桶 -> 开心点头 -> 重新抛竿
+          resetSeatedBubu();
+          s1.giantFish.visible = false;
+          if (fc < 31.2) {
+            const p = (fc - 29.0) / 2.2;
+            const ease = 1 - Math.pow(1 - p, 2);
+            rodPitch = -0.58 * Math.sin(Math.min(1, p * 1.3) * Math.PI * 0.5);
+            s1.bobber.visible = false;
+            s1.caughtFish.visible = true;
+            const fx = THREE.MathUtils.lerp(s1.waterSpot.x, s1.bucketPos.x, ease);
+            const fz = THREE.MathUtils.lerp(s1.waterSpot.z, s1.bucketPos.z, ease);
+            const fy = THREE.MathUtils.lerp(s1.waterSpot.y, s1.bucketPos.y + 0.14, ease) + Math.sin(p * Math.PI) * 1.35;
+            s1.caughtFish.position.set(fx, fy, fz);
+            s1.caughtFish.rotation.set(Math.sin(t * 22) * 0.5, t * 4.5, Math.cos(t * 20) * 0.45);
+            lineTarget.set(fx, fy, fz);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.75 * (1 - p * 1.5));
+            s1.bubuRipple.scale.setScalar(1.2 + p * 3.6);
+            if (bfPt) {
+              bfPt.animRoot.rotation.x = -0.18 * Math.sin(p * Math.PI);
+              bfPt.headPivot.rotation.x = -0.15 * Math.sin(p * Math.PI);
+            }
+          } else if (fc < 33.4) {
+            const p = (fc - 31.2) / 2.2;
+            rodPitch = THREE.MathUtils.lerp(-0.55, -0.2, p);
+            s1.bobber.visible = false;
+            s1.caughtFish.visible = false;
+            lineTarget.copy(s1.bucketPos).setY(s1.bucketPos.y + 0.12);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = 0;
+            if (bfPt) {
+              bfPt.headPivot.rotation.x = Math.sin(p * Math.PI * 2) * 0.14;
+            }
+          } else if (fc < 35.4) {
+            const p = (fc - 33.4) / 2.0;
+            rodPitch = THREE.MathUtils.lerp(-0.2, 0.0, p);
+            s1.bobber.visible = true;
+            s1.caughtFish.visible = false;
+            s1.bobber.position.set(
+              THREE.MathUtils.lerp(s1.bucketPos.x, s1.waterSpot.x, p),
+              THREE.MathUtils.lerp(s1.bucketPos.y + 0.25, s1.waterSpot.y, p) + Math.sin(p * Math.PI) * 0.55,
+              THREE.MathUtils.lerp(s1.bucketPos.z, s1.waterSpot.z, p),
+            );
+            lineTarget.copy(s1.bobber.position);
+          } else {
+            s1.bobber.visible = true;
+            s1.caughtFish.visible = false;
+            s1.bobber.position.set(s1.waterSpot.x, s1.waterSpot.y + Math.sin(t * 2.6) * 0.018, s1.waterSpot.z);
+            lineTarget.copy(s1.bobber.position);
+            const rp = (t * 0.5) % 1;
+            s1.bubuRipple.scale.setScalar(0.7 + rp * 1.8);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.42;
+          }
+        } else {
+          // 超大鱼分支：大鱼探头猛拽 -> 布布被拉进河里扑腾 -> 湿漉漉爬上岸站立 7.5 秒抖水 -> 重新坐回抛竿
+          s1.caughtFish.visible = false;
+          s1.bobber.visible = false;
+          if (fc < 30.8) {
+            // 超大鱼破水而出猛力拖拽，布布被拽得前倾拔河
+            const p = (fc - 29.0) / 1.8;
+            resetSeatedBubu();
+            s1.giantFish.visible = true;
+            s1.giantFish.position.set(
+              s1.waterSpot.x + Math.sin(t * 14) * 0.14,
+              s1.waterSpot.y + 0.18 + Math.sin(p * Math.PI) * 0.35,
+              s1.waterSpot.z + 0.25 + p * 0.35,
+            );
+            s1.giantFish.rotation.set(-0.35, s1.bubuFaceYaw + Math.sin(t * 16) * 0.4, Math.sin(t * 18) * 0.25);
+            rodPitch = 0.48 + Math.sin(t * 18) * 0.12;
+            lineTarget.copy(s1.giantFish.position);
+            const rp = (t * 2.6) % 1;
+            s1.bubuRipple.scale.setScalar(1.4 + rp * 5.2);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.9;
+            if (bfPt) {
+              bfPt.animRoot.rotation.x = 0.38 + p * 0.22;
+              bfPt.headPivot.rotation.x = -0.1;
+            }
+            if (bfFp) { bfFp.mouthW.visible = false; bfFp.mouthOpen.visible = true; }
+          } else if (fc < 32.0) {
+            // 噗通！布布连人带竿被超大鱼直接拉进护城河里
+            const p = (fc - 30.8) / 1.2;
+            showLine = false;
+            s1.rodPivot.visible = false;
+            s1.giantFish.visible = p < 0.7;
+            s1.giantFish.position.set(
+              s1.waterSpot.x + 0.25 * p,
+              s1.waterSpot.y + 0.2 * (1 - p) - 0.35 * p,
+              s1.waterSpot.z + 0.65 + p * 0.9,
+            );
+            s1.bubu.position.set(
+              THREE.MathUtils.lerp(s1.bubuSeatPos.x, s1.waterSpot.x, p),
+              THREE.MathUtils.lerp(s1.bubuSeatPos.y, s1.waterSpot.y - 0.18, p) + Math.sin(p * Math.PI) * 0.65,
+              THREE.MathUtils.lerp(s1.bubuSeatPos.z, s1.waterSpot.z, p),
+            );
+            s1.bubu.rotation.set(p * 0.7, s1.bubuFaceYaw, Math.sin(p * Math.PI) * 0.3);
+            s1.bubuRipple.scale.setScalar(1.8 + p * 5.8);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - p * 0.6) * 0.92;
+            if (bfPt) {
+              bfPt.leftArm.rotation.x = -2.1 + Math.sin(t * 22) * 0.5;
+              bfPt.rightArm.rotation.x = -2.1 - Math.sin(t * 22) * 0.5;
+              bfPt.leftFoot.rotation.x = Math.sin(t * 22) * 0.7;
+              bfPt.rightFoot.rotation.x = -Math.sin(t * 22) * 0.7;
+            }
+            if (bfFp) { bfFp.mouthW.visible = false; bfFp.mouthOpen.visible = true; }
+          } else if (fc < 33.4) {
+            // 布布在河里扑腾挣扎
+            showLine = false;
+            s1.rodPivot.visible = false;
+            s1.giantFish.visible = false;
+            s1.bubu.position.set(
+              s1.waterSpot.x + Math.sin(t * 9) * 0.08,
+              s1.waterSpot.y - 0.16 + Math.sin(t * 14) * 0.05,
+              s1.waterSpot.z + Math.cos(t * 8) * 0.08,
+            );
+            s1.bubu.rotation.set(0, s1.bubuFaceYaw + Math.PI, Math.sin(t * 14) * 0.18);
+            const rp = (t * 2.2) % 1;
+            s1.bubuRipple.scale.setScalar(1.5 + rp * 4.5);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.85;
+            if (bfPt) {
+              bfPt.animRoot.rotation.set(0, 0, 0);
+              bfPt.leftArm.rotation.x = -1.6 + Math.sin(t * 20) * 0.85;
+              bfPt.rightArm.rotation.x = -1.6 - Math.sin(t * 20) * 0.85;
+              bfPt.leftFoot.rotation.x = Math.sin(t * 20) * 0.9;
+              bfPt.rightFoot.rotation.x = -Math.sin(t * 20) * 0.9;
+            }
+            if (bfFp) { bfFp.mouthW.visible = false; bfFp.mouthOpen.visible = true; }
+          } else if (fc < 35.0) {
+            // 湿漉漉地爬回岸上
+            const p = (fc - 33.4) / 1.6;
+            showLine = false;
+            s1.rodPivot.visible = false;
+            s1.giantFish.visible = false;
+            s1.bubu.position.set(
+              THREE.MathUtils.lerp(s1.waterSpot.x, s1.bubuBankStandPos.x, p),
+              THREE.MathUtils.lerp(s1.waterSpot.y - 0.15, s1.bubuBankStandPos.y, p) + Math.sin(p * Math.PI) * 0.25,
+              THREE.MathUtils.lerp(s1.waterSpot.z, s1.bubuBankStandPos.z, p),
+            );
+            s1.bubu.rotation.set(0, s1.bubuFaceYaw + Math.PI * (1 - p), 0);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.7 * (1 - p));
+            if (bfPt) {
+              bfPt.animRoot.rotation.set(0.15, 0, 0);
+              bfPt.leftArm.rotation.x = Math.sin(t * 12) * 0.7;
+              bfPt.rightArm.rotation.x = -Math.sin(t * 12) * 0.7;
+              bfPt.leftFoot.rotation.x = -Math.sin(t * 12) * 0.7;
+              bfPt.rightFoot.rotation.x = Math.sin(t * 12) * 0.7;
+            }
+            s1.wetDrops.forEach((wd, wi) => {
+              wd.visible = true;
+              const dp = (t * 2.4 + wi * 0.19) % 1;
+              const ang = wi * 1.05;
+              wd.position.set(Math.cos(ang) * 0.24, 0.42 - dp * 0.42, Math.sin(ang) * 0.24);
+            });
+          } else if (fc < 42.5) {
+            // 湿漉漉站在岸上 7.5 秒，身上不断滴水并间歇抖身子甩水
+            const standT = fc - 35.0;
+            showLine = false;
+            s1.rodPivot.visible = false;
+            s1.giantFish.visible = false;
+            s1.bubu.position.copy(s1.bubuBankStandPos);
+            s1.bubu.rotation.set(0, s1.bubuFaceYaw, 0);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = 0;
+            const shakeBurst = (standT > 1.2 && standT < 2.2) || (standT > 4.4 && standT < 5.4);
+            if (bfPt) {
+              bfPt.animRoot.rotation.set(
+                0.06,
+                shakeBurst ? Math.sin(t * 34) * 0.38 : 0,
+                shakeBurst ? Math.sin(t * 34) * 0.16 : 0,
+              );
+              bfPt.leftArm.rotation.set(0.08, 0, shakeBurst ? 0.55 : 0.22);
+              bfPt.rightArm.rotation.set(0.08, 0, shakeBurst ? -0.55 : -0.22);
+              bfPt.leftFoot.rotation.x = 0;
+              bfPt.rightFoot.rotation.x = 0;
+              bfPt.headPivot.rotation.x = shakeBurst ? 0 : 0.14;
+              bfPt.headPivot.rotation.y = shakeBurst ? Math.sin(t * 38) * 0.45 : Math.sin(t * 1.2) * 0.22;
+            }
+            if (bfFp) { bfFp.mouthW.visible = true; bfFp.mouthOpen.visible = false; }
+            s1.wetDrops.forEach((wd, wi) => {
+              wd.visible = standT < 6.6;
+              const dp = (t * (shakeBurst ? 3.8 : 1.9) + wi * 0.18) % 1;
+              const ang = wi * 1.05 + (shakeBurst ? t * 4 : 0);
+              const rad = shakeBurst ? 0.24 + dp * 0.32 : 0.24;
+              wd.position.set(Math.cos(ang) * rad, 0.44 - dp * 0.44, Math.sin(ang) * rad);
+            });
+          } else {
+            // 甩干水重新走回木墩坐下、拿起钓竿抛入水中
+            const p = (fc - 42.5) / 1.0;
+            s1.giantFish.visible = false;
+            s1.wetDrops.forEach((wd) => { wd.visible = false; });
+            s1.bubu.position.lerpVectors(s1.bubuBankStandPos, s1.bubuSeatPos, p);
+            s1.bubu.rotation.set(0, s1.bubuFaceYaw, 0);
+            s1.rodPivot.visible = p > 0.35;
+            showLine = p > 0.35;
+            rodPitch = THREE.MathUtils.lerp(-0.35, 0.0, p);
+            lineTarget.copy(s1.waterSpot);
+            if (bfPt) {
+              bfPt.animRoot.rotation.set(0.05, 0, 0);
+              bfPt.leftFoot.rotation.x = THREE.MathUtils.lerp(0, -1.05, p);
+              bfPt.rightFoot.rotation.x = THREE.MathUtils.lerp(0, -1.05, p);
+              bfPt.leftArm.rotation.set(THREE.MathUtils.lerp(0, -0.88, p), 0, 0);
+              bfPt.rightArm.rotation.set(THREE.MathUtils.lerp(0, -0.88, p), 0, 0);
+            }
+          }
+        }
+        s1.line.visible = showLine;
+        if (showLine) {
+          s1.rodPivot.rotation.x = rodPitch;
+          s1.rodPivot.updateMatrixWorld(true);
+          tipWorld.applyMatrix4(s1.rodPivot.matrixWorld);
+          const lineLen = Math.max(0.05, tipWorld.distanceTo(lineTarget));
+          s1.line.position.copy(tipWorld).lerp(lineTarget, 0.5);
+          s1.line.scale.set(1, lineLen, 1);
+          s1.line.quaternion.setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0),
+            lineTarget.clone().sub(tipWorld).normalize(),
+          );
+        }
+
+        // B) 一二河边晃脚玩水 + 偶尔伸爪进蜂蜜罐粘出蜂蜜放嘴里吃（9.2 秒循环）
+        const yCyc = t % 9.2;
+        const ysPt = s1.yier.userData.parts as PlaneParts | undefined;
+        const ysFp = ysPt?.headMesh.userData.faceParts as HeadFaceParts | undefined;
+        if (ysPt) {
+          // 双脚垂在水边欢快交替拍水
+          const kick = Math.sin(t * 5.2);
+          ysPt.leftFoot.rotation.x = -1.05 + kick * 0.36;
+          ysPt.rightFoot.rotation.x = -1.05 - kick * 0.36;
+          ysPt.leftArm.rotation.x = -0.85;
+          ysPt.leftArm.rotation.z = -0.26;
+          ysPt.animRoot.rotation.z = Math.sin(t * 2.2) * 0.05;
+
+          const yrp = (t * 0.95) % 1;
+          s1.yierRipple.scale.setScalar(0.75 + yrp * 2.1);
+          (s1.yierRipple.material as THREE.MeshBasicMaterial).opacity = (1 - yrp) * 0.55;
+
+          if (yCyc < 4.8) {
+            // 悠闲玩水，偶尔侧头看布布钓鱼
+            ysPt.rightArm.rotation.x = -0.62 + Math.sin(t * 2.6) * 0.08;
+            ysPt.rightArm.rotation.z = 0.12;
+            ysPt.headPivot.rotation.x = 0.08;
+            ysPt.headPivot.rotation.y = Math.sin(t * 0.9) * 0.25;
+            s1.honeyGlob.visible = false;
+            if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
+          } else if (yCyc < 6.0) {
+            // 右手伸进蜂蜜罐里蘸蜂蜜
+            const p = (yCyc - 4.8) / 1.2;
+            const dip = Math.sin(p * Math.PI);
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.62, -1.18, dip);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.12, 0.52, dip);
+            ysPt.headPivot.rotation.x = 0.16 * dip;
+            ysPt.headPivot.rotation.y = -0.1 * dip;
+            s1.honeyGlob.visible = p > 0.55;
+            s1.honeyGlob.scale.setScalar(1);
+            if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
+          } else if (yCyc < 7.8) {
+            // 把粘满金黄蜂蜜的小爪子送进嘴里美滋滋吃掉
+            const p = (yCyc - 6.0) / 1.8;
+            const eatLift = Math.sin(Math.min(1, p * 1.25) * Math.PI * 0.5);
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.78, -2.05, eatLift) + Math.sin(t * 14) * 0.06;
+            ysPt.rightArm.rotation.z = 0.44;
+            ysPt.headPivot.rotation.x = -0.14 * eatLift + Math.sin(t * 12) * 0.04;
+            ysPt.headPivot.rotation.y = 0;
+            s1.honeyGlob.visible = p < 0.78;
+            s1.honeyGlob.scale.setScalar(Math.max(0.15, 1 - Math.max(0, p - 0.35) * 1.9));
+            if (ysFp) {
+              const munch = p > 0.28 && p < 0.88;
+              ysFp.mouthW.visible = !munch;
+              ysFp.mouthOpen.visible = munch;
+            }
+          } else {
+            // 放下手开心回味
+            const p = (yCyc - 7.8) / 1.4;
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-1.95, -0.62, p);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.44, 0.12, p);
+            ysPt.headPivot.rotation.x = THREE.MathUtils.lerp(-0.1, 0.08, p);
+            ysPt.headPivot.rotation.y = Math.sin(p * Math.PI * 2) * 0.16;
+            s1.honeyGlob.visible = false;
+            if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
+          }
+        }
       }
     }
     this.updatePoemBubbles();
