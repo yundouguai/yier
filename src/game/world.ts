@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   CHARS,
   FLIGHT_FROM,
@@ -229,12 +230,10 @@ export interface WorldRefs {
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
     waveHaloMats: THREE.MeshBasicMaterial[];
-    canopyGlowLight: THREE.PointLight;
     baseStripMesh: THREE.Mesh;
     baseStripMat: THREE.MeshBasicMaterial;
     baseStripGlowMesh: THREE.Mesh;
     baseStripGlowMat: THREE.MeshBasicMaterial;
-    basePointLights: THREE.PointLight[];
     plaqueMat: THREE.MeshStandardMaterial;
     wishingPlaques: { group: THREE.Group; phase: number; baseRotZ: number }[];
     heartPoints: THREE.Points;
@@ -965,8 +964,8 @@ export function buildAncientWorld(
   const waterNormalTex = createWaterNormalTexture(anisotropy);
   waterNormalTex.repeat.set(7, 2.8);
   const waterMesh = (() => {
-    const RAD = 20;
-    const ANG = 160;
+    const RAD = 10;
+    const ANG = 96;
     const pos: number[] = [];
     const uvs: number[] = [];
     const cols: number[] = [];
@@ -1001,38 +1000,19 @@ export function buildAncientWorld(
     g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const isLowPower = anisotropy <= 4;
-    const waterMat = isLowPower
-      ? new THREE.MeshStandardMaterial({
-          color: 0xffffff,
-          map: moatTex,
-          normalMap: waterNormalTex,
-          normalScale: new THREE.Vector2(0.26, 0.26),
-          vertexColors: true,
-          roughness: 0.34,
-          metalness: 0.0,
-          envMapIntensity: 0.22,
-          transparent: true,
-          opacity: 0.78,
-          depthWrite: false,
-        })
-      : new THREE.MeshPhysicalMaterial({
-          color: 0xffffff,
-          map: moatTex,
-          normalMap: waterNormalTex,
-          normalScale: new THREE.Vector2(0.28, 0.28),
-          vertexColors: true,
-          roughness: 0.34,
-          metalness: 0.0,
-          clearcoat: 0.14,
-          clearcoatRoughness: 0.3,
-          ior: 1.333,
-          reflectivity: 0.28,
-          envMapIntensity: 0.22,
-          transparent: true,
-          opacity: 0.78,
-          depthWrite: false,
-        });
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: moatTex,
+      normalMap: waterNormalTex,
+      normalScale: new THREE.Vector2(0.28, 0.28),
+      vertexColors: true,
+      roughness: 0.26,
+      metalness: 0.06,
+      envMapIntensity: 0.32,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false,
+    });
     waterMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = waterUniforms.uTime;
       shader.vertexShader = shader.vertexShader
@@ -1645,6 +1625,7 @@ export function buildAncientWorld(
       // 树枝朝护城河方向微倾
       g.rotation.y = -ang + Math.PI;
       treeGroup.add(g);
+      drapes.userData.dynamic = true;
       willowDrapeList.push({ g: drapes, phase: idx * 1.3 });
     });
 
@@ -1705,6 +1686,59 @@ export function buildAncientWorld(
           placed++;
         }
       }
+    }
+    // 静态树木/灌木/石块按材质合批为少量 Mesh，大幅降低 Draw Call（保留动态柳条与近岸阴影）
+    {
+      treeGroup.updateMatrixWorld(true);
+      const buckets = new Map<
+        string,
+        { mat: THREE.Material; castShadow: boolean; receiveShadow: boolean; geos: THREE.BufferGeometry[] }
+      >();
+      const toRemove: THREE.Mesh[] = [];
+      const tmpPos = new THREE.Vector3();
+      const skipSubtree = (obj: THREE.Object3D): boolean => {
+        let cur: THREE.Object3D | null = obj;
+        while (cur && cur !== treeGroup) {
+          if (cur.userData.dynamic) return true;
+          cur = cur.parent;
+        }
+        return false;
+      };
+      treeGroup.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.InstancedMesh) return;
+        if (skipSubtree(obj)) return;
+        const m = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+        if (!m) return;
+        obj.getWorldPosition(tmpPos);
+        const nearBoard = Math.hypot(tmpPos.x, tmpPos.z) <= 14.5;
+        const cast = obj.castShadow && nearBoard;
+        const recv = obj.receiveShadow;
+        const key = `${m.uuid}|${cast ? 1 : 0}|${recv ? 1 : 0}`;
+        let b = buckets.get(key);
+        if (!b) {
+          b = { mat: m, castShadow: cast, receiveShadow: recv, geos: [] };
+          buckets.set(key, b);
+        }
+        const g = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
+        g.applyMatrix4(obj.matrixWorld);
+        b.geos.push(g);
+        toRemove.push(obj);
+      });
+      toRemove.forEach((m) => m.parent?.remove(m));
+      buckets.forEach((b) => {
+        if (b.geos.length === 0) return;
+        const allHaveUv = b.geos.every((g) => !!g.getAttribute('uv'));
+        if (!allHaveUv) {
+          b.geos.forEach((g) => g.deleteAttribute('uv'));
+        }
+        const merged = mergeGeometries(b.geos, false);
+        b.geos.forEach((g) => g.dispose());
+        if (!merged) return;
+        const mesh = new THREE.Mesh(merged, b.mat);
+        mesh.castShadow = b.castShadow;
+        mesh.receiveShadow = b.receiveShadow;
+        treeGroup.add(mesh);
+      });
     }
     scene.add(treeGroup);
 
@@ -2484,9 +2518,7 @@ export function buildAncientWorld(
         heartTree.add(lg);
       });
 
-      const canopyGlowLight = new THREE.PointLight(0xff7838, 0, 5.8, 1.5);
-      canopyGlowLight.position.set(0, 1.95, -0.45);
-      heartTree.add(canopyGlowLight);
+
 
       // 4b. 树上悬挂 18 枚红色许愿牌（夜晚泛暖红微光，随风轻摆）
       const plaqueCanvas = document.createElement('canvas');
@@ -2596,13 +2628,7 @@ export function buildAncientWorld(
       baseStripGlowMesh.position.y = 0.022;
       baseStripGlowMesh.visible = false;
       heartTree.add(baseStripGlowMesh);
-      const basePointLights: THREE.PointLight[] = [];
-      for (const lx of [-1.25, 1.25]) {
-        const bpl = new THREE.PointLight(0xffb454, 0, 4.4, 1.6);
-        bpl.position.set(lx, 0.34, -0.35);
-        heartTree.add(bpl);
-        basePointLights.push(bpl);
-      }
+
 
       // 5. 沿爱心树边缘围成一圈的粉金小爱心萤火粒子（64 颗，清晰勾勒树冠爱心轮廓）
       const hCount = 64;
@@ -2776,12 +2802,10 @@ export function buildAncientWorld(
       heartTreeNightData = {
         waveMats: treeWaveMats,
         waveHaloMats,
-        canopyGlowLight,
         baseStripMesh,
         baseStripMat,
         baseStripGlowMesh,
         baseStripGlowMat,
-        basePointLights,
         plaqueMat,
         wishingPlaques,
         heartPoints,
@@ -5635,7 +5659,7 @@ export function buildAncientWorld(
   addNightLight(0, 2.3, 8.2, 0xff9438, 2.4, 13.5, 1.45);
   addNightLight(0, 2.3, -8.2, 0xff9438, 2.4, 13.5, 1.45);
   // 爱心古榕树灯笼暖光
-  addNightLight(-11.8, 2.8, 0, 0xff8d36, 2.1, 11.5, 1.45);
+  addNightLight(-11.5, 2.5, 0, 0xff9442, 2.6, 13.5, 1.4);
 
   // 夜景护城河与庭院周边漂浮萤火虫
   const fireflyCount = 68;

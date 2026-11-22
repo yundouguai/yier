@@ -396,7 +396,7 @@ export class FlightChessEngine {
       powerPreference: 'high-performance',
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    const maxDpr = this.isSoftwareGl || this.quality === 'low' ? 1 : this.quality === 'medium' ? 1.4 : 2;
+    const maxDpr = this.isSoftwareGl ? 1 : this.quality === 'low' ? 1.5 : 2;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -2925,7 +2925,7 @@ export class FlightChessEngine {
   public setQuality(q: GraphicsQuality): void {
     this.quality = q;
     if (this.disposed || this.isSoftwareGl) return;
-    const maxDpr = q === 'low' ? 1 : q === 'medium' ? 1.4 : 2;
+    const maxDpr = q === 'low' ? 1.5 : 2;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
     this.renderer.shadowMap.autoUpdate = q === 'high';
     this.shadowInterval = q === 'low' ? 4 : q === 'medium' ? 2 : 1;
@@ -3083,6 +3083,7 @@ export class FlightChessEngine {
         posAttr.needsUpdate = true;
         geo.computeVertexNormals();
         geo.userData.squished = false;
+        geo.userData.squashSig = '';
       }
       if (faceParts) {
         faceParts.leftEye.visible = true;
@@ -3103,35 +3104,41 @@ export class FlightChessEngine {
       return;
     }
 
-    for (let i = 0; i < basePos.length; i += 3) {
-      let x = basePos[i];
-      let y = basePos[i + 1];
-      let z = basePos[i + 2];
+    const squashSig = contactPlanesLocal
+      .map((cp) => `${cp.nx.toFixed(2)},${cp.nz.toFixed(2)},${cp.maxProj.toFixed(3)}`)
+      .join('|');
+    if (geo.userData.squashSig !== squashSig) {
+      geo.userData.squashSig = squashSig;
+      for (let i = 0; i < basePos.length; i += 3) {
+        let x = basePos[i];
+        let y = basePos[i + 1];
+        let z = basePos[i + 2];
 
-      for (const cp of contactPlanesLocal) {
-        const proj = x * cp.nx + z * cp.nz;
-        if (proj > cp.maxProj) {
-          const excess = proj - cp.maxProj;
-          // 接触面顶点 100% 压平到碰撞中线平面，实现零缝隙贴紧
-          x -= cp.nx * excess;
-          z -= cp.nz * excess;
-          // 挤压侧脸颊向前/两侧软糯鼓出
-          if (y >= 0.20 && y <= 0.45) {
-            if (z > 0) z += excess * 0.48;
-            y += excess * 0.14;
+        for (const cp of contactPlanesLocal) {
+          const proj = x * cp.nx + z * cp.nz;
+          if (proj > cp.maxProj) {
+            const excess = proj - cp.maxProj;
+            // 接触面顶点 100% 压平到碰撞中线平面，实现零缝隙贴紧
+            x -= cp.nx * excess;
+            z -= cp.nz * excess;
+            // 挤压侧脸颊向前/两侧软糯鼓出
+            if (y >= 0.20 && y <= 0.45) {
+              if (z > 0) z += excess * 0.48;
+              y += excess * 0.14;
+            }
+          } else if (proj > cp.maxProj * 0.68 && y >= 0.20 && y <= 0.42) {
+            const near = (proj - cp.maxProj * 0.68) / (cp.maxProj * 0.32);
+            if (z > 0) z += near * 0.013;
           }
-        } else if (proj > cp.maxProj * 0.68 && y >= 0.20 && y <= 0.42) {
-          const near = (proj - cp.maxProj * 0.68) / (cp.maxProj * 0.32);
-          if (z > 0) z += near * 0.013;
         }
+        arr[i] = x;
+        arr[i + 1] = y;
+        arr[i + 2] = z;
       }
-      arr[i] = x;
-      arr[i + 1] = y;
-      arr[i + 2] = z;
+      posAttr.needsUpdate = true;
+      geo.computeVertexNormals();
+      geo.userData.squished = true;
     }
-    posAttr.needsUpdate = true;
-    geo.computeVertexNormals();
-    geo.userData.squished = true;
 
     if (faceParts) {
       const squishLeft = contactPlanesLocal.some((cp) => cp.nx < -0.35);
@@ -5449,11 +5456,9 @@ export class FlightChessEngine {
       htn.baseStripMat.opacity = nightScale * 0.88;
       htn.baseStripGlowMesh.visible = active;
       htn.baseStripGlowMat.opacity = nightScale * 0.65;
-      htn.basePointLights.forEach((bpl) => { bpl.intensity = nightScale * 1.45; });
       htn.plaqueMat.emissiveIntensity = 0.2 + nightScale * 0.95;
       if (!active) {
         htn.waveHaloMats.forEach((wh) => { wh.opacity = 0; });
-        htn.canopyGlowLight.intensity = 0;
       }
     }
 
@@ -5463,7 +5468,7 @@ export class FlightChessEngine {
       this.world.waterMesh.material.color.copy(this._todColA).lerp(this._todColB, ease);
     }
 
-    if (!this.isSoftwareGl) {
+    if (!this.isSoftwareGl && (this.todBlend >= 1 || this.frameCounter % 3 === 0)) {
       this.renderer.shadowMap.needsUpdate = true;
     }
   }
@@ -5613,7 +5618,6 @@ export class FlightChessEngine {
             htn.waveHaloMats[wi].opacity = nightFactor * (0.08 + 0.36 * wave);
           }
         });
-        htn.canopyGlowLight.intensity = nightFactor * (1.1 + 0.45 * Math.sin(t * 2.4));
 
         // 2) 沿树冠爱心边缘环绕的粉金小爱心微光律动
         const hAttr = htn.heartPoints.geometry.getAttribute('position') as THREE.BufferAttribute;
