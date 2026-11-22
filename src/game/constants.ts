@@ -734,7 +734,7 @@ export const CHAR_TALENTS: Record<CharKey, CharTalentDef> = {
   mocha: {
     name: '茶香反震',
     shortTag: '破盾震退3格',
-    desc: '本局第 1 只起飞小熊自带泡泡罩；且全局任意护盾被踩碎时，将踩踏方震退 3 格。',
+    desc: '① 首熊起飞自带泡泡罩（限 1 次）；② 己方任意护盾被踩碎时，将踩踏方震退 3 格（全局常驻）。',
     maxCharges: 1,
     accentBg: '#ecfdf5',
     accentText: '#047857',

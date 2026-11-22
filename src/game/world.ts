@@ -2766,7 +2766,7 @@ export function buildAncientWorld(
       const spotTarget = new THREE.Object3D();
       spotTarget.position.set(0, 3.24, 0.0);
       heartTree.add(spotTarget);
-      const spotLight = new THREE.SpotLight(0xffd6ea, 0, 8.5, 0.48, 0.38, 1.0);
+      const spotLight = new THREE.SpotLight(0xfff2f8, 0, 9.5, 0.48, 0.34, 0.72);
       spotLight.castShadow = false;
       spotLight.map = projTex;
       spotLight.position.set(0, 3.18, -3.7);

@@ -3,6 +3,7 @@ import { beep } from '../game/audio';
 import {
   CHAR_TALENTS,
   CameraMode,
+  CharKey,
   GameHudSnapshot,
   GraphicsQuality,
   HUD_PIPS,
@@ -22,6 +23,21 @@ const QUICK_EMOTES = [
   { icon: '👏', text: '666!' },
   { icon: '💤', text: '快点呀~' },
 ];
+
+interface TopToastItem {
+  id: string;
+  kind: 'gift' | 'splash';
+  charKey: CharKey;
+  item?: ItemType | null;
+  playerName?: string;
+  questType?: 'gift' | 'bubu';
+  actorName?: string | null;
+  detail?: string | null;
+  targetCharKey?: CharKey | null;
+  targetName?: string | null;
+  text?: string | null;
+  exiting?: boolean;
+}
 
 interface GameHUDProps {
   snap: GameHudSnapshot;
@@ -85,6 +101,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [giftOpenedKey, setGiftOpenedKey] = useState<number | null>(null);
   const [giftDismissedKey, setGiftDismissedKey] = useState<number | null>(null);
   const [giftCountdown, setGiftCountdown] = useState<number>(3);
+  const [topToasts, setTopToasts] = useState<TopToastItem[]>([]);
+  const lastTopGiftKeyRef = useRef<number | null>(null);
+  const lastTopSplashKeyRef = useRef<number | null>(null);
+  const topToastTimersRef = useRef<number[]>([]);
   const lastHumanPidRef = useRef(0);
   const emoteTimers = useRef<Record<number, number>>({});
   const secretTapCount = useRef(0);
@@ -115,6 +135,79 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     }, 5400);
     return () => window.clearTimeout(dismissTimer);
   }, [giftEventKey, giftIsHuman, giftOpenedKey]);
+
+  const pushTopToast = (item: TopToastItem, stayMs: number) => {
+    setTopToasts((prev) => {
+      if (prev.some((t) => t.id === item.id)) return prev;
+      const next = [...prev, item];
+      return next.length > 4 ? next.slice(next.length - 4) : next;
+    });
+    const fadeTimer = window.setTimeout(() => {
+      setTopToasts((prev) => prev.map((t) => (t.id === item.id ? { ...t, exiting: true } : t)));
+    }, Math.max(400, stayMs - 260));
+    const rmTimer = window.setTimeout(() => {
+      setTopToasts((prev) => prev.filter((t) => t.id !== item.id));
+    }, stayMs);
+    topToastTimersRef.current.push(fadeTimer, rmTimer);
+  };
+
+  useEffect(() => {
+    return () => {
+      topToastTimersRef.current.forEach((id) => window.clearTimeout(id));
+      topToastTimersRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    const ev = snap.giftQuestEvent;
+    if (!ev || ev.isLocalHuman || showSetup) return;
+    if (lastTopGiftKeyRef.current === ev.key) return;
+    lastTopGiftKeyRef.current = ev.key;
+    pushTopToast(
+      {
+        id: `gift-${ev.key}`,
+        kind: 'gift',
+        charKey: ev.playerCharKey,
+        item: ev.item,
+        playerName: ev.playerName,
+        questType: ev.questType,
+      },
+      4200,
+    );
+  }, [snap.giftQuestEvent, showSetup]);
+
+  useEffect(() => {
+    if (showSetup || !snap.splashVisible) return;
+    if (snap.splashIsHuman || snap.splashItem === 'missile') return;
+    if (lastTopSplashKeyRef.current === snap.splashKey) return;
+    lastTopSplashKeyRef.current = snap.splashKey;
+    pushTopToast(
+      {
+        id: `splash-${snap.splashKey}`,
+        kind: 'splash',
+        charKey: snap.splashCharKey,
+        item: snap.splashItem,
+        actorName: snap.splashActorName,
+        detail: snap.splashDetail,
+        targetCharKey: snap.splashTargetCharKey,
+        targetName: snap.splashTargetName,
+        text: snap.splashText,
+      },
+      3600,
+    );
+  }, [
+    snap.splashVisible,
+    snap.splashKey,
+    snap.splashIsHuman,
+    snap.splashItem,
+    snap.splashCharKey,
+    snap.splashActorName,
+    snap.splashDetail,
+    snap.splashTargetCharKey,
+    snap.splashTargetName,
+    snap.splashText,
+    showSetup,
+  ]);
 
   // 启动时预加载全部 7 张轻量 WebP 表情包到内存，触发时零等待秒开
   useEffect(() => {
@@ -448,27 +541,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
           )
-        ) : (
-          <div
-            key={snap.giftQuestEvent.key}
-            className="pointer-events-none fixed left-1/2 top-14 md:top-16 z-[18] -translate-x-1/2 max-w-[calc(100vw-32px)]"
-          >
-            <div className="anim-msg-pop flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/60 bg-white/68 px-3 py-1 text-[11px] md:text-xs font-bold text-slate-600 shadow-xs backdrop-blur-xs">
-              <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={18} />
-              <span>
-                {snap.giftQuestEvent.playerName} 完成
-                {snap.giftQuestEvent.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}，获得
-              </span>
-              <span
-                className="inline-flex items-center gap-1 font-extrabold"
-                style={{ color: ITEM_DEFS[snap.giftQuestEvent.item].accentColor }}
-              >
-                <ItemIcon item={snap.giftQuestEvent.item} size={15} />
-                <span>{ITEM_DEFS[snap.giftQuestEvent.item].name}</span>
-              </span>
-            </div>
-          </div>
-        )
+        ) : null
       )}
 
       {/* Turn / Item splash：本地玩家居中展示表情包+提示；非本地AI使用奶油派炸弹时同规格大提示但不显示表情包，其余仅顶部弱化提示 */}
@@ -530,41 +603,61 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
         </div>
-      ) : (
-        <div
-          className={`pointer-events-none fixed left-1/2 top-14 md:top-16 z-[18] -translate-x-1/2 max-w-[calc(100vw-32px)] transition-opacity duration-200 ${
-            snap.splashVisible ? 'opacity-90' : 'opacity-0'
-          }`}
-        >
-          <div className="flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/60 bg-white/70 px-3.5 py-1 text-[11px] md:text-xs font-bold text-slate-600 shadow-xs backdrop-blur-xs">
-            <CharacterAvatar charKey={snap.splashCharKey} size={18} />
-            {snap.splashItem && snap.splashItem !== 'shield' && snap.splashActorName ? (
-              <>
-                <span>{snap.splashActorName} 使用</span>
-                <span
-                  className="inline-flex items-center gap-1"
-                  style={{ color: ITEM_DEFS[snap.splashItem].accentColor }}
-                >
-                  <ItemIcon item={snap.splashItem} size={15} />
-                  <span>「{ITEM_DEFS[snap.splashItem].name}」</span>
-                </span>
-                {snap.splashDetail && <span>· {snap.splashDetail}</span>}
-                {snap.splashTargetCharKey && snap.splashTargetName && (
-                  <span className="inline-flex items-center gap-1">
-                    <CharacterAvatar charKey={snap.splashTargetCharKey} size={18} />
-                    <span>{snap.splashTargetName}！</span>
+      ) : null}
+
+      {/* 顶部多行滚动提示队列：先来的播完淡出后，下方消息自动顶上，杜绝重叠 */}
+      {!showSetup && topToasts.length > 0 && (
+        <div className="pointer-events-none fixed left-1/2 top-14 md:top-16 z-[18] -translate-x-1/2 flex flex-col items-center gap-1.5 max-w-[calc(100vw-32px)]">
+          {topToasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`anim-msg-pop flex flex-wrap items-center justify-center gap-1.5 rounded-full border border-white/65 bg-white/74 px-3.5 py-1 text-[11px] md:text-xs font-bold text-slate-700 shadow-xs backdrop-blur-sm transition-all duration-250 ${
+                toast.exiting ? 'opacity-0 -translate-y-2 scale-95' : 'opacity-95 translate-y-0 scale-100'
+              }`}
+            >
+              <CharacterAvatar charKey={toast.charKey} size={18} />
+              {toast.kind === 'gift' && toast.item ? (
+                <>
+                  <span>
+                    {toast.playerName} 完成
+                    {toast.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}，获得
                   </span>
-                )}
-              </>
-            ) : snap.splashItem === 'shield' ? (
-              <>
-                <ItemIcon item="shield" size={15} />
-                <span>{snap.splashText}</span>
-              </>
-            ) : (
-              <span>{snap.splashText}</span>
-            )}
-          </div>
+                  <span
+                    className="inline-flex items-center gap-1 font-extrabold"
+                    style={{ color: ITEM_DEFS[toast.item].accentColor }}
+                  >
+                    <ItemIcon item={toast.item} size={15} />
+                    <span>{ITEM_DEFS[toast.item].name}</span>
+                  </span>
+                </>
+              ) : toast.item && toast.item !== 'shield' && toast.actorName ? (
+                <>
+                  <span>{toast.actorName} 使用</span>
+                  <span
+                    className="inline-flex items-center gap-1 font-extrabold"
+                    style={{ color: ITEM_DEFS[toast.item].accentColor }}
+                  >
+                    <ItemIcon item={toast.item} size={15} />
+                    <span>「{ITEM_DEFS[toast.item].name}」</span>
+                  </span>
+                  {toast.detail && <span>· {toast.detail}</span>}
+                  {toast.targetCharKey && toast.targetName && (
+                    <span className="inline-flex items-center gap-1">
+                      <CharacterAvatar charKey={toast.targetCharKey} size={18} />
+                      <span>{toast.targetName}！</span>
+                    </span>
+                  )}
+                </>
+              ) : toast.item === 'shield' ? (
+                <>
+                  <ItemIcon item="shield" size={15} />
+                  <span>{toast.text}</span>
+                </>
+              ) : (
+                <span>{toast.text}</span>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -783,17 +876,40 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           }}
                           title={td.desc}
                         >
-                          <div className="flex items-center justify-between font-extrabold" style={{ color: td.accentText }}>
-                            <span>✨ {td.name}</span>
-                            {td.maxCharges > 0 ? (
-                              <span className="tabular-nums">剩余 {rem}/{td.maxCharges}</span>
-                            ) : (
-                              <span>已生效</span>
-                            )}
-                          </div>
-                          <div className="mt-0.5 text-[9.5px] leading-snug text-slate-600">
-                            {td.shortTag}
-                          </div>
+                          {questPlayer.charKey === 'mocha' ? (
+                            <>
+                              <div className="flex items-center justify-between font-extrabold" style={{ color: td.accentText }}>
+                                <span>✨ {td.name}</span>
+                                <span>双效天赋</span>
+                              </div>
+                              <div className="mt-0.5 space-y-0.5 text-[9.5px] leading-snug text-slate-700">
+                                <div className="flex items-center justify-between">
+                                  <span>首熊起飞套盾</span>
+                                  <span className="font-bold tabular-nums" style={{ color: rem > 0 ? td.accentText : '#64748b' }}>
+                                    {rem > 0 ? `剩余 ${rem}/1` : '已用完'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span>破盾震退3格</span>
+                                  <span className="font-bold" style={{ color: td.accentText }}>全局常驻</span>
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between font-extrabold" style={{ color: td.accentText }}>
+                                <span>✨ {td.name}</span>
+                                {td.maxCharges > 0 ? (
+                                  <span className="tabular-nums">剩余 {rem}/{td.maxCharges}</span>
+                                ) : (
+                                  <span>已生效</span>
+                                )}
+                              </div>
+                              <div className="mt-0.5 text-[9.5px] leading-snug text-slate-600">
+                                {td.shortTag}
+                              </div>
+                            </>
+                          )}
                         </div>
                       );
                     })()}

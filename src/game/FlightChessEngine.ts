@@ -299,6 +299,14 @@ export class FlightChessEngine {
     bubu: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean };
     yier: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean };
   };
+  private talentBubbles: {
+    root: HTMLDivElement;
+    text: HTMLSpanElement;
+    plane: PlaneData | null;
+    untilMs: number;
+  }[] = [];
+  private openingTalentItems: Record<number, ItemType[]> = {};
+  private openingTalentsAnnounced = false;
   private stage0RunState = {
     bubuTh: 0.72 + Math.PI,
     yierPhase: 'climb' as 'climb' | 'steal' | 'climbDown' | 'run',
@@ -525,10 +533,13 @@ export class FlightChessEngine {
     const basicPool: ItemType[] = ['sixDie', 'twinDice', 'refuel', 'shield'];
     this.players.forEach((P, pid) => {
       if (P.key === 'xiangyu') {
+        const granted: ItemType[] = [];
         for (let k = 0; k < 2; k++) {
           const it = basicPool[Math.floor(Math.random() * basicPool.length)];
           this.playerItems[pid][it] = (this.playerItems[pid][it] ?? 0) + 1;
+          granted.push(it);
         }
+        this.openingTalentItems[pid] = granted;
       }
     });
     this.playerQuests = this.players.map(() => ({
@@ -622,6 +633,10 @@ export class FlightChessEngine {
       bubu: makePoemBubble('', '#2563eb'),
       yier: makePoemBubble('', '#d97706'),
     };
+    this.talentBubbles = this.players.map((P) => {
+      const b = makePoemBubble('', P.uiColor);
+      return { root: b.root, text: b.text, plane: null, untilMs: 0 };
+    });
 
     this.players.forEach((P, pid) => {
       for (let i = 0; i < 4; i++) {
@@ -817,6 +832,7 @@ export class FlightChessEngine {
     this.emitSnapshot();
     if (autoStart) {
       this.beginRollPhase(false);
+      this.triggerOpeningTalentBubbles();
     }
     this.renderer.render(this.scene, this.camera);
     this.startLoop();
@@ -830,6 +846,43 @@ export class FlightChessEngine {
   public startMatch(): void {
     if (this.disposed || this.phase !== 'idle') return;
     this.beginRollPhase(false);
+    this.triggerOpeningTalentBubbles();
+  }
+
+  private showPieceSpeech(plane: PlaneData, text: string, durationMs = 3000): void {
+    const slot = this.talentBubbles[plane.pid];
+    if (!slot) return;
+    slot.plane = plane;
+    slot.text.textContent = text;
+    slot.untilMs = this.timeMs + durationMs;
+  }
+
+  private triggerOpeningTalentBubbles(): void {
+    if (this.openingTalentsAnnounced) return;
+    this.openingTalentsAnnounced = true;
+    const msgs: string[] = [];
+    this.players.forEach((P, pid) => {
+      const firstPlane = this.planesOf(pid)[0];
+      if (!firstPlane) return;
+      if (P.key === 'yier') {
+        msgs.push(`✨ ${P.name}「甜梦先发」开局站上起点`);
+        this.after(450, () => {
+          if (!this.disposed) this.showPieceSpeech(firstPlane, '✨ 甜梦先发！先站起点啦~', 3600);
+        });
+      } else if (P.key === 'xiangyu') {
+        const items = this.openingTalentItems[pid] ?? [];
+        const names = items.map((it) => `${ITEM_DEFS[it].icon}${ITEM_DEFS[it].name}`).join(' + ');
+        msgs.push(`🎁 ${P.name}「星愿百宝袋」开局获 ${names}`);
+        this.after(650, () => {
+          if (!this.disposed) this.showPieceSpeech(firstPlane, `🎁 百宝袋开局送 ${names}！`, 4000);
+        });
+      }
+    });
+    if (msgs.length > 0) {
+      this.after(500, () => {
+        if (!this.disposed) this.setMsg(msgs.join(' ｜ '));
+      });
+    }
   }
 
   private getSlot(slotId: number) {
@@ -1373,6 +1426,92 @@ export class FlightChessEngine {
         sh.m.geometry.dispose();
         (sh.m.material as THREE.Material).dispose();
       }
+    });
+  }
+
+  private spawnMochaRecoilFx(x: number, z: number): void {
+    // 抹茶布布专属「茶香反震」双层翠绿冲击波 + 旋转茶叶片飞溅，与破盾蓝环及普通踩踏明显区分
+    const ringOuter = new THREE.Mesh(
+      new THREE.RingGeometry(0.18, 0.42, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0x6ab82e,
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ringOuter.rotation.x = -Math.PI / 2;
+    ringOuter.position.set(x, 0.24, z);
+    this.scene.add(ringOuter);
+
+    const ringInner = new THREE.Mesh(
+      new THREE.RingGeometry(0.12, 0.28, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xd9f99d,
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    ringInner.rotation.x = -Math.PI / 2;
+    ringInner.position.set(x, 0.28, z);
+    this.scene.add(ringInner);
+
+    const leafColors = [0x4d7c0f, 0x6ab82e, 0xa3e635, 0xd9f99d];
+    const leafGeo = new THREE.OctahedronGeometry(0.065, 0);
+    const leaves: { m: THREE.Mesh; vx: number; vy: number; vz: number; spin: number }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + (i % 2) * 0.14;
+      const mat = new THREE.MeshBasicMaterial({
+        color: leafColors[i % leafColors.length],
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+      });
+      const m = new THREE.Mesh(leafGeo, mat);
+      m.scale.set(1.5, 0.35, 0.72);
+      m.position.set(x + Math.cos(a) * 0.2, 0.36, z + Math.sin(a) * 0.2);
+      m.rotation.set(0.3, -a, 0.25);
+      this.scene.add(m);
+      leaves.push({
+        m,
+        vx: Math.cos(a) * (1.35 + (i % 3) * 0.25),
+        vy: 0.55 + (i % 2) * 0.35,
+        vz: Math.sin(a) * (1.35 + (i % 3) * 0.25),
+        spin: (i % 2 === 0 ? 1 : -1) * (6 + (i % 3) * 2),
+      });
+    }
+
+    this.tween(520, (k) => {
+      const ease = 1 - Math.pow(1 - k, 2.2);
+      ringOuter.scale.setScalar(1 + ease * 3.1);
+      (ringOuter.material as THREE.MeshBasicMaterial).opacity = (1 - k) * 0.95;
+      ringInner.scale.setScalar(1 + ease * 2.1);
+      (ringInner.material as THREE.MeshBasicMaterial).opacity = (1 - k) * 0.88;
+      leaves.forEach((lf) => {
+        lf.m.position.x = x + lf.vx * ease;
+        lf.m.position.z = z + lf.vz * ease;
+        lf.m.position.y = 0.36 + lf.vy * ease - 0.55 * k * k;
+        lf.m.rotation.y += 0.14 * lf.spin * 0.1;
+        lf.m.rotation.x += 0.09;
+        (lf.m.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k * 1.05);
+      });
+    }).then(() => {
+      this.scene.remove(ringOuter);
+      this.scene.remove(ringInner);
+      ringOuter.geometry.dispose();
+      (ringOuter.material as THREE.Material).dispose();
+      ringInner.geometry.dispose();
+      (ringInner.material as THREE.Material).dispose();
+      leaves.forEach((lf) => {
+        this.scene.remove(lf.m);
+        (lf.m.material as THREE.Material).dispose();
+      });
+      leafGeo.dispose();
     });
   }
 
@@ -4569,14 +4708,23 @@ export class FlightChessEngine {
       const mochaName = this.players[mochaDefPid].name;
       const attackerStack = this.planesOf(plane.pid).filter((q) => q.pos === plane.pos);
       const recoilPos = Math.max(0, plane.pos - 3);
-      // 等待攻击方落地跳跃动画完全结束再执行震退，避免两个补间争抢坐标
+      // 破盾后立刻爆出抹茶翠绿反震冲击波（在震退起飞之前呈现），同时等攻击方落地余韵结束即刻弹飞
+      this.setMsg(`🍵 ${mochaName} 触发「茶香反震」，泡泡罩将 ${attackerName} 震退 3 格！`, this.players[mochaDefPid].uiColor);
+      const mochaUnit = byPid.get(mochaDefPid)?.[0];
+      if (mochaUnit) this.showPieceSpeech(mochaUnit, '🍵 茶香反震！弹退你 3 格~', 3000);
+      this.spawnMochaRecoilFx(c[0], c[1]);
+      beep(520, 0.14, 'sine', 0.16);
+      this.triggerShake();
       let waitMs = 0;
-      while (attackerStack.some((a) => a.animating) && !this.disposed && waitMs < 900) {
-        await this.sleep(30);
-        waitMs += 30;
+      while (attackerStack.some((a) => a.animating) && !this.disposed && waitMs < 450) {
+        await this.sleep(20);
+        waitMs += 20;
       }
       if (this.disposed) return;
-      this.setMsg(`🍵 ${mochaName} 触发「茶香反震」，泡泡罩将 ${attackerName} 震退 3 格！`, this.players[mochaDefPid].uiColor);
+      if (waitMs < 110) {
+        await this.sleep(110 - waitMs);
+        if (this.disposed) return;
+      }
       await Promise.all(attackerStack.map((a) => this.knockBackTo(a, recoilPos)));
       this.relayout();
       this.syncShieldVisuals();
@@ -4618,10 +4766,8 @@ export class FlightChessEngine {
           return this.sendHome(v, b[0], b[1]);
         }),
         ...toSplitRetreat.map(({ plane: v, newPos }) => this.knockBackTo(v, newPos)),
+        ...(mochaDefPid !== undefined ? [triggerMochaRecoil()] : []),
       ]);
-      if (mochaDefPid !== undefined) {
-        await triggerMochaRecoil();
-      }
       this.relayout();
       this.syncShieldVisuals();
     }
@@ -4827,6 +4973,11 @@ export class FlightChessEngine {
             : `🍵 ${P.name} 触发「茶香反震」，首熊起飞自带泡泡罩！`,
           P.uiColor,
         );
+        this.showPieceSpeech(
+          plane,
+          P.key === 'bubu' ? '🛡️ 三盾守门！泡泡罩护体~' : '🍵 茶香反震！先套一层泡泡罩~',
+          2800,
+        );
       }
       this.relayout();
       await this.sleep(320);
@@ -4905,6 +5056,7 @@ export class FlightChessEngine {
             await this.sleep(240);
             if (this.disposed) return;
             this.setMsg(`🍓 ${P.name} 触发「元气蹦跳」，补步至同色格！`, P.uiColor);
+            this.showPieceSpeech(plane, '🍓 元气蹦跳！再蹦一步踩同色~', 2800);
             beep(660, 0.12, 'triangle', 0.14);
             setPos(nextOwn);
             let talentCap: Promise<number> | null = null;
@@ -5064,6 +5216,7 @@ export class FlightChessEngine {
         await this.sleep(260);
         if (this.disposed) return;
         this.setMsg(`🌊 ${P.name} 触发「顺风破蛋」，直接顺风滑入终点！`, P.uiColor);
+        this.showPieceSpeech(plane, '🌊 顺风破蛋！冲进终点咯~', 3200);
         beep(740, 0.18, 'triangle', 0.16);
         setPos(HOME_END);
         await hopAll(
@@ -5786,7 +5939,7 @@ export class FlightChessEngine {
       htn.heartPoints.visible = active;
       htn.groundHaloMat.opacity = treeNightScale * 0.85;
       htn.groundHalo.visible = active;
-      htn.spotLight.intensity = treeNightScale * 7.6;
+      htn.spotLight.intensity = treeNightScale * 14.5;
       htn.dioramaGroup.visible = treeNightScale > 0.15;
       htn.baseStripMesh.visible = active;
       htn.baseStripMat.opacity = treeNightScale * 0.88;
@@ -8233,6 +8386,24 @@ export class FlightChessEngine {
       };
       projectObj(s0.bubu, this.stage0Bubbles.bubu);
       projectObj(s0.yier, this.stage0Bubbles.yier);
+    }
+
+    for (const tb of this.talentBubbles) {
+      if (!tb.plane || this.paused || this.timeMs >= tb.untilMs) {
+        tb.root.style.opacity = '0';
+        continue;
+      }
+      tb.plane.mesh.updateMatrixWorld();
+      _scratchBoatAnchor.set(0, 1.05, 0).applyMatrix4(tb.plane.mesh.matrixWorld);
+      _scratchProj.copy(_scratchBoatAnchor).project(this.camera);
+      if (_scratchProj.z > 1 || _scratchProj.z < -1) {
+        tb.root.style.opacity = '0';
+        continue;
+      }
+      const sx = THREE.MathUtils.clamp((_scratchProj.x * 0.5 + 0.5) * w, 96, w - 96);
+      const sy = THREE.MathUtils.clamp((-_scratchProj.y * 0.5 + 0.5) * h, 64, h - 48);
+      tb.root.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+      tb.root.style.opacity = '1';
     }
   }
 
