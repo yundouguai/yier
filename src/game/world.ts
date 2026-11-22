@@ -16,6 +16,7 @@ import {
   ringColor,
 } from './constants';
 import { buildPlaneMesh, makePlaneModel } from './pieces';
+import type { PlaneParts } from './pieces';
 import {
   createAncientTileTexture,
   createBrickBankTexture,
@@ -232,6 +233,17 @@ export interface WorldRefs {
   sunriseHaloMesh?: THREE.Mesh;
   sunriseHaloMat?: THREE.MeshBasicMaterial;
   skyDomeMat?: THREE.ShaderMaterial;
+  stage0RunEgg?: {
+    group: THREE.Group;
+    bubu: THREE.Group;
+    yier: THREE.Group;
+    honeyPot: THREE.Group;
+    sweatDrops: THREE.Mesh[];
+    bees: { g: THREE.Group; lw: THREE.Mesh; rw: THREE.Mesh; phase: number }[];
+    hiveWorldPos: THREE.Vector3;
+    treeClimbBase: THREE.Vector3;
+    treeAng: number;
+  };
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
     waveHaloMats: THREE.MeshBasicMaterial[];
@@ -269,6 +281,7 @@ export interface WorldRefs {
   swimKois: SwimKoiAnim[];
   boats: BoatAnim[];
   critters: CritterAnim[];
+  moatInnerR: (th: number) => number;
   moatMid: (th: number) => number;
   moatOuterR: (th: number) => number;
   moatChannelR: (th: number, rOff: number, margin?: number) => number;
@@ -2608,11 +2621,10 @@ export function buildAncientWorld(
 
       // 4c. 树池底座透明隐藏式暖金灯带（白天完全隐形透明，仅夜晚亮起柔光）
       const baseStripMat = new THREE.MeshBasicMaterial({
-        color: 0xffd584,
+        color: 0xffc12e,
         transparent: true,
         opacity: 0,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
       });
       const baseStripMesh = new THREE.Mesh(
         new THREE.TorusGeometry(1.155, 0.024, 12, 64),
@@ -2627,10 +2639,10 @@ export function buildAncientWorld(
       sgCanvas.width = sgCanvas.height = 128;
       const sgg = sgCanvas.getContext('2d')!;
       const sgGrad = sgg.createRadialGradient(64, 64, 40, 64, 64, 63);
-      sgGrad.addColorStop(0, 'rgba(255, 200, 110, 0)');
-      sgGrad.addColorStop(0.45, 'rgba(255, 210, 125, 0.85)');
-      sgGrad.addColorStop(0.72, 'rgba(255, 180, 85, 0.45)');
-      sgGrad.addColorStop(1, 'rgba(255, 180, 85, 0)');
+      sgGrad.addColorStop(0, 'rgba(255, 184, 36, 0)');
+      sgGrad.addColorStop(0.45, 'rgba(255, 196, 48, 0.88)');
+      sgGrad.addColorStop(0.72, 'rgba(255, 165, 24, 0.48)');
+      sgGrad.addColorStop(1, 'rgba(255, 165, 24, 0)');
       sgg.fillStyle = sgGrad;
       sgg.fillRect(0, 0, 128, 128);
       const sgTex = new THREE.CanvasTexture(sgCanvas);
@@ -2706,20 +2718,20 @@ export function buildAncientWorld(
       ghCanvas.width = ghCanvas.height = 256;
       const ghg = ghCanvas.getContext('2d')!;
       const ghGrad = ghg.createRadialGradient(128, 128, 30, 128, 128, 124);
-      ghGrad.addColorStop(0, 'rgba(255, 190, 215, 0.35)');
-      ghGrad.addColorStop(0.6, 'rgba(255, 210, 145, 0.22)');
-      ghGrad.addColorStop(1, 'rgba(255, 210, 145, 0)');
+      ghGrad.addColorStop(0, 'rgba(255, 92, 118, 0.32)');
+      ghGrad.addColorStop(0.6, 'rgba(255, 72, 102, 0.22)');
+      ghGrad.addColorStop(1, 'rgba(255, 72, 102, 0)');
       ghg.fillStyle = ghGrad;
       ghg.fillRect(0, 0, 256, 256);
-      ghg.strokeStyle = 'rgba(255, 225, 168, 0.68)';
-      ghg.lineWidth = 4;
+      ghg.strokeStyle = 'rgba(255, 74, 104, 0.92)';
+      ghg.lineWidth = 5;
       ghg.setLineDash([16, 10]);
       ghg.beginPath();
       ghg.arc(128, 128, 104, 0, Math.PI * 2);
       ghg.stroke();
       ghg.setLineDash([]);
-      ghg.strokeStyle = 'rgba(255, 168, 200, 0.55)';
-      ghg.lineWidth = 3;
+      ghg.strokeStyle = 'rgba(255, 108, 134, 0.78)';
+      ghg.lineWidth = 3.5;
       ghg.beginPath();
       ghg.arc(128, 128, 86, 0, Math.PI * 2);
       ghg.stroke();
@@ -2729,7 +2741,6 @@ export function buildAncientWorld(
         transparent: true,
         opacity: 0,
         depthWrite: false,
-        blending: THREE.AdditiveBlending,
       });
       const groundHalo = new THREE.Mesh(new THREE.CircleGeometry(1.75, 40), groundHaloMat);
       groundHalo.rotation.x = -Math.PI / 2;
@@ -5422,197 +5433,86 @@ export function buildAncientWorld(
       oarPivot.add(oarRod);
       g.add(oarPivot);
 
-      // 船舱前端精致苗条游船人物：白衣女子 / 青衣男子
+      // 船舱前端赏景乘客（仅阶段 2 登船：青衣布布 / 白衣一二）
       const p = new THREE.Group();
-      const clothMat = mat(passenger.cloth, 0.62);
       const isMaiden = passenger.variant === 'maiden';
-      const trimMat = isMaiden ? pinkRibbonMat : ivoryTrimMat;
-      const accentMat = isMaiden ? goldAccent : jadeMat;
-
       const cushion = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.088, 0.098, 0.026, 12),
+        new THREE.CylinderGeometry(0.098, 0.108, 0.026, 12),
         isMaiden ? pinkRibbonMat : deepTealTrimMat,
       );
       cushion.position.y = 0.013;
       p.add(cushion);
 
-      // 修身坐裙/下摆（更纤细收腰、加褶皱滚边）
-      const skirtLower = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.08, 0.068, 12), clothMat);
-      skirtLower.scale.set(0.95, 1, 0.88);
-      skirtLower.position.set(0, 0.056, 0.012);
-      p.add(skirtLower);
-
-      const hemTrim = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.077, 0.082, 0.012, 12),
-        isMaiden ? ivoryTrimMat : deepTealTrimMat,
-      );
-      hemTrim.scale.set(0.95, 1, 0.88);
-      hemTrim.position.set(0, 0.028, 0.012);
-      p.add(hemTrim);
-
-      // 细窄裙褶条
-      for (let pi = 0; pi < 5; pi++) {
-        const pa = -0.75 + pi * 0.375;
-        const pleat = new THREE.Mesh(
-          new THREE.BoxGeometry(0.005, 0.058, 0.006),
-          isMaiden ? pinkRibbonMat : deepTealTrimMat,
-        );
-        pleat.position.set(Math.sin(pa) * 0.062, 0.055, 0.012 + Math.cos(pa) * 0.054);
-        pleat.rotation.y = pa;
-        pleat.rotation.x = -0.32;
-        p.add(pleat);
-      }
-
-      // 苗条上身（收肩收腰 + 略微扁平化更显修长）
-      const pBody = new THREE.Group();
-      pBody.position.y = 0.086;
-      p.add(pBody);
-
-      const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.049, 0.142, 12), clothMat);
-      robe.scale.set(0.92, 1, 0.76);
-      robe.position.y = 0.072;
-      robe.castShadow = true;
-      pBody.add(robe);
-
-      // 汉服交领（Y字领口滚边）
-      for (const sx of [-1, 1]) {
-        const lapel = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.062, 0.008), trimMat);
-        lapel.position.set(0.012 * sx, 0.114, 0.031);
-        lapel.rotation.z = 0.34 * sx;
-        pBody.add(lapel);
-      }
-
-      // 纤细束腰与玉佩/丝绦
-      const pSash = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.043, 0.045, 0.02, 12),
-        isMaiden ? pinkRibbonMat : deepTealTrimMat,
-      );
-      pSash.scale.set(0.94, 1, 0.78);
-      pSash.position.y = 0.028;
-      pBody.add(pSash);
-
-      const sashTail = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.054, 0.005), accentMat);
-      sashTail.position.set(0.018, -0.002, 0.035);
-      sashTail.rotation.z = -0.14;
-      pBody.add(sashTail);
-
-      // 修长双袖
-      for (const sx of [-1, 1]) {
-        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.022, 0.095, 8), clothMat);
-        sleeve.position.set(0.044 * sx, 0.092, 0.022);
-        sleeve.rotation.set(-0.68, 0, -0.18 * sx);
-        pBody.add(sleeve);
-        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.011, 8, 6), skinMat);
-        hand.position.set(0.052 * sx, 0.054, 0.054);
-        pBody.add(hand);
-      }
-
-      // 头部独立枢轴，方便相遇对诗时微微颔首顾盼
-      const pHeadGrp = new THREE.Group();
-      pHeadGrp.position.y = 0.178;
-      pBody.add(pHeadGrp);
-
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.015, 0.026, 8), skinMat);
-      neck.position.y = -0.026;
-      pHeadGrp.add(neck);
-
-      const pHead = new THREE.Mesh(new THREE.SphereGeometry(0.043, 12, 10), skinMat);
-      pHead.scale.set(0.92, 1.03, 0.92);
-      pHead.castShadow = true;
-      pHeadGrp.add(pHead);
-      addCuteFace(pHeadGrp, -0.003, 0.038, true);
-
-      const hairCap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.046, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
-        hairMat,
-      );
-      hairCap.scale.set(0.93, 1.02, 0.94);
-      hairCap.position.set(0, 0.005, -0.003);
-      hairCap.rotation.x = -0.24;
-      pHeadGrp.add(hairCap);
-
-      const backHair = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.024, 0.018, isMaiden ? 0.115 : 0.075, 8),
-        hairMat,
-      );
-      backHair.scale.set(1.15, 1, 0.45);
-      backHair.position.set(0, isMaiden ? -0.045 : -0.026, -0.034);
-      backHair.rotation.x = 0.14;
-      pHeadGrp.add(backHair);
+      const bearChar = isMaiden ? CHARS.yier : CHARS.bubu;
+      const bearFakeSlot = {
+        ...bearChar,
+        slotId: 0,
+        start: 0,
+        court: [0, 0] as [number, number],
+        launch: [0, 0] as [number, number],
+        gate: [0, 0] as [number, number],
+        gateAxis: 'z' as const,
+        home: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] as [number, number][],
+        final: [0, 0] as [number, number],
+        base: [[0, 0], [0, 0], [0, 0], [0, 0]] as [number, number][],
+        toy: [0, 0] as [number, number],
+        finalYaw: 0,
+        type: 'human' as const,
+      };
+      const bearPassenger = buildPlaneMesh(bearFakeSlot, anisotropy);
+      bearPassenger.scale.setScalar(0.36);
+      bearPassenger.position.set(0, 0.024, 0.01);
+      const bp = bearPassenger.userData.parts as PlaneParts;
+      const pHeadGrp = bp.headPivot;
+      bp.leftArm.rotation.x = -0.38;
+      bp.rightArm.rotation.x = -0.38;
 
       if (isMaiden) {
-        // 白衣女子：仙姿云髻 + 金步摇花饰 + 轻盈披帛 + 精致团扇
-        const topKnot = new THREE.Mesh(new THREE.SphereGeometry(0.021, 8, 6), hairMat);
-        topKnot.scale.set(1.05, 0.9, 0.95);
-        topKnot.position.set(0, 0.052, -0.005);
-        pHeadGrp.add(topKnot);
-        for (const sx of [-1, 1]) {
-          const sideLoop = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.0055, 6, 10), hairMat);
-          sideLoop.position.set(0.034 * sx, 0.034, -0.003);
-          sideLoop.rotation.y = 0.35 * sx;
-          pHeadGrp.add(sideLoop);
-          const pearl = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 6), pinkRibbonMat);
-          pearl.position.set(0.041 * sx, 0.038, 0.009);
-          pHeadGrp.add(pearl);
-        }
-        const hairpin = new THREE.Mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.088, 6), goldAccent);
-        hairpin.rotation.z = Math.PI / 2 + 0.16;
-        hairpin.position.set(0, 0.054, -0.005);
-        pHeadGrp.add(hairpin);
-
-        // 轻纱披帛环绕双肩垂落
+        // 白衣一二：粉白轻纱披帛 + 团扇
         const shawlArc = new THREE.Mesh(
-          new THREE.TorusGeometry(0.055, 0.0065, 6, 14, Math.PI * 1.15),
+          new THREE.TorusGeometry(0.185, 0.022, 6, 16, Math.PI * 1.15),
           pinkRibbonMat,
         );
-        shawlArc.rotation.set(Math.PI / 2 + 0.25, 0, Math.PI * 0.92);
-        shawlArc.position.set(0, 0.102, 0.006);
-        pBody.add(shawlArc);
-        for (const sx of [-1, 1]) {
-          const drape = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.078, 0.004), pinkRibbonMat);
-          drape.position.set(0.052 * sx, 0.054, 0.028);
-          drape.rotation.z = -0.18 * sx;
-          pBody.add(drape);
-        }
-
-        // 手持团扇
-        const fanRim = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.003, 6, 14), woodDark);
-        fanRim.position.set(-0.056, 0.084, 0.068);
+        shawlArc.rotation.set(Math.PI / 2 + 0.2, 0, Math.PI * 0.92);
+        shawlArc.position.set(0, 0.25, 0.01);
+        bp.animRoot.add(shawlArc);
+        const fanRim = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.008, 6, 14), woodDark);
+        fanRim.position.set(-0.18, 0.24, 0.17);
         fanRim.rotation.set(0.22, 0.42, 0);
-        pBody.add(fanRim);
-        const roundFan = new THREE.Mesh(new THREE.CircleGeometry(0.039, 14), fanPaperMat);
+        bp.animRoot.add(fanRim);
+        const roundFan = new THREE.Mesh(new THREE.CircleGeometry(0.082, 14), fanPaperMat);
         roundFan.position.copy(fanRim.position);
         roundFan.rotation.copy(fanRim.rotation);
-        pBody.add(roundFan);
-        const fanHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.055, 6), woodDark);
-        fanHandle.position.set(-0.052, 0.044, 0.062);
-        pBody.add(fanHandle);
+        bp.animRoot.add(roundFan);
       } else {
-        // 青衣男子：高束玉冠 + 玉簪 + 文雅折扇
-        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), hairMat);
-        bun.position.set(0, 0.054, -0.006);
-        pHeadGrp.add(bun);
-        const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.021, 0.022, 8), ivoryTrimMat);
-        crown.position.set(0, 0.053, -0.006);
+        // 青衣布布：青色文雅束带 + 玉冠发簪 + 折扇
+        const sash = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.168, 0.182, 0.055, 16),
+          mat(passenger.cloth, 0.6),
+        );
+        sash.position.set(0, 0.165, 0);
+        bp.animRoot.add(sash);
+        const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.054, 0.052, 8), ivoryTrimMat);
+        crown.position.set(0, 0.37, -0.01);
         pHeadGrp.add(crown);
-        const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.078, 6), jadeMat);
+        const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.17, 6), jadeMat);
         pin.rotation.z = Math.PI / 2;
-        pin.position.set(0, 0.056, -0.006);
+        pin.position.set(0, 0.375, -0.01);
         pHeadGrp.add(pin);
-
-        // 手持折扇
         const fan = new THREE.Mesh(
-          new THREE.CircleGeometry(0.044, 10, 0.25, Math.PI * 0.65),
+          new THREE.CircleGeometry(0.095, 10, 0.25, Math.PI * 0.65),
           fanPaperMat,
         );
-        fan.position.set(0.056, 0.072, 0.066);
+        fan.position.set(0.18, 0.23, 0.17);
         fan.rotation.set(0.28, -0.45, 0.22);
-        pBody.add(fan);
+        bp.animRoot.add(fan);
       }
 
+      p.add(bearPassenger);
       p.position.set(0, 0.115, 0.16);
       p.rotation.y = -0.16;
       p.scale.setScalar(1.08);
+      p.visible = false;
       g.add(p);
 
       // 船体吃水线白沫环 + 船尾 V 形水波纹
@@ -5983,6 +5883,231 @@ export function buildAncientWorld(
   skyDome.renderOrder = -10;
   scene.add(skyDome);
 
+  // 7) 阶段 0 专属彩蛋：护城河内岸「蓝色头巾布布」顺时针晨跑 + 河外高树「偷蜜一二」爬上爬下被蜜蜂追赶逆时针狂奔
+  const stage0RunGroup = new THREE.Group();
+  const makeStage0Bear = (charDef: typeof CHARS.yier) => {
+    const fakeSlot = {
+      ...charDef,
+      slotId: 0,
+      start: 0,
+      court: [0, 0] as [number, number],
+      launch: [0, 0] as [number, number],
+      gate: [0, 0] as [number, number],
+      gateAxis: 'z' as const,
+      home: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]] as [number, number][],
+      final: [0, 0] as [number, number],
+      base: [[0, 0], [0, 0], [0, 0], [0, 0]] as [number, number][],
+      toy: [0, 0] as [number, number],
+      finalYaw: 0,
+      type: 'human' as const,
+    };
+    const m = buildPlaneMesh(fakeSlot, anisotropy);
+    m.scale.setScalar(0.58);
+    return m;
+  };
+
+  // A) 护城河外高大蜂蜜树 + 树上黄金蜂窝（位于外岸树林外缘，避开跑道）
+  const honeyTreeAng = 0.72;
+  const honeyTreeR = moatOuterR(honeyTreeAng) + 1.85;
+  const htx = Math.cos(honeyTreeAng) * honeyTreeR;
+  const htz = Math.sin(honeyTreeAng) * honeyTreeR;
+  const honeyTree = new THREE.Group();
+  honeyTree.position.set(htx, -0.66, htz);
+  honeyTree.rotation.y = Math.atan2(-htx, -htz);
+
+  const htBarkMat = mat(0x5b3b24, 0.9);
+  const htTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.27, 2.85, 10), htBarkMat);
+  htTrunk.position.y = 1.425;
+  htTrunk.castShadow = true;
+  htTrunk.receiveShadow = true;
+  honeyTree.add(htTrunk);
+
+  const htBranch = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 0.82, 8), htBarkMat);
+  htBranch.position.set(0, 2.15, 0.34);
+  htBranch.rotation.x = 1.15;
+  honeyTree.add(htBranch);
+
+  const htLeafMat1 = mat(0x3a8238, 0.8);
+  const htLeafMat2 = mat(0x4d9946, 0.78);
+  for (const [lx, ly, lz, lr, lm] of [
+    [0, 3.15, 0, 1.05, htLeafMat1],
+    [-0.58, 2.85, 0.22, 0.72, htLeafMat2],
+    [0.58, 2.88, -0.18, 0.72, htLeafMat2],
+    [0.12, 2.95, 0.56, 0.65, htLeafMat1],
+    [-0.1, 3.62, -0.08, 0.68, htLeafMat2],
+  ] as [number, number, number, number, THREE.Material][]) {
+    const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(lr, 1), lm);
+    puff.position.set(lx, ly, lz);
+    puff.castShadow = true;
+    honeyTree.add(puff);
+  }
+
+  // 蜂窝（挂在伸向护城河的树枝下方）
+  const hiveGroup = new THREE.Group();
+  hiveGroup.position.set(0, 1.88, 0.64);
+  const hiveMatA = mat(0xf59e0b, 0.52);
+  const hiveMatB = mat(0xd97706, 0.58);
+  for (const [hy, hr, hm] of [
+    [0.12, 0.12, hiveMatB],
+    [0.04, 0.165, hiveMatA],
+    [-0.04, 0.155, hiveMatB],
+    [-0.12, 0.11, hiveMatA],
+  ] as [number, number, THREE.Material][]) {
+    const ring = new THREE.Mesh(new THREE.SphereGeometry(hr, 12, 9), hm);
+    ring.scale.set(1, 0.62, 1);
+    ring.position.y = hy;
+    hiveGroup.add(ring);
+  }
+  const hiveHole = new THREE.Mesh(new THREE.CircleGeometry(0.042, 10), mat(0x2d1a0b, 0.9));
+  hiveHole.position.set(0, -0.02, 0.155);
+  hiveGroup.add(hiveHole);
+  honeyTree.add(hiveGroup);
+  scene.add(honeyTree);
+
+  honeyTree.updateMatrixWorld(true);
+  const hiveWorldPos = new THREE.Vector3(0, 1.88, 0.72).applyMatrix4(honeyTree.matrixWorld);
+  // 爬树起点紧贴树干外侧（半径留足 0.42 间距，绝不穿进树干）
+  const treeClimbBase = new THREE.Vector3(0, 0, 0.44).applyMatrix4(honeyTree.matrixWorld);
+
+  // B) 晨跑布布（头戴贴合额头的蓝色运动头巾，零穿模）
+  const bubuRunner = makeStage0Bear(CHARS.bubu);
+  const bubuParts = bubuRunner.userData.parts as PlaneParts;
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.42 });
+  const headband = new THREE.Mesh(new THREE.TorusGeometry(0.244, 0.022, 8, 28), bandMat);
+  headband.rotation.x = Math.PI / 2;
+  headband.scale.set(1.03, 0.96, 1.0);
+  headband.position.set(0, 0.245, 0);
+  bubuParts.headPivot.add(headband);
+  const bandKnot = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), bandMat);
+  bandKnot.position.set(0, 0.245, -0.248);
+  bubuParts.headPivot.add(bandKnot);
+  for (const sx of [-1, 1]) {
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.012), bandMat);
+    tail.position.set(sx * 0.032, 0.21, -0.265);
+    tail.rotation.set(0.42, sx * 0.2, sx * 0.28);
+    bubuParts.headPivot.add(tail);
+  }
+  stage0RunGroup.add(bubuRunner);
+
+  // C) 偷蜜一二（精致陶釉蜂蜜罐 + 金黄溢蜜 + 立体小汗滴）
+  const yierRunner = makeStage0Bear(CHARS.yier);
+  const yierParts = yierRunner.userData.parts as PlaneParts;
+  const honeyPot = new THREE.Group();
+  const jarPts = [
+    new THREE.Vector2(0.0, 0.0),
+    new THREE.Vector2(0.068, 0.005),
+    new THREE.Vector2(0.095, 0.055),
+    new THREE.Vector2(0.092, 0.115),
+    new THREE.Vector2(0.064, 0.148),
+    new THREE.Vector2(0.074, 0.165),
+  ];
+  const jarGeo = new THREE.LatheGeometry(jarPts, 18);
+  const potBody = new THREE.Mesh(jarGeo, mat(0xc26d27, 0.42));
+  potBody.position.y = -0.08;
+  honeyPot.add(potBody);
+  const honeyGlazeMat = new THREE.MeshStandardMaterial({
+    color: 0xfbbf24,
+    emissive: 0xd97706,
+    emissiveIntensity: 0.22,
+    roughness: 0.18,
+  });
+  const honeyTop = new THREE.Mesh(new THREE.SphereGeometry(0.064, 12, 8), honeyGlazeMat);
+  honeyTop.scale.set(1, 0.42, 1);
+  honeyTop.position.y = 0.084;
+  honeyPot.add(honeyTop);
+  for (const [da, dl] of [[0.3, 0.048], [2.1, 0.038], [4.2, 0.044]] as [number, number][]) {
+    const drip = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), honeyGlazeMat);
+    drip.scale.set(0.8, 1.5, 0.8);
+    drip.position.set(Math.cos(da) * 0.072, 0.06 - dl * 0.4, Math.sin(da) * 0.072);
+    honeyPot.add(drip);
+  }
+  honeyPot.position.set(0, 0.23, 0.255);
+  honeyPot.visible = false;
+  yierParts.animRoot.add(honeyPot);
+
+  const sweatMat = new THREE.MeshBasicMaterial({
+    color: 0x7dd3fc,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const sweatDrops: THREE.Mesh[] = [];
+  const sweatBulbGeo = new THREE.SphereGeometry(0.024, 8, 6);
+  const sweatTipGeo = new THREE.ConeGeometry(0.021, 0.052, 8);
+  for (let si = 0; si < 3; si++) {
+    const sd = new THREE.Mesh(sweatBulbGeo, sweatMat);
+    const tip = new THREE.Mesh(sweatTipGeo, sweatMat);
+    tip.position.y = 0.028;
+    sd.add(tip);
+    sd.position.set(si === 0 ? -0.275 : 0.275, 0.33 + (si % 2) * 0.065, 0.14);
+    sd.rotation.z = si === 0 ? 0.55 : -0.55;
+    sd.visible = false;
+    yierParts.headPivot.add(sd);
+    sweatDrops.push(sd);
+  }
+  stage0RunGroup.add(yierRunner);
+
+  // D) 7 只精致小蜜蜂（黄黑条纹胖身体 + 小圆头 + 触角 + 尾刺 + 半透双翅）
+  const bees: { g: THREE.Group; lw: THREE.Mesh; rw: THREE.Mesh; phase: number }[] = [];
+  const beeYellowMat = mat(0xfacc15, 0.32);
+  const beeDarkMat = mat(0x1f2937, 0.48);
+  const beeWingMat = new THREE.MeshBasicMaterial({
+    color: 0xf8fafc,
+    transparent: true,
+    opacity: 0.78,
+    side: THREE.DoubleSide,
+  });
+  for (let bi = 0; bi < 7; bi++) {
+    const bg = new THREE.Group();
+    const bBody = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), beeYellowMat);
+    bBody.scale.set(0.86, 0.86, 1.32);
+    bg.add(bBody);
+    for (const sz of [-0.015, 0.015]) {
+      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.014, 10), beeDarkMat);
+      stripe.rotation.x = Math.PI / 2;
+      stripe.position.z = sz;
+      bg.add(stripe);
+    }
+    const bHead = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), beeDarkMat);
+    bHead.position.set(0, 0.005, 0.048);
+    bg.add(bHead);
+    const stinger = new THREE.Mesh(new THREE.ConeGeometry(0.01, 0.026, 6), beeDarkMat);
+    stinger.rotation.x = -Math.PI / 2;
+    stinger.position.set(0, 0, -0.056);
+    bg.add(stinger);
+    for (const sx of [-1, 1]) {
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.028, 4), beeDarkMat);
+      ant.position.set(sx * 0.011, 0.032, 0.056);
+      ant.rotation.set(0.35, 0, -sx * 0.28);
+      bg.add(ant);
+    }
+    const lw = new THREE.Mesh(new THREE.CircleGeometry(0.034, 10), beeWingMat);
+    lw.scale.set(1.25, 0.62, 1);
+    lw.position.set(-0.042, 0.032, 0.006);
+    lw.rotation.x = Math.PI / 2;
+    bg.add(lw);
+    const rw = new THREE.Mesh(new THREE.CircleGeometry(0.034, 10), beeWingMat);
+    rw.scale.set(1.25, 0.62, 1);
+    rw.position.set(0.042, 0.032, 0.006);
+    rw.rotation.x = Math.PI / 2;
+    bg.add(rw);
+    stage0RunGroup.add(bg);
+    bees.push({ g: bg, lw, rw, phase: bi * 0.92 });
+  }
+
+  scene.add(stage0RunGroup);
+
+  const stage0RunEgg = {
+    group: stage0RunGroup,
+    bubu: bubuRunner,
+    yier: yierRunner,
+    honeyPot,
+    sweatDrops,
+    bees,
+    hiveWorldPos,
+    treeClimbBase,
+    treeAng: honeyTreeAng,
+  };
+
   return {
     waterMesh,
     moatTex,
@@ -6023,6 +6148,8 @@ export function buildAncientWorld(
     swimKois,
     boats,
     critters,
+    stage0RunEgg,
+    moatInnerR,
     moatMid,
     moatOuterR,
     moatChannelR,

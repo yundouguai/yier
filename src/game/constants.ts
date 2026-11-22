@@ -159,7 +159,7 @@ export const ITEM_DEFS: Record<ItemType, ItemDef> = {
     icon: '🧋',
     shortEffect: '同时掷两颗骰子',
     limitNote: '投出 6 无连投',
-    desc: '吨吨炫完双倍珍珠奶茶，同时掷两颗骰子按点数之和前进（任一或点数之和为 5/6 可起飞）。',
+    desc: '吨吨炫完双倍珍珠奶茶，同时掷两颗骰子按点数之和前进（点数之和 ≥ 5 即可起飞）。',
     accentColor: '#c97b3e',
   },
   refuel: {
@@ -207,7 +207,7 @@ export const GIFT_QUEST_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, num
   1: { sixDie: 85 / 3, twinDice: 85 / 3, refuel: 85 / 3, shield: 10, missile: 5 },
   // 阶段 2~3：奶油派 10%，其余 4 种平分剩余 90%
   2: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
-  3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
+  3: { sixDie: 18.75, twinDice: 18.75, refuel: 18.75, shield: 18.75, missile: 25 },
 };
 
 /** 按阶段（全场最多完赛棋子数 0/1/2/3）配置「道具商店」各道具出现权重/概率 */
