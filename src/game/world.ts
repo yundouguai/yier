@@ -2502,13 +2502,13 @@ export function buildAncientWorld(
 
       const lanternSpecs: [number, number, number, number][] = [];
       const zBandBase = [-0.56, -0.34, -0.14, 0.14, 0.34, 0.56];
-      for (let i = 0; i < 64; i++) {
-        const isLeft = i < 32;
-        const idxInSide = isLeft ? i : i - 32;
-        const frac = idxInSide / 31;
+      for (let i = 0; i < 44; i++) {
+        const isLeft = i < 22;
+        const idxInSide = isLeft ? i : i - 22;
+        const frac = idxInSide / 21;
         const t = isLeft
-          ? THREE.MathUtils.lerp(0.46 * Math.PI, 0.84 * Math.PI, frac)
-          : THREE.MathUtils.lerp(1.16 * Math.PI, 1.54 * Math.PI, frac);
+          ? THREE.MathUtils.lerp(0.64 * Math.PI, 0.88 * Math.PI, frac)
+          : THREE.MathUtils.lerp(1.12 * Math.PI, 1.36 * Math.PI, frac);
         const widthRatio = Math.max(0.42, Math.abs(Math.sin(t)));
         let zBand = zBandBase[(i * 5 + (isLeft ? 0 : 3)) % zBandBase.length] * widthRatio;
         const radialScale = THREE.MathUtils.clamp(1.03 - Math.abs(zBand) * 0.28, 0.8, 1.0);
@@ -2594,12 +2594,12 @@ export function buildAncientWorld(
       });
       const plaqueGeo = new THREE.BoxGeometry(0.115, 0.15, 0.018);
       const wishingPlaques: { group: THREE.Group; phase: number; baseRotZ: number }[] = [];
-      for (let i = 0; i < 18; i++) {
+      for (let i = 0; i < 14; i++) {
         const side = i % 2 === 0 ? -1 : 1;
-        const frac = Math.floor(i / 2) / 8;
+        const frac = Math.floor(i / 2) / 6;
         const t = side < 0
-          ? THREE.MathUtils.lerp(0.32 * Math.PI, 0.80 * Math.PI, frac)
-          : THREE.MathUtils.lerp(1.20 * Math.PI, 1.68 * Math.PI, frac);
+          ? THREE.MathUtils.lerp(0.66 * Math.PI, 0.86 * Math.PI, frac)
+          : THREE.MathUtils.lerp(1.14 * Math.PI, 1.34 * Math.PI, frac);
         const [px, py, lowFrac] = heartPos(t, 0.96);
         const pz = (i % 3 === 0 ? -0.52 : i % 3 === 1 ? 0.52 : -0.34) * (1 - 0.3 * lowFrac);
         const pg = new THREE.Group();
@@ -6216,48 +6216,56 @@ export function buildAncientWorld(
   }
   stage0RunGroup.add(yierRunner);
 
-  // D) 7 只精致小蜜蜂（黄黑条纹胖身体 + 小圆头 + 触角 + 尾刺 + 半透双翅）
+  // D) 5 只亮黄萌系小蜜蜂（金黄占比 80% + 两条细棕黑纹 + 黄色小圆头与亮白半透双翅，远看一眼辨认不发黑）
   const bees: { g: THREE.Group; lw: THREE.Mesh; rw: THREE.Mesh; phase: number }[] = [];
-  const beeYellowMat = mat(0xfacc15, 0.32);
-  const beeDarkMat = mat(0x1f2937, 0.48);
+  const beeYellowMat = new THREE.MeshStandardMaterial({
+    color: 0xffdf2b,
+    emissive: 0xeab308,
+    emissiveIntensity: 0.28,
+    roughness: 0.28,
+  });
+  const beeStripeMat = mat(0x3b2412, 0.55);
   const beeWingMat = new THREE.MeshBasicMaterial({
-    color: 0xf8fafc,
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.78,
+    opacity: 0.88,
     side: THREE.DoubleSide,
   });
   for (let bi = 0; bi < 5; bi++) {
     const bg = new THREE.Group();
-    const bBody = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), beeYellowMat);
-    bBody.scale.set(0.86, 0.86, 1.32);
+    const bBody = new THREE.Mesh(new THREE.SphereGeometry(0.046, 10, 8), beeYellowMat);
+    bBody.scale.set(0.92, 0.9, 1.28);
     bg.add(bBody);
-    for (const sz of [-0.015, 0.015]) {
-      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.014, 10), beeDarkMat);
+    for (const sz of [-0.014, 0.012]) {
+      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.0425, 0.0425, 0.0085, 10), beeStripeMat);
       stripe.rotation.x = Math.PI / 2;
       stripe.position.z = sz;
       bg.add(stripe);
     }
-    const bHead = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), beeDarkMat);
-    bHead.position.set(0, 0.005, 0.048);
+    const bHead = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), beeYellowMat);
+    bHead.position.set(0, 0.006, 0.052);
     bg.add(bHead);
-    const stinger = new THREE.Mesh(new THREE.ConeGeometry(0.01, 0.026, 6), beeDarkMat);
-    stinger.rotation.x = -Math.PI / 2;
-    stinger.position.set(0, 0, -0.056);
-    bg.add(stinger);
     for (const sx of [-1, 1]) {
-      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.028, 4), beeDarkMat);
-      ant.position.set(sx * 0.011, 0.032, 0.056);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 6, 5), beeStripeMat);
+      eye.position.set(sx * 0.014, 0.012, 0.075);
+      bg.add(eye);
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.0028, 0.0028, 0.024, 4), beeStripeMat);
+      ant.position.set(sx * 0.011, 0.035, 0.058);
       ant.rotation.set(0.35, 0, -sx * 0.28);
       bg.add(ant);
     }
-    const lw = new THREE.Mesh(new THREE.CircleGeometry(0.034, 10), beeWingMat);
-    lw.scale.set(1.25, 0.62, 1);
-    lw.position.set(-0.042, 0.032, 0.006);
+    const stinger = new THREE.Mesh(new THREE.ConeGeometry(0.007, 0.018, 6), beeStripeMat);
+    stinger.rotation.x = -Math.PI / 2;
+    stinger.position.set(0, 0, -0.062);
+    bg.add(stinger);
+    const lw = new THREE.Mesh(new THREE.CircleGeometry(0.04, 10), beeWingMat);
+    lw.scale.set(1.3, 0.65, 1);
+    lw.position.set(-0.048, 0.038, 0.006);
     lw.rotation.x = Math.PI / 2;
     bg.add(lw);
-    const rw = new THREE.Mesh(new THREE.CircleGeometry(0.034, 10), beeWingMat);
-    rw.scale.set(1.25, 0.62, 1);
-    rw.position.set(0.042, 0.032, 0.006);
+    const rw = new THREE.Mesh(new THREE.CircleGeometry(0.04, 10), beeWingMat);
+    rw.scale.set(1.3, 0.65, 1);
+    rw.position.set(0.048, 0.038, 0.006);
     rw.rotation.x = Math.PI / 2;
     bg.add(rw);
     stage0RunGroup.add(bg);

@@ -771,7 +771,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
                   <div className="mt-1 space-y-1.5 text-slate-800">
                     {(() => {
-                      const td = CHAR_TALENTS[questPlayer.key];
+                      const td = questPlayer ? CHAR_TALENTS[questPlayer.charKey] : undefined;
+                      if (!td) return null;
                       const rem = questPlayer.talentCharges ?? 0;
                       return (
                         <div
@@ -1253,6 +1254,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
 
           <div className="flex max-w-full items-center justify-center gap-1.5 md:gap-2">
+            <div
+              className="flex h-9 md:h-10 shrink-0 items-center justify-center rounded-2xl border-2 border-slate-300/90 bg-white/95 px-2.5 md:px-3 text-[12px] md:text-[13px] font-extrabold text-slate-700 whitespace-nowrap tabular-nums"
+              style={{ boxShadow: '0 6px 18px rgba(0,0,0,0.12)' }}
+              title="当前大轮数"
+            >
+              第 {snap.roundNumber ?? 1} 轮
+            </div>
+
             <div
               className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-2.5 md:px-3.5 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
               style={{

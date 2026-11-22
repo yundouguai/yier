@@ -52,6 +52,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   timeOfDay: 'morning',
   phase: 'idle',
   turn: 0,
+  roundNumber: 1,
   die: null,
   twinDice: null,
   hudDieFace: 6,

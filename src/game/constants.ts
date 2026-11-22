@@ -258,7 +258,6 @@ export type GraphicsQuality = 'high' | 'medium' | 'low';
 export type CameraMode = 'follow' | 'top' | 'free';
 
 export interface HudPlayerSnapshot {
-  key: CharKey;
   charKey: CharKey;
   name: string;
   species: Species;
@@ -501,6 +500,7 @@ export interface GameHudSnapshot {
   timeOfDay: TimeOfDay;
   phase: GamePhase;
   turn: number;
+  roundNumber: number;
   die: number | null;
   twinDice: [number, number] | null;
   hudDieFace: number;
@@ -706,9 +706,9 @@ export const CHAR_TALENTS: Record<CharKey, CharTalentDef> = {
   },
   caomei: {
     name: '元气蹦跳',
-    shortTag: '前3次补跳',
-    desc: '本局前 3 次外圈移动若未落到己色格，自动补步至前方最近己色格并触发同色大跳（+4）。',
-    maxCharges: 3,
+    shortTag: '前2次补跳',
+    desc: '本局前 2 次外圈移动若未落到己色格，自动补步至前方最近己色格并触发同色大跳（+4）。',
+    maxCharges: 2,
     accentBg: '#fff1f2',
     accentText: '#be123c',
     accentBorder: '#fecdd3',

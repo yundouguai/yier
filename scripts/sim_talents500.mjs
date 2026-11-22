@@ -125,7 +125,7 @@ function runOneGame() {
       roll2: 0,
       stomped: 0,
       turnCount: 0,
-      caomeiJumpLeft: talent === 'caomei' ? 3 : 0,
+      caomeiJumpLeft: talent === 'caomei' ? 2 : 0,
       bubuShieldLeft: talent === 'bubu' ? 3 : 0,
       mochaShieldLeft: talent === 'mocha' ? 1 : 0,
       haiyanSlideLeft: talent === 'haiyan' ? 1 : 0,
