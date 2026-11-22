@@ -785,6 +785,61 @@ export function buildAncientWorld(
     return m;
   };
 
+  const batchStaticGroup = (group: THREE.Object3D, shadowMaxRadius?: number) => {
+    group.updateMatrixWorld(true);
+    const buckets = new Map<
+      string,
+      { mat: THREE.Material; castShadow: boolean; receiveShadow: boolean; geos: THREE.BufferGeometry[] }
+    >();
+    const toRemove: THREE.Mesh[] = [];
+    const tmpPos = new THREE.Vector3();
+    const skipSubtree = (obj: THREE.Object3D): boolean => {
+      let cur: THREE.Object3D | null = obj;
+      while (cur && cur !== group) {
+        if (cur.userData.dynamic) return true;
+        cur = cur.parent;
+      }
+      return false;
+    };
+    group.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.InstancedMesh) return;
+      if (skipSubtree(obj)) return;
+      const m = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+      if (!m) return;
+      let cast = obj.castShadow;
+      if (cast && shadowMaxRadius !== undefined) {
+        obj.getWorldPosition(tmpPos);
+        if (Math.hypot(tmpPos.x, tmpPos.z) > shadowMaxRadius) cast = false;
+      }
+      const recv = obj.receiveShadow;
+      const key = `${m.uuid}|${cast ? 1 : 0}|${recv ? 1 : 0}`;
+      let b = buckets.get(key);
+      if (!b) {
+        b = { mat: m, castShadow: cast, receiveShadow: recv, geos: [] };
+        buckets.set(key, b);
+      }
+      const g = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
+      g.applyMatrix4(obj.matrixWorld);
+      b.geos.push(g);
+      toRemove.push(obj);
+    });
+    toRemove.forEach((m) => m.parent?.remove(m));
+    buckets.forEach((b) => {
+      if (b.geos.length === 0) return;
+      const allHaveUv = b.geos.every((g) => !!g.getAttribute('uv'));
+      if (!allHaveUv) {
+        b.geos.forEach((g) => g.deleteAttribute('uv'));
+      }
+      const merged = mergeGeometries(b.geos, false);
+      b.geos.forEach((g) => g.dispose());
+      if (!merged) return;
+      const mesh = new THREE.Mesh(merged, b.mat);
+      mesh.castShadow = b.castShadow;
+      mesh.receiveShadow = b.receiveShadow;
+      group.add(mesh);
+    });
+  };
+
   /* ================= 1. 地形草地与护城河 ================= */
   const WATER_Y = -0.69;
   const grassTex = createGrassTexture(anisotropy);
@@ -1687,59 +1742,7 @@ export function buildAncientWorld(
         }
       }
     }
-    // 静态树木/灌木/石块按材质合批为少量 Mesh，大幅降低 Draw Call（保留动态柳条与近岸阴影）
-    {
-      treeGroup.updateMatrixWorld(true);
-      const buckets = new Map<
-        string,
-        { mat: THREE.Material; castShadow: boolean; receiveShadow: boolean; geos: THREE.BufferGeometry[] }
-      >();
-      const toRemove: THREE.Mesh[] = [];
-      const tmpPos = new THREE.Vector3();
-      const skipSubtree = (obj: THREE.Object3D): boolean => {
-        let cur: THREE.Object3D | null = obj;
-        while (cur && cur !== treeGroup) {
-          if (cur.userData.dynamic) return true;
-          cur = cur.parent;
-        }
-        return false;
-      };
-      treeGroup.traverse((obj) => {
-        if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.InstancedMesh) return;
-        if (skipSubtree(obj)) return;
-        const m = Array.isArray(obj.material) ? obj.material[0] : obj.material;
-        if (!m) return;
-        obj.getWorldPosition(tmpPos);
-        const nearBoard = Math.hypot(tmpPos.x, tmpPos.z) <= 14.5;
-        const cast = obj.castShadow && nearBoard;
-        const recv = obj.receiveShadow;
-        const key = `${m.uuid}|${cast ? 1 : 0}|${recv ? 1 : 0}`;
-        let b = buckets.get(key);
-        if (!b) {
-          b = { mat: m, castShadow: cast, receiveShadow: recv, geos: [] };
-          buckets.set(key, b);
-        }
-        const g = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone();
-        g.applyMatrix4(obj.matrixWorld);
-        b.geos.push(g);
-        toRemove.push(obj);
-      });
-      toRemove.forEach((m) => m.parent?.remove(m));
-      buckets.forEach((b) => {
-        if (b.geos.length === 0) return;
-        const allHaveUv = b.geos.every((g) => !!g.getAttribute('uv'));
-        if (!allHaveUv) {
-          b.geos.forEach((g) => g.deleteAttribute('uv'));
-        }
-        const merged = mergeGeometries(b.geos, false);
-        b.geos.forEach((g) => g.dispose());
-        if (!merged) return;
-        const mesh = new THREE.Mesh(merged, b.mat);
-        mesh.castShadow = b.castShadow;
-        mesh.receiveShadow = b.receiveShadow;
-        treeGroup.add(mesh);
-      });
-    }
+    batchStaticGroup(treeGroup, 14.5);
     scene.add(treeGroup);
 
     const petalDropGeo = new THREE.CircleGeometry(0.055, 6);
@@ -1854,6 +1857,7 @@ export function buildAncientWorld(
   }
 
   /* ================= 3. 古城石台、城墙、四向城门楼 & 角楼 ================= */
+  const castleGroup = new THREE.Group();
   const stoneDeckTex = createStoneDeckTexture(anisotropy);
   const brickMat = (rx = 1, ry = 1) => {
     const t = createWallBrickTexture(anisotropy);
@@ -1874,7 +1878,7 @@ export function buildAncientWorld(
     m.position.set(x, y, z);
     m.receiveShadow = true;
     m.castShadow = true;
-    scene.add(m);
+    castleGroup.add(m);
     return m;
   };
 
@@ -1888,7 +1892,7 @@ export function buildAncientWorld(
   );
   deck.position.y = 0.05;
   deck.receiveShadow = true;
-  scene.add(deck);
+  castleGroup.add(deck);
 
   const wallMat = brickMat(4.5, 0.3);
   const merlonGeo = new THREE.BoxGeometry(0.62, 0.15, 0.3);
@@ -1899,25 +1903,25 @@ export function buildAncientWorld(
       wh.position.set(sx * 4.365, 0.21, sz * 8.38);
       wh.castShadow = true;
       wh.receiveShadow = true;
-      scene.add(wh);
+      castleGroup.add(wh);
 
       const wv = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.26, 6.88), wallMat);
       wv.position.set(sz * 8.38, 0.21, sx * 4.365);
       wv.castShadow = true;
       wv.receiveShadow = true;
-      scene.add(wv);
+      castleGroup.add(wv);
 
       for (let i = 0; i < 6; i++) {
         const mh = new THREE.Mesh(merlonGeo, merlonMat);
         mh.position.set(sx * (1.45 + i * 1.2), 0.415, sz * 8.38);
         mh.castShadow = true;
-        scene.add(mh);
+        castleGroup.add(mh);
 
         const mv = new THREE.Mesh(merlonGeo, merlonMat);
         mv.rotation.y = Math.PI / 2;
         mv.position.set(sz * 8.38, 0.415, sx * (1.45 + i * 1.2));
         mv.castShadow = true;
-        scene.add(mv);
+        castleGroup.add(mv);
       }
     }
   }
@@ -2090,7 +2094,7 @@ export function buildAncientWorld(
       const a = (q * Math.PI) / 2;
       gate.position.set(Math.sin(a) * 8.38, 0.08, Math.cos(a) * 8.38);
       gate.rotation.y = a;
-      scene.add(gate);
+      castleGroup.add(gate);
     }
 
     // 为其中三座城门修筑青石台阶与垂带石扶手（随机挑一门暂不放台阶，供后续处理）
@@ -2184,10 +2188,13 @@ export function buildAncientWorld(
       const a = (q * Math.PI) / 2;
       stairGrp.position.set(Math.sin(a) * 8.38, 0.08, Math.cos(a) * 8.38);
       stairGrp.rotation.y = a;
-      scene.add(stairGrp);
+      castleGroup.add(stairGrp);
     }
 
     // 唯一无台阶的城门外：福州古风爱心榕树（短粗古干 + 低矮繁茂立体心形树冠 + 垂须气根 + 54 盏小巧红灯笼 + 防闪烁抬升树池）
+  batchStaticGroup(castleGroup);
+  scene.add(castleGroup);
+
     {
       const ha = (skipStairGate * Math.PI) / 2;
       const heartTree = new THREE.Group();
@@ -2410,7 +2417,7 @@ export function buildAncientWorld(
         }
       }
 
-      const leafGeo = new THREE.IcosahedronGeometry(1, 2);
+      const leafGeo = new THREE.IcosahedronGeometry(1, 1);
       const leafMat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.80,
@@ -2832,6 +2839,7 @@ export function buildAncientWorld(
   }
 
   /* ================= 4. 古朴红木漆面棋盘格子 ================= */
+  const boardTileGroup = new THREE.Group();
   const hardwoodTex = createHardwoodFrameTexture(anisotropy);
   const tileCurbMat = new THREE.MeshStandardMaterial({
     map: hardwoodTex,
@@ -2948,7 +2956,7 @@ export function buildAncientWorld(
     base.position.set(x, 0.05, z);
     base.receiveShadow = true;
     base.castShadow = true;
-    scene.add(base);
+    boardTileGroup.add(base);
 
     const inlay = new THREE.Mesh(
       new THREE.BoxGeometry(Math.max(0.2, w - 0.065), 0.024, Math.max(0.2, d - 0.065)),
@@ -2956,7 +2964,7 @@ export function buildAncientWorld(
     );
     inlay.position.set(x, 0.108, z);
     inlay.receiveShadow = true;
-    scene.add(inlay);
+    boardTileGroup.add(inlay);
     return inlay;
   };
 
@@ -2988,7 +2996,7 @@ export function buildAncientWorld(
     outer.position.y = 0;
     outer.receiveShadow = true;
     outer.castShadow = true;
-    scene.add(outer);
+    boardTileGroup.add(outer);
 
     // 略微向质心内缩形成倒角青石嵌面
     const insetPts = ptsXZ.map(([x, z]) => {
@@ -3010,7 +3018,7 @@ export function buildAncientWorld(
     inlay.rotation.x = -Math.PI / 2;
     inlay.position.y = 0.1;
     inlay.receiveShadow = true;
-    scene.add(inlay);
+    boardTileGroup.add(inlay);
     return inlay;
   };
 
@@ -3024,7 +3032,7 @@ export function buildAncientWorld(
     r.rotation.x = -Math.PI / 2;
     r.position.set(x, 0.1215, z);
     r.receiveShadow = true;
-    scene.add(r);
+    boardTileGroup.add(r);
   };
 
   RING_TILES.forEach((t, i) => {
@@ -3249,6 +3257,9 @@ export function buildAncientWorld(
       }
     });
   });
+
+  batchStaticGroup(boardTileGroup);
+  scene.add(boardTileGroup);
 
   /* ================= 5. 1:1 摇摇车手办与基地庭院 ================= */
   const rideToys: RideToyAnim[] = [];
@@ -5653,11 +5664,9 @@ export function buildAncientWorld(
   };
   // 中央骰台上方暖金主灯（柔和照亮棋盘中心与小熊）
   addNightLight(0, 4.6, 0, 0xffb85c, 2.8, 19, 1.35);
-  // 四座熊熊坊/城门暖橘灯笼池
-  addNightLight(8.2, 2.3, 0, 0xff9438, 2.4, 13.5, 1.45);
-  addNightLight(-8.2, 2.3, 0, 0xff9438, 2.4, 13.5, 1.45);
-  addNightLight(0, 2.3, 8.2, 0xff9438, 2.4, 13.5, 1.45);
-  addNightLight(0, 2.3, -8.2, 0xff9438, 2.4, 13.5, 1.45);
+  // 2 盏对角广域暖橘灯覆盖四座熊熊坊/城门（与自发光灯笼配合，减少点光源着色器循环）
+  addNightLight(6.2, 3.0, 6.2, 0xff9a42, 2.6, 18.0, 1.35);
+  addNightLight(-6.2, 3.0, -6.2, 0xff9a42, 2.6, 18.0, 1.35);
   // 爱心古榕树灯笼暖光
   addNightLight(-11.5, 2.5, 0, 0xff9442, 2.6, 13.5, 1.4);
 

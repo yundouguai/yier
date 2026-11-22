@@ -404,10 +404,10 @@ export class FlightChessEngine {
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type =
       this.quality === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
-    if (!this.isSoftwareGl && this.quality !== 'high') {
+    if (!this.isSoftwareGl) {
       this.renderer.shadowMap.autoUpdate = false;
       this.renderer.shadowMap.needsUpdate = true;
-      this.shadowInterval = this.quality === 'low' ? 4 : 2;
+      this.shadowInterval = this.quality === 'low' ? 4 : this.quality === 'medium' ? 2 : 1;
     }
     this.container.appendChild(this.renderer.domElement);
 
@@ -2927,7 +2927,7 @@ export class FlightChessEngine {
     if (this.disposed || this.isSoftwareGl) return;
     const maxDpr = q === 'low' ? 1.5 : 2;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
-    this.renderer.shadowMap.autoUpdate = q === 'high';
+    this.renderer.shadowMap.autoUpdate = false;
     this.shadowInterval = q === 'low' ? 4 : q === 'medium' ? 2 : 1;
     this.renderer.shadowMap.needsUpdate = true;
     if (!this.isContextLost) {
@@ -5483,7 +5483,12 @@ export class FlightChessEngine {
     this.frameCounter++;
 
     if (!this.isSoftwareGl && !this.renderer.shadowMap.autoUpdate) {
-      if (this.frameCounter % this.shadowInterval === 0) {
+      // 高画质静止思考时按 4 帧节流重绘阴影，仅在棋子/骰子动画时每帧刷新
+      const effInterval =
+        this.quality === 'high' && this.anims.length === 0 && this.todBlend >= 1
+          ? 4
+          : this.shadowInterval;
+      if (this.frameCounter % effInterval === 0) {
         this.renderer.shadowMap.needsUpdate = true;
       }
     }
