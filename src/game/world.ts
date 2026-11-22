@@ -241,6 +241,8 @@ export interface WorldRefs {
     bees: { g: THREE.Group; lw: THREE.Mesh; rw: THREE.Mesh; phase: number }[];
     hiveWorldPos: THREE.Vector3;
     treeClimbBase: THREE.Vector3;
+    treeClimbTop: THREE.Vector3;
+    treeTrunkWorld: THREE.Vector3;
     treeAng: number;
   };
   heartTreeNight?: {
@@ -1486,6 +1488,10 @@ export function buildAncientWorld(
   const petals: PetalAnim[] = [];
   const lanternMats: THREE.MeshStandardMaterial[] = [];
   let heartTreeNightData: WorldRefs['heartTreeNight'];
+  const honeyTreeAng = 0.72;
+  const honeyTreeR = moatOuterR(honeyTreeAng) + 1.85;
+  const htx = Math.cos(honeyTreeAng) * honeyTreeR;
+  const htz = Math.sin(honeyTreeAng) * honeyTreeR;
   {
     const barkMat = mat(0x6e4b35, 0.9);
     const darkBarkMat = mat(0x523626, 0.92);
@@ -1525,7 +1531,7 @@ export function buildAncientWorld(
     const moatSafeOuter = (x: number, z: number, pad = 1.45) => {
       const r = Math.hypot(x, z);
       const th = Math.atan2(z, x);
-      return r >= moatOuterR(th) + pad;
+      return r >= moatOuterR(th) + pad && Math.hypot(x - htx, z - htz) >= 2.85;
     };
     const moatSafeInner = (x: number, z: number, pad = 1.2) => {
       const r = Math.hypot(x, z);
@@ -6027,7 +6033,7 @@ export function buildAncientWorld(
       varying float vH;
       void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
-        vH = clamp(normalize(wp.xyz).y, 0.0, 1.0);
+        vH = normalize(wp.xyz).y;
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
@@ -6036,7 +6042,8 @@ export function buildAncientWorld(
       uniform vec3 uHorizon;
       varying float vH;
       void main() {
-        float t = pow(vH, 0.58);
+        float h = clamp(vH, 0.0, 1.0);
+        float t = pow(max(h, 0.0001), 0.58);
         gl_FragColor = vec4(mix(uHorizon, uZenith, t), 1.0);
       }
     `,
@@ -6071,11 +6078,7 @@ export function buildAncientWorld(
     return m;
   };
 
-  // A) 护城河外高大蜂蜜树 + 树上黄金蜂窝（位于外岸树林外缘，避开跑道）
-  const honeyTreeAng = 0.72;
-  const honeyTreeR = moatOuterR(honeyTreeAng) + 1.85;
-  const htx = Math.cos(honeyTreeAng) * honeyTreeR;
-  const htz = Math.sin(honeyTreeAng) * honeyTreeR;
+  // A) 护城河外高大蜂蜜树 + 树上黄金蜂窝（位于外岸空旷草地，不与其他树重叠）
   const honeyTree = new THREE.Group();
   honeyTree.position.set(htx, -0.66, htz);
   honeyTree.rotation.y = Math.atan2(-htx, -htz);
@@ -6087,8 +6090,8 @@ export function buildAncientWorld(
   htTrunk.receiveShadow = true;
   honeyTree.add(htTrunk);
 
-  const htBranch = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 0.82, 8), htBarkMat);
-  htBranch.position.set(0, 2.15, 0.34);
+  const htBranch = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.085, 0.44, 8), htBarkMat);
+  htBranch.position.set(0, 1.98, 0.21);
   htBranch.rotation.x = 1.15;
   honeyTree.add(htBranch);
 
@@ -6107,32 +6110,34 @@ export function buildAncientWorld(
     honeyTree.add(puff);
   }
 
-  // 蜂窝（挂在伸向护城河的树枝下方）
+  // 蜂窝（紧贴挂在伸向护城河的短树枝下方，不悬空）
   const hiveGroup = new THREE.Group();
-  hiveGroup.position.set(0, 1.88, 0.64);
+  hiveGroup.position.set(0, 1.72, 0.36);
   const hiveMatA = mat(0xf59e0b, 0.52);
   const hiveMatB = mat(0xd97706, 0.58);
   for (const [hy, hr, hm] of [
-    [0.12, 0.12, hiveMatB],
-    [0.04, 0.165, hiveMatA],
-    [-0.04, 0.155, hiveMatB],
-    [-0.12, 0.11, hiveMatA],
+    [0.11, 0.11, hiveMatB],
+    [0.035, 0.15, hiveMatA],
+    [-0.035, 0.14, hiveMatB],
+    [-0.11, 0.1, hiveMatA],
   ] as [number, number, THREE.Material][]) {
     const ring = new THREE.Mesh(new THREE.SphereGeometry(hr, 12, 9), hm);
     ring.scale.set(1, 0.62, 1);
     ring.position.y = hy;
     hiveGroup.add(ring);
   }
-  const hiveHole = new THREE.Mesh(new THREE.CircleGeometry(0.042, 10), mat(0x2d1a0b, 0.9));
-  hiveHole.position.set(0, -0.02, 0.155);
+  const hiveHole = new THREE.Mesh(new THREE.CircleGeometry(0.038, 10), mat(0x2d1a0b, 0.9));
+  hiveHole.position.set(0, -0.02, 0.142);
   hiveGroup.add(hiveHole);
   honeyTree.add(hiveGroup);
   scene.add(honeyTree);
 
   honeyTree.updateMatrixWorld(true);
-  const hiveWorldPos = new THREE.Vector3(0, 1.88, 0.72).applyMatrix4(honeyTree.matrixWorld);
-  // 爬树起点紧贴树干外侧（半径留足 0.42 间距，绝不穿进树干）
-  const treeClimbBase = new THREE.Vector3(0, 0, 0.44).applyMatrix4(honeyTree.matrixWorld);
+  const hiveWorldPos = new THREE.Vector3(0, 1.72, 0.36).applyMatrix4(honeyTree.matrixWorld);
+  // 爬树起终点紧贴树干前侧（面朝树干爬行，杜绝悬空或背对树干）
+  const treeClimbBase = new THREE.Vector3(0, 0, 0.31).applyMatrix4(honeyTree.matrixWorld);
+  const treeClimbTop = new THREE.Vector3(0, 1.44, 0.25).applyMatrix4(honeyTree.matrixWorld);
+  const treeTrunkWorld = new THREE.Vector3(0, 0, 0).applyMatrix4(honeyTree.matrixWorld);
 
   // B) 晨跑布布（头戴贴合额头的蓝色运动头巾，零穿模）
   const bubuRunner = makeStage0Bear(CHARS.bubu);
@@ -6221,7 +6226,7 @@ export function buildAncientWorld(
     opacity: 0.78,
     side: THREE.DoubleSide,
   });
-  for (let bi = 0; bi < 7; bi++) {
+  for (let bi = 0; bi < 5; bi++) {
     const bg = new THREE.Group();
     const bBody = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), beeYellowMat);
     bBody.scale.set(0.86, 0.86, 1.32);
@@ -6270,6 +6275,8 @@ export function buildAncientWorld(
     bees,
     hiveWorldPos,
     treeClimbBase,
+    treeClimbTop,
+    treeTrunkWorld,
     treeAng: honeyTreeAng,
   };
 

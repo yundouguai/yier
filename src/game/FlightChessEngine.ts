@@ -296,7 +296,7 @@ export class FlightChessEngine {
     yier: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean };
   };
   private stage0RunState = {
-    bubuTh: 0.15,
+    bubuTh: 0.72 + Math.PI,
     yierPhase: 'climb' as 'climb' | 'steal' | 'climbDown' | 'run',
     yierPhaseT: 0,
     yierTh: 0.72,
@@ -568,13 +568,6 @@ export class FlightChessEngine {
       card.style.alignItems = 'center';
       card.style.gap = '2px';
 
-      const speaker = document.createElement('span');
-      speaker.textContent = label;
-      speaker.style.fontSize = '10px';
-      speaker.style.fontWeight = '700';
-      speaker.style.letterSpacing = '0.08em';
-      speaker.style.color = accent;
-
       const text = document.createElement('span');
       text.style.fontSize = '13px';
       text.style.fontWeight = '600';
@@ -591,7 +584,15 @@ export class FlightChessEngine {
       tail.style.transform = 'rotate(45deg)';
       tail.style.marginTop = '-5px';
 
-      card.appendChild(speaker);
+      if (label) {
+        const speaker = document.createElement('span');
+        speaker.textContent = label;
+        speaker.style.fontSize = '10px';
+        speaker.style.fontWeight = '700';
+        speaker.style.letterSpacing = '0.08em';
+        speaker.style.color = accent;
+        card.appendChild(speaker);
+      }
       card.appendChild(text);
       root.appendChild(card);
       root.appendChild(tail);
@@ -604,8 +605,8 @@ export class FlightChessEngine {
       maiden: makePoemBubble('白衣一二', '#b85c6b'),
     };
     this.stage0Bubbles = {
-      bubu: makePoemBubble('晨跑布布', '#2563eb'),
-      yier: makePoemBubble('偷蜜一二', '#d97706'),
+      bubu: makePoemBubble('', '#2563eb'),
+      yier: makePoemBubble('', '#d97706'),
     };
 
     this.players.forEach((P, pid) => {
@@ -5298,7 +5299,9 @@ export class FlightChessEngine {
     const P = this.players[me];
     const personality: AiPersonality = P?.type === 'ai' ? (P.personality ?? 'tactician') : 'tactician';
     const myPlanes = this.planesOf(me);
+    const doneCount = myPlanes.filter((q) => q.pos === HOME_END).length;
     const activeCount = myPlanes.filter((q) => q.pos >= 0 && q.pos < HOME_END).length;
+    const leadPos = myPlanes.reduce((mx, q) => (q.pos < HOME_END && q.pos > mx ? q.pos : mx), -1);
     const crossThreat = this.oppCrossFlyThreat(me);
     const myTotalItems = Object.values(this.playerItems[me] ?? {}).reduce((a, b) => a + b, 0);
 
@@ -5325,30 +5328,41 @@ export class FlightChessEngine {
       let s = 0;
 
       if (np === HOME_END) {
-        // 骰子刚好到达终点，最高优先级
-        s = (personality === 'rusher' ? 380 : 320) + stackCount * 35;
+        // 骰子刚好到达终点，最高优先级（尚未有棋子进终点时额外加权抢先破蛋）
+        s = (personality === 'rusher' ? 400 : 350) + (doneCount === 0 ? 60 : 0) + stackCount * 35;
       } else if (p.pos >= 51) {
-        // 已在终点前安全小路上：没危险时尽量不浪费步数去反复回弹，留给其他棋子扩大优势
+        // 已在终点前安全小路上：若不会回弹，应积极往前逼近终点；只有回弹才扣分留给其他棋子
         const inDanger = p.pos === 54 && crossThreat.immediate;
         if (inDanger) {
-          s = 78 - (L.bounced ? 14 : 0) + (np !== 54 ? 22 : 0);
+          s = 82 - (L.bounced ? 14 : 0) + (np !== 54 ? 24 : 0);
+        } else if (!L.bounced && np > p.pos) {
+          s =
+            46 +
+            (np - 50) * 9 +
+            (doneCount === 0 ? 34 : 0) -
+            (np === 54 && (crossThreat.immediate || crossThreat.near) ? 28 : 0);
         } else {
           s =
-            -160 -
-            (L.bounced ? 60 : 0) -
+            -155 -
+            (L.bounced ? 55 : 0) -
             (np === 54 && (crossThreat.immediate || crossThreat.near) ? 28 : 0) +
             np * 0.5;
         }
       } else if (p.pos === -1) {
         // 掷出 5 或 6 点可从基地起飞
-        const baseLaunch = personality === 'rusher' ? 92 : personality === 'chill' ? 68 : 78;
-        s = baseLaunch - activeCount * 10;
+        const baseLaunch = personality === 'rusher' ? 90 : personality === 'chill' ? 68 : 76;
+        s = baseLaunch - activeCount * 12;
       } else {
-        // 外圈或起点台棋子：结合性格评估进度、踩人、航线、商店与避险
+        // 外圈或起点台棋子：优先推进领跑棋子进终点，其次再考虑踩人、航线与叠机
+        const isLeadBear = p.pos >= 34 && p.pos === leadPos;
+        const firstGoalBoost = doneCount === 0 && p.pos >= 36 ? 26 : 0;
         s =
           p.pos === 0
             ? 18 * progressMult
-            : 10 + (p.pos * 0.45 + Math.max(0, np - p.pos) * 0.55) * progressMult;
+            : 10 +
+              (p.pos * 0.62 + Math.max(0, np - p.pos) * 0.55) * progressMult +
+              (isLeadBear ? 18 : 0) +
+              firstGoalBoost;
 
         // 统计沿途各停靠环格可撞回家的敌机：
         // 目标价值公式 = 基础踩踏分 + 领先分×领先权重 + (威胁系数 - 1)×威胁权重 + 实时威胁分×28
@@ -5416,7 +5430,9 @@ export class FlightChessEngine {
             s += personality === 'tactician' ? 30 : personality === 'chill' ? 14 : 18;
           }
           if (myPlanes.some((q) => q !== p && q.pos === np)) {
-            s += personality === 'tactician' ? 24 : 12; // 同格叠机协同推进
+            // 叠叠乐仅作温和加分，避免为叠机而放弃推进领跑棋子进终点
+            const stackBonus = personality === 'tactician' ? 10 : 6;
+            s += doneCount === 0 && leadPos >= 36 ? stackBonus * 0.5 : stackBonus;
           }
           const curThreat =
             p.pos >= 1 && p.pos <= 50 ? this.ringThreatScore(this.ringIndexOf(p), me) : 0;
@@ -5426,7 +5442,8 @@ export class FlightChessEngine {
           }
           if (newThreat > 0) {
             const myShieldMult = p.shielded ? 0.2 : 1.0;
-            s -= newThreat * (24 + p.pos * 0.45 * stackCount) * threatMult * myShieldMult;
+            const stackRiskMult = Math.min(2.0, 1 + (stackCount - 1) * 0.3);
+            s -= newThreat * (22 + p.pos * 0.42 * stackRiskMult) * threatMult * myShieldMult;
           }
         }
       }
@@ -7741,68 +7758,81 @@ export class FlightChessEngine {
           return [Math.cos(th) * r, Math.sin(th) * r];
         };
 
-        // A) 布布沿护城河内岸顺时针晨跑
-        st.bubuTh = (st.bubuTh + dt * 0.22) % (Math.PI * 2);
+        // A) 布布沿护城河内岸顺时针匀速慢跑（约 90 秒一圈）
+        st.bubuTh = (st.bubuTh + dt * 0.070) % (Math.PI * 2);
         const [bx, bz] = bubuTrackXZ(st.bubuTh);
         const [bxNext, bzNext] = bubuTrackXZ(st.bubuTh + 0.015);
-        const bStride = t * 10.5;
-        s0.bubu.position.set(bx, -0.63 + Math.abs(Math.sin(bStride)) * 0.055, bz);
+        const bStride = t * 5.2;
+        s0.bubu.position.set(bx, -0.63 + Math.abs(Math.sin(bStride)) * 0.042, bz);
         s0.bubu.rotation.y = Math.atan2(bxNext - bx, bzNext - bz);
         const bPt = s0.bubu.userData.parts as PlaneParts | undefined;
         if (bPt) {
-          bPt.animRoot.rotation.x = 0.12;
-          bPt.leftArm.rotation.x = Math.sin(bStride) * 0.85;
-          bPt.rightArm.rotation.x = -Math.sin(bStride) * 0.85;
-          bPt.leftFoot.rotation.x = -Math.sin(bStride) * 0.9;
-          bPt.rightFoot.rotation.x = Math.sin(bStride) * 0.9;
+          bPt.animRoot.rotation.x = 0.08;
+          bPt.leftArm.rotation.x = Math.sin(bStride) * 0.68;
+          bPt.rightArm.rotation.x = -Math.sin(bStride) * 0.68;
+          bPt.leftFoot.rotation.x = -Math.sin(bStride) * 0.72;
+          bPt.rightFoot.rotation.x = Math.sin(bStride) * 0.72;
           bPt.headPivot.rotation.y =
             t < st.bubuChatUntil && st.bubuChatUntil - t > 1.4 && this.stage0Bubbles.bubu.text.textContent?.includes('晨练')
               ? 0.45
-              : Math.sin(bStride * 0.5) * 0.08;
+              : Math.sin(bStride * 0.5) * 0.06;
         }
         if (t >= st.nextBubuShoutAt && t > st.bubuChatUntil) {
-          st.nextBubuShoutAt = t + 6.5;
+          st.nextBubuShoutAt = t + 9.0;
           this.stage0Bubbles.bubu.text.textContent = '一二一~';
-          st.bubuChatUntil = t + 2.2;
+          st.bubuChatUntil = t + 2.4;
         }
 
-        // B) 一二爬上树 -> 偷蜂蜜 -> 爬下树 -> 被蜜蜂追赶沿外岸逆时针狂奔
+        // B) 一二空手走到树下 -> 面朝树干爬上树 -> 偷蜂蜜 -> 爬下树 -> 被 5 只蜜蜂追赶沿外岸逆时针跑（约 90 秒一圈）
         st.yierPhaseT += dt;
         const yPt = s0.yier.userData.parts as PlaneParts | undefined;
         const yFp = yPt?.headMesh.userData.faceParts as HeadFaceParts | undefined;
-        const climbTopY = s0.hiveWorldPos.y - 0.3;
 
         if (st.yierPhase === 'climb') {
-          const p = Math.min(1, st.yierPhaseT / 4.0);
+          const p = Math.min(1, st.yierPhaseT / 4.2);
+          const climbFrac = p < 0.16 ? 0 : (p - 0.16) / 0.84;
           s0.honeyPot.visible = false;
           s0.sweatDrops.forEach((sd) => { sd.visible = false; });
+          const cy = THREE.MathUtils.lerp(-0.66, s0.treeClimbTop.y, climbFrac);
           s0.yier.position.set(
-            THREE.MathUtils.lerp(s0.treeClimbBase.x, s0.hiveWorldPos.x, p * 0.55),
-            THREE.MathUtils.lerp(-0.66, climbTopY, p),
-            THREE.MathUtils.lerp(s0.treeClimbBase.z, s0.hiveWorldPos.z, p * 0.55),
+            THREE.MathUtils.lerp(s0.treeClimbBase.x, s0.treeClimbTop.x, climbFrac),
+            cy,
+            THREE.MathUtils.lerp(s0.treeClimbBase.z, s0.treeClimbTop.z, climbFrac),
           );
-          s0.yier.lookAt(s0.hiveWorldPos.x, s0.yier.position.y, s0.hiveWorldPos.z);
+          // 身体正面向树干，绝不背对树干
+          s0.yier.lookAt(s0.treeTrunkWorld.x, cy, s0.treeTrunkWorld.z);
           if (yPt) {
-            const cl = Math.sin(t * 8.5);
-            yPt.animRoot.rotation.x = 0.06;
-            yPt.leftArm.rotation.x = -1.15 + cl * 0.48;
-            yPt.rightArm.rotation.x = -1.15 - cl * 0.48;
-            yPt.leftFoot.rotation.x = -cl * 0.55;
-            yPt.rightFoot.rotation.x = cl * 0.55;
-            yPt.headPivot.rotation.x = -0.34;
-            yPt.headPivot.rotation.y = 0;
+            if (p < 0.16) {
+              yPt.animRoot.rotation.x = 0;
+              yPt.leftArm.rotation.x = 0;
+              yPt.rightArm.rotation.x = 0;
+              yPt.leftFoot.rotation.x = 0;
+              yPt.rightFoot.rotation.x = 0;
+              yPt.headPivot.rotation.x = -0.35;
+              yPt.headPivot.rotation.y = 0;
+            } else {
+              const cl = Math.sin(t * 7.0);
+              yPt.animRoot.rotation.x = 0.04;
+              yPt.leftArm.rotation.x = -1.1 + cl * 0.42;
+              yPt.rightArm.rotation.x = -1.1 - cl * 0.42;
+              yPt.leftFoot.rotation.x = -cl * 0.45;
+              yPt.rightFoot.rotation.x = cl * 0.45;
+              yPt.headPivot.rotation.x = -0.28;
+              yPt.headPivot.rotation.y = 0;
+            }
           }
           if (yFp) { yFp.mouthW.visible = true; yFp.mouthOpen.visible = false; }
           s0.bees.forEach((bee, bi) => {
-            const ba = t * 3.2 + bee.phase;
+            bee.g.visible = true;
+            const ba = t * 3.0 + bee.phase;
             bee.g.position.set(
-              s0.hiveWorldPos.x + Math.cos(ba) * 0.28,
-              s0.hiveWorldPos.y + Math.sin(ba * 1.4 + bi) * 0.14,
-              s0.hiveWorldPos.z + Math.sin(ba) * 0.28,
+              s0.hiveWorldPos.x + Math.cos(ba) * 0.24,
+              s0.hiveWorldPos.y + Math.sin(ba * 1.4 + bi) * 0.12,
+              s0.hiveWorldPos.z + Math.sin(ba) * 0.24,
             );
             bee.g.rotation.y = -ba;
-            bee.lw.rotation.z = Math.sin(t * 36 + bi) * 0.6;
-            bee.rw.rotation.z = -Math.sin(t * 36 + bi) * 0.6;
+            bee.lw.rotation.z = Math.sin(t * 34 + bi) * 0.55;
+            bee.rw.rotation.z = -Math.sin(t * 34 + bi) * 0.55;
           });
           if (p >= 1) {
             st.yierPhase = 'steal';
@@ -7811,81 +7841,80 @@ export class FlightChessEngine {
         } else if (st.yierPhase === 'steal') {
           s0.honeyPot.visible = true;
           s0.sweatDrops.forEach((sd) => { sd.visible = false; });
-          const midX = THREE.MathUtils.lerp(s0.treeClimbBase.x, s0.hiveWorldPos.x, 0.55);
-          const midZ = THREE.MathUtils.lerp(s0.treeClimbBase.z, s0.hiveWorldPos.z, 0.55);
-          s0.yier.position.set(midX, climbTopY, midZ);
+          s0.yier.position.copy(s0.treeClimbTop);
+          s0.yier.lookAt(s0.treeTrunkWorld.x, s0.treeClimbTop.y, s0.treeTrunkWorld.z);
           if (yPt) {
             yPt.animRoot.rotation.x = 0;
             yPt.leftArm.rotation.x = -0.82;
             yPt.rightArm.rotation.x = -0.82;
             yPt.leftFoot.rotation.x = 0;
             yPt.rightFoot.rotation.x = 0;
-            yPt.headPivot.rotation.x = 0.08 * Math.sin(t * 8);
+            yPt.headPivot.rotation.x = 0.08 * Math.sin(t * 7);
           }
           if (yFp) { yFp.mouthW.visible = false; yFp.mouthOpen.visible = true; }
           s0.bees.forEach((bee, bi) => {
-            const ba = t * 6.5 + bee.phase;
+            bee.g.visible = true;
+            const ba = t * 6.0 + bee.phase;
             bee.g.position.set(
-              s0.yier.position.x + Math.cos(ba) * 0.34,
-              s0.yier.position.y + 0.28 + Math.sin(ba * 2.0) * 0.16,
-              s0.yier.position.z + Math.sin(ba) * 0.34,
+              s0.yier.position.x + Math.cos(ba) * 0.30,
+              s0.yier.position.y + 0.26 + Math.sin(ba * 2.0) * 0.14,
+              s0.yier.position.z + Math.sin(ba) * 0.30,
             );
             bee.g.rotation.y = -ba;
-            bee.lw.rotation.z = Math.sin(t * 42 + bi) * 0.7;
-            bee.rw.rotation.z = -Math.sin(t * 42 + bi) * 0.7;
+            bee.lw.rotation.z = Math.sin(t * 40 + bi) * 0.65;
+            bee.rw.rotation.z = -Math.sin(t * 40 + bi) * 0.65;
           });
           if (st.yierPhaseT >= 1.5) {
             st.yierPhase = 'climbDown';
             st.yierPhaseT = 0;
           }
         } else if (st.yierPhase === 'climbDown') {
-          // 抱着蜂蜜罐慌张爬下树并接上外岸跑道
-          const p = Math.min(1, st.yierPhaseT / 2.2);
+          // 抱着蜂蜜罐面朝树干爬下，再接上外岸跑道
+          const p = Math.min(1, st.yierPhaseT / 2.3);
           const [runStartX, runStartZ] = yierTrackXZ(s0.treeAng);
-          const startX = THREE.MathUtils.lerp(s0.treeClimbBase.x, s0.hiveWorldPos.x, 0.55);
-          const startZ = THREE.MathUtils.lerp(s0.treeClimbBase.z, s0.hiveWorldPos.z, 0.55);
           const curX = p < 0.72
-            ? THREE.MathUtils.lerp(startX, s0.treeClimbBase.x, p / 0.72)
+            ? THREE.MathUtils.lerp(s0.treeClimbTop.x, s0.treeClimbBase.x, p / 0.72)
             : THREE.MathUtils.lerp(s0.treeClimbBase.x, runStartX, (p - 0.72) / 0.28);
           const curZ = p < 0.72
-            ? THREE.MathUtils.lerp(startZ, s0.treeClimbBase.z, p / 0.72)
+            ? THREE.MathUtils.lerp(s0.treeClimbTop.z, s0.treeClimbBase.z, p / 0.72)
             : THREE.MathUtils.lerp(s0.treeClimbBase.z, runStartZ, (p - 0.72) / 0.28);
           const curY = p < 0.72
-            ? THREE.MathUtils.lerp(climbTopY, -0.66, p / 0.72)
-            : -0.66 + Math.abs(Math.sin(t * 14)) * 0.06;
+            ? THREE.MathUtils.lerp(s0.treeClimbTop.y, -0.66, p / 0.72)
+            : -0.66 + Math.abs(Math.sin(t * 8.5)) * 0.045;
           s0.honeyPot.visible = true;
           s0.yier.position.set(curX, curY, curZ);
           if (p < 0.72) {
-            s0.yier.lookAt(s0.hiveWorldPos.x, curY, s0.hiveWorldPos.z);
+            s0.yier.lookAt(s0.treeTrunkWorld.x, curY, s0.treeTrunkWorld.z);
           } else {
             const [nx, nz] = yierTrackXZ(s0.treeAng - 0.02);
             s0.yier.rotation.y = Math.atan2(nx - runStartX, nz - runStartZ);
           }
           if (yPt) {
-            const dn = Math.sin(t * 13);
-            yPt.animRoot.rotation.x = p < 0.72 ? -0.05 : 0.16;
+            const dn = Math.sin(t * 8.5);
+            yPt.animRoot.rotation.x = p < 0.72 ? -0.04 : 0.12;
             yPt.leftArm.rotation.x = -0.82;
             yPt.rightArm.rotation.x = -0.82;
-            yPt.leftFoot.rotation.x = dn * 0.75;
-            yPt.rightFoot.rotation.x = -dn * 0.75;
-            yPt.headPivot.rotation.x = p < 0.72 ? -0.25 : 0;
+            yPt.leftFoot.rotation.x = dn * 0.65;
+            yPt.rightFoot.rotation.x = -dn * 0.65;
+            yPt.headPivot.rotation.x = p < 0.72 ? -0.2 : 0;
           }
           if (yFp) { yFp.mouthW.visible = false; yFp.mouthOpen.visible = true; }
           s0.sweatDrops.forEach((sd, si) => {
             sd.visible = true;
-            const pulse = (t * 2.8 + si * 0.35) % 1;
-            sd.scale.setScalar(0.65 + Math.sin(pulse * Math.PI) * 0.65);
+            const pulse = (t * 2.5 + si * 0.35) % 1;
+            sd.scale.setScalar(0.65 + Math.sin(pulse * Math.PI) * 0.6);
           });
           s0.bees.forEach((bee, bi) => {
-            const ba = t * 7.5 + bee.phase;
+            bee.g.visible = true;
+            const ba = t * 6.5 + bee.phase;
             bee.g.position.set(
-              curX + Math.cos(ba) * 0.36,
-              curY + 0.45 + Math.sin(ba * 2.1 + bi) * 0.18,
-              curZ + Math.sin(ba) * 0.36,
+              curX + Math.cos(ba) * 0.32,
+              curY + 0.42 + Math.sin(ba * 2.0 + bi) * 0.15,
+              curZ + Math.sin(ba) * 0.32,
             );
             bee.g.rotation.y = -ba;
-            bee.lw.rotation.z = Math.sin(t * 48 + bi) * 0.75;
-            bee.rw.rotation.z = -Math.sin(t * 48 + bi) * 0.75;
+            bee.lw.rotation.z = Math.sin(t * 44 + bi) * 0.7;
+            bee.rw.rotation.z = -Math.sin(t * 44 + bi) * 0.7;
           });
           if (p >= 1) {
             st.yierPhase = 'run';
@@ -7894,9 +7923,11 @@ export class FlightChessEngine {
             st.yierRunSpan = 0;
           }
         } else {
-          const dTh = dt * 0.29;
+          // 约 82 秒跑完一圈（加上爬树共约 90 秒一轮），最后接近蜂蜜树前蜜蜂与蜂蜜罐提前消失
+          const dTh = dt * 0.0766;
           st.yierTh -= dTh;
           st.yierRunSpan += dTh;
+          const chased = st.yierRunSpan < Math.PI * 1.82;
           const [yx, yz] = yierTrackXZ(st.yierTh);
           const [yxNext, yzNext] = yierTrackXZ(st.yierTh - 0.015);
           const ydx = yxNext - yx;
@@ -7904,50 +7935,57 @@ export class FlightChessEngine {
           const yLen = Math.hypot(ydx, ydz) || 1;
           const ynx = ydx / yLen;
           const ynz = ydz / yLen;
-          const yStride = t * 14.5;
-          s0.honeyPot.visible = true;
-          s0.yier.position.set(yx, -0.66 + Math.abs(Math.sin(yStride)) * 0.075, yz);
+          const yStride = t * (chased ? 7.2 : 5.4);
+          s0.honeyPot.visible = chased;
+          s0.yier.position.set(yx, -0.66 + Math.abs(Math.sin(yStride)) * (chased ? 0.052 : 0.04), yz);
           s0.yier.rotation.y = Math.atan2(ynx, ynz);
           if (yPt) {
-            yPt.animRoot.rotation.x = 0.18;
-            yPt.leftArm.rotation.x = -0.82;
-            yPt.rightArm.rotation.x = -0.82;
-            yPt.leftFoot.rotation.x = -Math.sin(yStride) * 1.05;
-            yPt.rightFoot.rotation.x = Math.sin(yStride) * 1.05;
+            yPt.animRoot.rotation.x = chased ? 0.14 : 0.08;
+            yPt.leftArm.rotation.x = chased ? -0.82 : Math.sin(yStride) * 0.68;
+            yPt.rightArm.rotation.x = chased ? -0.82 : -Math.sin(yStride) * 0.68;
+            yPt.leftFoot.rotation.x = -Math.sin(yStride) * (chased ? 0.85 : 0.72);
+            yPt.rightFoot.rotation.x = Math.sin(yStride) * (chased ? 0.85 : 0.72);
             yPt.headPivot.rotation.x = 0;
-            yPt.headPivot.rotation.y = Math.sin(t * 3.5) * 0.28;
+            yPt.headPivot.rotation.y = chased ? Math.sin(t * 2.8) * 0.24 : Math.sin(yStride * 0.5) * 0.06;
           }
-          if (yFp) { yFp.mouthW.visible = false; yFp.mouthOpen.visible = true; }
+          if (yFp) {
+            yFp.mouthW.visible = !chased;
+            yFp.mouthOpen.visible = chased;
+          }
           s0.sweatDrops.forEach((sd, si) => {
-            sd.visible = true;
-            const pulse = (t * 2.8 + si * 0.35) % 1;
-            sd.scale.setScalar(0.65 + Math.sin(pulse * Math.PI) * 0.65);
+            sd.visible = chased;
+            if (chased) {
+              const pulse = (t * 2.5 + si * 0.35) % 1;
+              sd.scale.setScalar(0.65 + Math.sin(pulse * Math.PI) * 0.6);
+            }
           });
           s0.bees.forEach((bee, bi) => {
-            const lag = 0.42 + (bi % 3) * 0.18;
-            const side = (bi - 3) * 0.08;
+            bee.g.visible = chased;
+            if (!chased) return;
+            const lag = 0.42 + (bi % 3) * 0.16;
+            const side = (bi - 2) * 0.09;
             bee.g.position.set(
-              yx - ynx * lag + -ynz * side + Math.sin(t * 9 + bi) * 0.08,
-              -0.12 + Math.sin(t * 11 + bi * 1.3) * 0.16,
-              yz - ynz * lag + ynx * side + Math.cos(t * 8 + bi) * 0.08,
+              yx - ynx * lag + -ynz * side + Math.sin(t * 7 + bi) * 0.07,
+              -0.14 + Math.sin(t * 9 + bi * 1.3) * 0.14,
+              yz - ynz * lag + ynx * side + Math.cos(t * 6.5 + bi) * 0.07,
             );
             bee.g.rotation.y = Math.atan2(ynx, ynz);
-            bee.lw.rotation.z = Math.sin(t * 48 + bi) * 0.75;
-            bee.rw.rotation.z = -Math.sin(t * 48 + bi) * 0.75;
+            bee.lw.rotation.z = Math.sin(t * 44 + bi) * 0.72;
+            bee.rw.rotation.z = -Math.sin(t * 44 + bi) * 0.72;
           });
 
           let dAng = ((st.bubuTh - st.yierTh + Math.PI) % (Math.PI * 2)) - Math.PI;
           if (dAng < -Math.PI) dAng += Math.PI * 2;
-          if (Math.abs(dAng) < 0.30 && t - st.lastEncounterAt > 11) {
+          if (Math.abs(dAng) < 0.26 && t - st.lastEncounterAt > 25) {
             st.lastEncounterAt = t;
             this.stage0Bubbles.bubu.text.textContent = '一二宝，你也在晨练啊~';
-            st.bubuChatUntil = t + 3.6;
+            st.bubuChatUntil = t + 3.8;
             st.yierChatDelayAt = t + 0.55;
           }
           if (st.yierChatDelayAt > 0 && t >= st.yierChatDelayAt) {
             st.yierChatDelayAt = -1;
             this.stage0Bubbles.yier.text.textContent = '蜂蜜好好吃~';
-            st.yierChatUntil = t + 3.4;
+            st.yierChatUntil = t + 3.6;
           }
           if (st.yierRunSpan >= Math.PI * 2) {
             st.yierPhase = 'climb';

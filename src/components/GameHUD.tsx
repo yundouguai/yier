@@ -339,39 +339,46 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           giftOpenedKey !== snap.giftQuestEvent.key ? (
             <div
               key={`gift-box-${snap.giftQuestEvent.key}`}
-              className="fixed inset-0 z-[22] flex items-center justify-center p-4 pointer-events-none"
+              className="pointer-events-none fixed inset-0 z-[22] flex items-center justify-center p-4"
             >
-              <button
-                type="button"
-                onClick={() => setGiftOpenedKey(snap.giftQuestEvent!.key)}
-                className="pointer-events-auto group flex flex-col items-center gap-2.5 rounded-3xl border border-white/80 bg-white/85 px-6 py-5 shadow-[0_14px_36px_rgba(15,23,42,0.22)] backdrop-blur-md transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer anim-card-pop"
-                style={{
-                  borderColor: `${snap.giftQuestEvent.playerColor}99`,
-                }}
-              >
-                <div className="flex items-center gap-1.5 text-sm md:text-base font-extrabold text-slate-900">
-                  <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={22} />
-                  <span>
-                    {snap.giftQuestEvent.playerName} 完成
-                    {snap.giftQuestEvent.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}
-                  </span>
+              <div className="hud-gift-toast-inner flex max-w-[calc(100vw-24px)] flex-col items-center">
+                <div
+                  className="mb-2 flex flex-col items-center justify-center gap-0.5 max-w-[calc(100vw-28px)] rounded-3xl bg-white/75 px-5 py-2 text-center text-sm sm:text-base font-extrabold text-slate-900 shadow-[0_6px_18px_rgba(0,0,0,0.14)] backdrop-blur-sm anim-card-pop"
+                  style={{
+                    border: `1.5px solid ${snap.giftQuestEvent.playerColor}99`,
+                    textShadow: '0 1px 2px rgba(255,255,255,0.85)',
+                  }}
+                >
+                  <div className="flex flex-wrap items-center justify-center gap-x-1.5">
+                    <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={22} />
+                    <span>
+                      {snap.giftQuestEvent.playerName} 完成
+                      {snap.giftQuestEvent.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}
+                    </span>
+                  </div>
+                  <div className="text-xs sm:text-sm font-bold text-amber-700">
+                    点击礼盒开启奖励（{giftCountdown}秒后自动打开）
+                  </div>
                 </div>
-                <div className="relative flex h-28 w-28 items-center justify-center">
-                  {/* 旋转光芒底盘 */}
+                <button
+                  type="button"
+                  onClick={() => setGiftOpenedKey(snap.giftQuestEvent!.key)}
+                  aria-label="点击礼盒开启奖励"
+                  className="pointer-events-auto relative flex h-40 w-40 md:h-48 md:w-48 items-center justify-center bg-transparent border-0 p-0 cursor-pointer transition-transform duration-200 hover:scale-105 active:scale-95 focus:outline-none"
+                >
                   <div
-                    className="anim-gift-rays absolute inset-0 rounded-full opacity-65 blur-[2px]"
+                    className="anim-gift-rays absolute inset-1 rounded-full opacity-70 blur-[2px]"
                     style={{
                       background:
                         snap.giftQuestEvent.questType === 'bubu'
-                          ? 'repeating-conic-gradient(from 0deg, rgba(253,224,71,0.52) 0deg 15deg, rgba(147,197,253,0.12) 15deg 30deg)'
-                          : 'repeating-conic-gradient(from 0deg, rgba(253,224,71,0.55) 0deg 15deg, rgba(244,114,182,0.14) 15deg 30deg)',
+                          ? 'repeating-conic-gradient(from 0deg, rgba(253,224,71,0.55) 0deg 15deg, rgba(147,197,253,0.12) 15deg 30deg)'
+                          : 'repeating-conic-gradient(from 0deg, rgba(253,224,71,0.58) 0deg 15deg, rgba(244,114,182,0.14) 15deg 30deg)',
                       maskImage: 'radial-gradient(circle, black 35%, transparent 72%)',
                       WebkitMaskImage: 'radial-gradient(circle, black 35%, transparent 72%)',
                     }}
                   />
-                  {/* 柔和呼吸光晕 */}
                   <div
-                    className="absolute inset-2 rounded-full opacity-75 blur-md animate-pulse"
+                    className="absolute inset-4 rounded-full opacity-75 blur-md animate-pulse"
                     style={{
                       background:
                         snap.giftQuestEvent.questType === 'bubu'
@@ -379,50 +386,22 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                           : 'radial-gradient(circle, #fef08a 0%, #f9a8d4 60%, transparent 100%)',
                     }}
                   />
-                  {/* 闪烁星芒点缀 */}
-                  <span className="absolute left-2 top-2 text-sm text-amber-400 animate-ping" style={{ animationDuration: '1.8s' }}>✦</span>
-                  <span className="absolute right-2 top-3 text-xs text-amber-500 animate-pulse">✦</span>
-                  <span className="absolute left-3 bottom-3 text-xs text-yellow-400 animate-pulse">✦</span>
-                  {/* 摇晃蓄力待开礼盒 */}
-                  <svg
-                    viewBox="0 0 80 80"
-                    className="anim-gift-wiggle relative h-22 w-22 drop-shadow-[0_10px_18px_rgba(245,158,11,0.34)]"
-                    aria-hidden="true"
-                  >
-                    <rect
-                      x="14"
-                      y="32"
-                      width="52"
-                      height="36"
-                      rx="7"
-                      fill={snap.giftQuestEvent.questType === 'bubu' ? '#60a5fa' : '#f472b6'}
-                    />
-                    <rect
-                      x="10"
-                      y="22"
-                      width="60"
-                      height="13"
-                      rx="5"
-                      fill={snap.giftQuestEvent.questType === 'bubu' ? '#3b82f6' : '#ec4899'}
-                    />
-                    <rect x="35" y="22" width="10" height="46" fill="#fde047" />
-                    <rect x="14" y="45" width="52" height="8" fill="#fde047" opacity="0.92" />
-                    <path
-                      d="M40 22 C30 8, 17 14, 24 22 Z M40 22 C50 8, 63 14, 56 22 Z"
-                      fill="#facc15"
-                    />
-                    <circle cx="40" cy="22" r="4.5" fill="#eab308" />
-                  </svg>
-                  {/* 右下角动态点击手势 + 波纹引导 */}
-                  <div className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex items-center justify-center">
-                    <span className="absolute h-7 w-7 rounded-full border-2 border-amber-400/80 animate-ping" />
-                    <span className="anim-gift-tap relative text-xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.28)]">👆</span>
+                  <span className="absolute left-3 top-3 text-base text-amber-400 animate-ping" style={{ animationDuration: '1.8s' }}>✦</span>
+                  <span className="absolute right-3 top-4 text-sm text-amber-500 animate-pulse">✦</span>
+                  <span className="absolute left-4 bottom-4 text-sm text-yellow-400 animate-pulse">✦</span>
+                  <img
+                    src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
+                    alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼礼盒' : '一二的馈赠礼盒'}
+                    loading="eager"
+                    decoding="sync"
+                    className="anim-gift-wiggle relative h-36 w-36 md:h-44 md:w-44 shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]"
+                  />
+                  <div className="pointer-events-none absolute bottom-2 right-2 flex items-center justify-center">
+                    <span className="absolute h-8 w-8 rounded-full border-2 border-amber-400/85 animate-ping" />
+                    <span className="anim-gift-tap relative text-2xl drop-shadow-[0_2px_6px_rgba(0,0,0,0.32)]">👆</span>
                   </div>
-                </div>
-                <div className="rounded-full bg-amber-50 border border-amber-200 px-3.5 py-1 text-xs md:text-sm font-bold text-amber-700">
-                  点击礼盒开启奖励（{giftCountdown}秒后自动打开）
-                </div>
-              </button>
+                </button>
+              </div>
             </div>
           ) : (
           <div
