@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { beep } from '../game/audio';
 import {
+  CHAR_TALENTS,
   CameraMode,
   GameHudSnapshot,
   GraphicsQuality,
@@ -118,6 +119,8 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   // 启动时预加载全部 7 张轻量 WebP 表情包到内存，触发时零等待秒开
   useEffect(() => {
     const urls = [
+      './assets/yier_gift_box_closed.webp',
+      './assets/bubu_gift_box_closed.webp',
       './assets/yier_gift_box.webp',
       './assets/bubu_gift_box.webp',
       './assets/item_sixDie.webp',
@@ -390,7 +393,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   <span className="absolute right-3 top-4 text-sm text-amber-500 animate-pulse">✦</span>
                   <span className="absolute left-4 bottom-4 text-sm text-yellow-400 animate-pulse">✦</span>
                   <img
-                    src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
+                    src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box_closed.webp' : 'yier_gift_box_closed.webp'}`}
                     alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼礼盒' : '一二的馈赠礼盒'}
                     loading="eager"
                     decoding="sync"
@@ -436,7 +439,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 </div>
               </div>
               <img
-                src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}`}
+                src={`./assets/${snap.giftQuestEvent.questType === 'bubu' ? 'bubu_gift_box.webp' : 'yier_gift_box.webp'}?k=${snap.giftQuestEvent.key}`}
                 alt={snap.giftQuestEvent.questType === 'bubu' ? '布布不烦恼' : '一二的馈赠'}
                 loading="eager"
                 decoding="sync"
@@ -767,6 +770,32 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </button>
 
                   <div className="mt-1 space-y-1.5 text-slate-800">
+                    {(() => {
+                      const td = CHAR_TALENTS[questPlayer.key];
+                      const rem = questPlayer.talentCharges ?? 0;
+                      return (
+                        <div
+                          className="rounded-lg border px-1.5 py-1 text-[10px]"
+                          style={{
+                            backgroundColor: td.accentBg,
+                            borderColor: td.accentBorder,
+                          }}
+                          title={td.desc}
+                        >
+                          <div className="flex items-center justify-between font-extrabold" style={{ color: td.accentText }}>
+                            <span>✨ {td.name}</span>
+                            {td.maxCharges > 0 ? (
+                              <span className="tabular-nums">剩余 {rem}/{td.maxCharges}</span>
+                            ) : (
+                              <span>已生效</span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 text-[9.5px] leading-snug text-slate-600">
+                            {td.shortTag}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div>
                       <div className="flex items-center justify-between text-[11px] font-extrabold">
                         <span>🎲 一二的馈赠</span>

@@ -1,7 +1,7 @@
 // 无头百局模拟器：按当前《熊熊村 · 飞行棋大作战》完整规则统计各阶段回合数、拆散次数与胜率
-// 用法: node scripts/sim100.mjs [局数，默认100]
+// 用法: node scripts/sim100.mjs [局数，默认500]
 
-const GAMES = Math.max(1, parseInt(process.argv[2] || '100', 10) || 100);
+const GAMES = Math.max(1, parseInt(process.argv[2] || '500', 10) || 500);
 const HOME_END = 56;
 const FLIGHT_FROM = 18;
 const FLIGHT_STEP = 12;
@@ -71,8 +71,8 @@ function simulateMove(pos, die) {
   return { pos: np, ringStops, jump, fly, bounced };
 }
 
-function rollNaturalDie(turnNo) {
-  const minFace = turnNo === 1 ? 4 : turnNo === 2 ? 3 : turnNo === 3 ? 2 : 1;
+function rollNaturalDie(turnNo, isBonus = false) {
+  const minFace = isBonus ? 1 : turnNo === 1 ? 4 : turnNo === 2 ? 3 : turnNo === 3 ? 2 : 1;
   return minFace + Math.floor(Math.random() * (7 - minFace));
 }
 
@@ -98,6 +98,9 @@ function runOneGame() {
   let totalItemsUsed = 0;
   const stageTurns = [0, 0, 0, 0];
   const stageRolls = [0, 0, 0, 0];
+  const stageSingleStompHome = [0, 0, 0, 0];
+  const stageStackSplits = [0, 0, 0, 0];
+  const stageShieldBreaks = [0, 0, 0, 0];
   const finishedOrder = [];
 
   const getStage = () => {
@@ -120,8 +123,10 @@ function runOneGame() {
     let keepRolling = true;
     let usedAtkDef = false;
     let usedDef = false;
+    let turnLoop = 0;
 
     while (keepRolling && finishedOrder.length < 1 && totalRolls < 4000) {
+      const curStageNow = getStage();
       keepRolling = false;
       if (!usedDef && P.items.shield > 0) {
         const unshielded = P.planes.filter((q) => q.pos >= 1 && q.pos <= 50 && !q.shielded);
@@ -144,6 +149,7 @@ function runOneGame() {
           if (sameStack.some((q) => q.shielded)) {
             sameStack.forEach((q) => (q.shielded = false));
             shieldBreaks++;
+                stageShieldBreaks[curStageNow]++;
           } else {
             sameStack.forEach((q) => (q.pos = Math.max(0, q.pos - 6)));
             players[tgt.pid].stomped++;
@@ -180,14 +186,14 @@ function runOneGame() {
       }
 
       totalRolls++;
-      stageRolls[getStage()]++;
-      let die = rollNaturalDie(P.turnCount);
+      stageRolls[curStageNow]++;
+      let die = rollNaturalDie(P.turnCount, turnLoop > 0);
       let allowTakeoff = false;
       let suppressSixBonus = useSix || useTwin;
 
       if (useTwin) {
-        const d1 = rollNaturalDie(P.turnCount);
-        const d2 = rollNaturalDie(P.turnCount);
+        const d1 = rollNaturalDie(P.turnCount, turnLoop > 0);
+        const d2 = rollNaturalDie(P.turnCount, turnLoop > 0);
         die = d1 + d2;
         allowTakeoff = die >= 5;
         if (d1 === 1 || d2 === 1) P.roll1++;
@@ -261,14 +267,17 @@ function runOneGame() {
               if (hits.some((h) => h.shielded)) {
                 hits.forEach((h) => (h.shielded = false));
                 shieldBreaks++;
+                stageShieldBreaks[curStageNow]++;
               } else {
                 if (hits.length === 1) {
                   hits[0].pos = -1;
                   singleStompHome++;
+                  stageSingleStompHome[curStageNow]++;
                 } else {
                   hits.sort((a, b) => a.idx - b.idx);
                   hits.forEach((h, idx) => (h.pos = Math.max(0, h.pos - (6 + idx))));
                   stackSplits++;
+                  stageStackSplits[curStageNow]++;
                 }
                 op.stomped++;
                 if (op.stomped >= 2) {
@@ -286,14 +295,17 @@ function runOneGame() {
             if (hits.some((h) => h.shielded)) {
               hits.forEach((h) => (h.shielded = false));
               shieldBreaks++;
+                stageShieldBreaks[curStageNow]++;
             } else {
               if (hits.length === 1) {
                 hits[0].pos = -1;
                 singleStompHome++;
+                  stageSingleStompHome[curStageNow]++;
               } else {
                 hits.sort((a, b) => a.idx - b.idx);
                 hits.forEach((h, idx) => (h.pos = Math.max(0, h.pos - (6 + idx))));
                 stackSplits++;
+                  stageStackSplits[curStageNow]++;
               }
             }
           }
@@ -320,6 +332,7 @@ function runOneGame() {
       if (gotSixBonus || useRefuel) {
         keepRolling = true;
       }
+      turnLoop++;
     }
     turn = (turn + 1) % 4;
   }
@@ -330,6 +343,9 @@ function runOneGame() {
     totalRolls,
     stageTurns,
     stageRolls,
+    stageSingleStompHome,
+    stageStackSplits,
+    stageShieldBreaks,
     singleStompHome,
     stackSplits,
     shieldBreaks,
@@ -356,3 +372,12 @@ for (let s = 0; s < 4; s++) {
 }
 console.log('');
 console.log(`单熊踩回基地: ${avg((r) => r.singleStompHome).toFixed(1)} 次/局 | 多熊拆散分摊: ${avg((r) => r.stackSplits).toFixed(1)} 次/局 | 破盾: ${avg((r) => r.shieldBreaks).toFixed(1)} 次/局 | 道具使用: ${avg((r) => r.totalItemsUsed).toFixed(1)} 次/局`);
+console.log('');
+console.log('--- 各阶段踩踏次数统计（平均每局）---');
+for (let s = 0; s < 4; s++) {
+  const sHome = avg((r) => r.stageSingleStompHome[s]);
+  const sSplit = avg((r) => r.stageStackSplits[s]);
+  const sShield = avg((r) => r.stageShieldBreaks[s]);
+  const sTotal = sHome + sSplit;
+  console.log(`阶段 ${s}: 合计踩踏 ${sTotal.toFixed(1)} 次（单熊回基地 ${sHome.toFixed(1)} 次 / 叠叠乐拆散 ${sSplit.toFixed(1)} 次 / 破盾格挡 ${sShield.toFixed(1)} 次）`);
+}

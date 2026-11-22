@@ -258,6 +258,7 @@ export type GraphicsQuality = 'high' | 'medium' | 'low';
 export type CameraMode = 'follow' | 'top' | 'free';
 
 export interface HudPlayerSnapshot {
+  key: CharKey;
   charKey: CharKey;
   name: string;
   species: Species;
@@ -269,6 +270,7 @@ export interface HudPlayerSnapshot {
   active: boolean;
   items: Record<ItemType, number>;
   quest: PlayerQuestState;
+  talentCharges?: number;
   kda: PlayerKdaStats;
 }
 
@@ -679,6 +681,73 @@ export const CHARS: Record<CharKey, CharacterDef> = {
     colorLight: 0xa9cde4,
     baseTint: 0xe4edf4,
     uiColor: '#3f8dbb',
+  },
+};
+
+export interface CharTalentDef {
+  name: string;
+  shortTag: string;
+  desc: string;
+  maxCharges: number; // 0 = 被动/开局即时生效
+  accentBg: string;
+  accentText: string;
+  accentBorder: string;
+}
+
+export const CHAR_TALENTS: Record<CharKey, CharTalentDef> = {
+  yier: {
+    name: '甜梦先发',
+    shortTag: '开局站起点',
+    desc: '开局自动派 1 只小熊直接站上 START 起点台，第 1 回合即可出圈前进。',
+    maxCharges: 0,
+    accentBg: '#f1f5f9',
+    accentText: '#334155',
+    accentBorder: '#cbd5e1',
+  },
+  caomei: {
+    name: '元气蹦跳',
+    shortTag: '前3次补跳',
+    desc: '本局前 3 次外圈移动若未落到己色格，自动补步至前方最近己色格并触发同色大跳（+4）。',
+    maxCharges: 3,
+    accentBg: '#fff1f2',
+    accentText: '#be123c',
+    accentBorder: '#fecdd3',
+  },
+  xiangyu: {
+    name: '星愿百宝袋',
+    shortTag: '开局2张卡',
+    desc: '开局自动获得 2 张随机基础道具卡（蛋糕 / 奶茶 / 饼干 / 泡泡罩，不含奶油派炸弹）。',
+    maxCharges: 0,
+    accentBg: '#f5f3ff',
+    accentText: '#6d28d9',
+    accentBorder: '#ddd6fe',
+  },
+  bubu: {
+    name: '三盾守门',
+    shortTag: '前3只带盾',
+    desc: '本局前 3 只从基地起飞的小熊，登上起点台时自动套上 1 层软绵绵泡泡罩。',
+    maxCharges: 3,
+    accentBg: '#fffbeb',
+    accentText: '#b45309',
+    accentBorder: '#fde68a',
+  },
+  mocha: {
+    name: '茶香反震',
+    shortTag: '破盾震退3格',
+    desc: '本局第 1 只起飞小熊自带泡泡罩；且全局任意护盾被踩碎时，将踩踏方震退 3 格。',
+    maxCharges: 1,
+    accentBg: '#ecfdf5',
+    accentText: '#047857',
+    accentBorder: '#a7f3d0',
+  },
+  haiyan: {
+    name: '顺风破蛋',
+    shortTag: '首熊直达终点',
+    desc: '己方第 1 只小熊到达终点入口及走廊（最后 6 格）时，直接顺风滑入终点完成归位。',
+    maxCharges: 1,
+    accentBg: '#f0f9ff',
+    accentText: '#0369a1',
+    accentBorder: '#bae6fd',
   },
 };
 

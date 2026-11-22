@@ -17,6 +17,7 @@ import {
   AI_PERSONALITY_ORDER,
   AiPersonality,
   CHARS,
+  CHAR_TALENTS,
   CharKey,
   CameraMode,
   FLIGHT_FROM,
@@ -219,6 +220,8 @@ export class FlightChessEngine {
   private shopRingSet = new Set<number>();
   private playerItems: Record<ItemType, number>[] = [];
   private playerQuests: PlayerQuestState[] = [];
+  private talentCharges: number[] = [];
+  private lastCaptureRecoilTriggered = false;
   private playerKda: PlayerKdaStats[] = [];
   private turnUsedAtkDef = false;
   private turnUsedDef = false;
@@ -241,6 +244,7 @@ export class FlightChessEngine {
   // AI 性格、威胁/记仇系数与拟人化发言状态
   private offenseScores: number[][] = [];
   private playerTurnCount: number[] = [];
+  private isBonusRollThisTurn = false;
   private itemLastGainedTurn: Record<ItemType, number>[] = [];
   private latestEmote: HudEmoteEvent | null = null;
   private giftQuestEvent: GiftQuestEvent | null = null;
@@ -517,6 +521,16 @@ export class FlightChessEngine {
       shield: 0,
       missile: 0,
     }));
+    this.talentCharges = this.players.map((P) => CHAR_TALENTS[P.key].maxCharges);
+    const basicPool: ItemType[] = ['sixDie', 'twinDice', 'refuel', 'shield'];
+    this.players.forEach((P, pid) => {
+      if (P.key === 'xiangyu') {
+        for (let k = 0; k < 2; k++) {
+          const it = basicPool[Math.floor(Math.random() * basicPool.length)];
+          this.playerItems[pid][it] = (this.playerItems[pid][it] ?? 0) + 1;
+        }
+      }
+    });
     this.playerQuests = this.players.map(() => ({
       roll1: 0,
       roll2: 0,
@@ -615,7 +629,7 @@ export class FlightChessEngine {
         const data: PlaneData = {
           pid,
           idx: i,
-          pos: -1,
+          pos: P.key === 'yier' && i === 0 ? 0 : -1,
           animating: false,
           phase: pid * 1.3 + i * 0.95,
           shielded: false,
@@ -1250,6 +1264,7 @@ export class FlightChessEngine {
       players: this.players.map((pl, i) => {
         const rankIdx = this.finishedOrder.indexOf(i);
         return {
+          key: P.key,
           charKey: pl.key,
           name: pl.name,
           species: pl.species,
@@ -1261,6 +1276,7 @@ export class FlightChessEngine {
           active: this.turn === i && this.phase !== 'over' && P !== undefined,
           items: { ...this.playerItems[i] },
           quest: { ...this.playerQuests[i] },
+          talentCharges: this.talentCharges[i] ?? 0,
           kda: { ...this.playerKda[i] },
         };
       }),
@@ -3526,8 +3542,17 @@ export class FlightChessEngine {
   }
 
   private rollNaturalDie(): number {
+    // 仅本回合第一次投骰享受前期保底（第1/2/3回合下限 4/3/2），连投或额外投骰走纯随机 1..6
     const turnNo = this.playerTurnCount[this.turn] ?? 4;
-    const minFace = turnNo === 1 ? 4 : turnNo === 2 ? 3 : turnNo === 3 ? 2 : 1;
+    const minFace = this.isBonusRollThisTurn
+      ? 1
+      : turnNo === 1
+        ? 4
+        : turnNo === 2
+          ? 3
+          : turnNo === 3
+            ? 2
+            : 1;
     return minFace + Math.floor(Math.random() * (7 - minFace));
   }
 
@@ -4460,6 +4485,7 @@ export class FlightChessEngine {
   }
 
   private async captureAt(plane: PlaneData): Promise<number> {
+    this.lastCaptureRecoilTriggered = false;
     if (plane.pos < 1 || plane.pos > 50) return 0;
     const r = this.ringIndexOf(plane);
     const victims = this.planes.filter(
@@ -4536,8 +4562,33 @@ export class FlightChessEngine {
     }
 
     const hitCount = toSendHome.length + toSplitRetreat.length;
+    const mochaDefPid = defendedPids.find((id) => this.players[id]?.key === 'mocha');
+    const triggerMochaRecoil = async () => {
+      if (mochaDefPid === undefined || plane.pos < 1 || plane.pos > 50) return;
+      this.lastCaptureRecoilTriggered = true;
+      const mochaName = this.players[mochaDefPid].name;
+      const attackerStack = this.planesOf(plane.pid).filter((q) => q.pos === plane.pos);
+      const recoilPos = Math.max(0, plane.pos - 3);
+      // 等待攻击方落地跳跃动画完全结束再执行震退，避免两个补间争抢坐标
+      let waitMs = 0;
+      while (attackerStack.some((a) => a.animating) && !this.disposed && waitMs < 900) {
+        await this.sleep(30);
+        waitMs += 30;
+      }
+      if (this.disposed) return;
+      this.setMsg(`🍵 ${mochaName} 触发「茶香反震」，泡泡罩将 ${attackerName} 震退 3 格！`, this.players[mochaDefPid].uiColor);
+      await Promise.all(attackerStack.map((a) => this.knockBackTo(a, recoilPos)));
+      this.relayout();
+      this.syncShieldVisuals();
+    };
+
     if (defendedPids.length > 0 && hitCount === 0) {
       beep(680, 0.16, 'triangle', 0.15);
+      if (mochaDefPid !== undefined && plane.pos >= 1 && plane.pos <= 50) {
+        await triggerMochaRecoil();
+        await this.sleep(280);
+        return 0;
+      }
       const names = defendedPids.map((id) => this.players[id].name).join('、');
       this.setMsg(`🫧 ${names} 的泡泡罩挡下踩踏！大家挤脸站在同一格~`);
       this.relayout();
@@ -4568,6 +4619,9 @@ export class FlightChessEngine {
         }),
         ...toSplitRetreat.map(({ plane: v, newPos }) => this.knockBackTo(v, newPos)),
       ]);
+      if (mochaDefPid !== undefined) {
+        await triggerMochaRecoil();
+      }
       this.relayout();
       this.syncShieldVisuals();
     }
@@ -4648,6 +4702,7 @@ export class FlightChessEngine {
   }
 
   private async performMove(rawPlane: PlaneData, die: number): Promise<void> {
+    this.lastCaptureRecoilTriggered = false;
     const plane = this.resolveBottomOfStack(rawPlane);
     this.phase = 'moving';
     this.deadline = null;
@@ -4761,6 +4816,18 @@ export class FlightChessEngine {
         ),
         ...shiftTasks,
       ]);
+      if ((P.key === 'bubu' || P.key === 'mocha') && (this.talentCharges[plane.pid] ?? 0) > 0) {
+        this.talentCharges[plane.pid] -= 1;
+        plane.shielded = true;
+        this.syncShieldVisuals();
+        beep(740, 0.14, 'triangle', 0.14);
+        this.setMsg(
+          P.key === 'bubu'
+            ? `🛡️ ${P.name} 触发「三盾守门」，起飞自带泡泡罩！`
+            : `🍵 ${P.name} 触发「茶香反震」，首熊起飞自带泡泡罩！`,
+          P.uiColor,
+        );
+      }
       this.relayout();
       await this.sleep(320);
     } else {
@@ -4822,7 +4889,41 @@ export class FlightChessEngine {
       }
 
       const runSameColorAndFlight = async () => {
-        if (this.disposed) return;
+        if (this.disposed || this.lastCaptureRecoilTriggered) return;
+        if (
+          P.key === 'caomei' &&
+          (this.talentCharges[plane.pid] ?? 0) > 0 &&
+          plane.pos >= 1 &&
+          plane.pos <= 48 &&
+          plane.pos % 4 !== 2
+        ) {
+          const rem = plane.pos % 4;
+          const delta = rem < 2 ? 2 - rem : 6 - rem;
+          const nextOwn = plane.pos + delta;
+          if (nextOwn <= 49) {
+            this.talentCharges[plane.pid] -= 1;
+            await this.sleep(240);
+            if (this.disposed) return;
+            this.setMsg(`🍓 ${P.name} 触发「元气蹦跳」，补步至同色格！`, P.uiColor);
+            beep(660, 0.12, 'triangle', 0.14);
+            setPos(nextOwn);
+            let talentCap: Promise<number> | null = null;
+            await hopAll(
+              this.posToCell(P, nextOwn),
+              this.faceTravelDir(plane),
+              0.72,
+              460,
+              1,
+              nextOwn,
+              'none',
+              () => {
+                talentCap = this.captureAt(plane);
+              },
+            );
+            if (talentCap) await talentCap;
+            if (this.disposed || this.lastCaptureRecoilTriggered) return;
+          }
+        }
         if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
           await this.sleep(320);
           if (this.disposed) return;
@@ -4951,6 +5052,30 @@ export class FlightChessEngine {
       }
 
       await runSameColorAndFlight();
+      if (
+        !this.disposed &&
+        !this.lastCaptureRecoilTriggered &&
+        P.key === 'haiyan' &&
+        (this.talentCharges[plane.pid] ?? 0) > 0 &&
+        plane.pos >= 50 &&
+        plane.pos < HOME_END
+      ) {
+        this.talentCharges[plane.pid] -= 1;
+        await this.sleep(260);
+        if (this.disposed) return;
+        this.setMsg(`🌊 ${P.name} 触发「顺风破蛋」，直接顺风滑入终点！`, P.uiColor);
+        beep(740, 0.18, 'triangle', 0.16);
+        setPos(HOME_END);
+        await hopAll(
+          this.posToCell(P, HOME_END),
+          P.finalYaw,
+          1.35,
+          720,
+          1,
+          HOME_END,
+          'frontFlip',
+        );
+      }
     }
 
     if (this.disposed) return;
@@ -5167,6 +5292,7 @@ export class FlightChessEngine {
   }
 
   private beginRollPhase(isBonus = false): void {
+    this.isBonusRollThisTurn = isBonus;
     const curTurnSeq = ++this.turnSeq;
     if (!isBonus && this.playerTurnCount[this.turn] !== undefined) {
       this.playerTurnCount[this.turn] += 1;
@@ -5327,7 +5453,8 @@ export class FlightChessEngine {
 
       let s = 0;
 
-      if (np === HOME_END) {
+      const haiyanAutoGoal = P.key === 'haiyan' && (this.talentCharges[me] ?? 0) > 0 && np >= 50;
+      if (np === HOME_END || haiyanAutoGoal) {
         // 骰子刚好到达终点，最高优先级（尚未有棋子进终点时额外加权抢先破蛋）
         s = (personality === 'rusher' ? 400 : 350) + (doneCount === 0 ? 60 : 0) + stackCount * 35;
       } else if (p.pos >= 51) {
