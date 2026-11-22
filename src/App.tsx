@@ -466,7 +466,7 @@ export default function App() {
           onGmClearItems={() => engineRef.current?.gmClearItems()}
           onSetGmTimeOfDay={(tod) => engineRef.current?.setGmTimeOfDay(tod)}
           onToggleGmAutoPlay={() => engineRef.current?.toggleGmAutoPlay()}
-          onSetGameSpeed={(speed) => engineRef.current?.setGameSpeed(speed)}
+          onSetGameSpeed={(speed, gmMode) => engineRef.current?.setGameSpeed(speed, gmMode)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onUseItem={(item) => engineRef.current?.useItem(item)}
           onPickItemTarget={(pid, idx) => engineRef.current?.pickItemTarget(pid, idx)}

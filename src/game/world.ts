@@ -227,6 +227,10 @@ export interface WorldRefs {
   nightSkyGroup?: THREE.Group;
   starMat?: THREE.PointsMaterial;
   moonMat?: THREE.MeshBasicMaterial;
+  sunriseGroup?: THREE.Group;
+  sunriseDiscMat?: THREE.MeshBasicMaterial;
+  sunriseHaloMesh?: THREE.Mesh;
+  sunriseHaloMat?: THREE.MeshBasicMaterial;
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
     waveHaloMats: THREE.MeshBasicMaterial[];
@@ -5908,6 +5912,42 @@ export function buildAncientWorld(
   nightSkyGroup.visible = false;
   scene.add(nightSkyGroup);
 
+  // 5) 清晨东方日出太阳与柔粉金晨曦光晕
+  const sunriseGroup = new THREE.Group();
+  sunriseGroup.position.set(32, 9.2, 14);
+  const sunriseDiscMat = new THREE.MeshBasicMaterial({
+    color: 0xffe6b3,
+    transparent: true,
+    opacity: 0.96,
+    depthWrite: false,
+    fog: false,
+  });
+  const sunriseDiscMesh = new THREE.Mesh(new THREE.SphereGeometry(2.1, 24, 18), sunriseDiscMat);
+  sunriseGroup.add(sunriseDiscMesh);
+
+  const shCanvas = document.createElement('canvas');
+  shCanvas.width = shCanvas.height = 128;
+  const shg = shCanvas.getContext('2d')!;
+  const shGrad = shg.createRadialGradient(64, 64, 6, 64, 64, 63);
+  shGrad.addColorStop(0, 'rgba(255, 244, 204, 0.92)');
+  shGrad.addColorStop(0.28, 'rgba(255, 198, 146, 0.65)');
+  shGrad.addColorStop(0.62, 'rgba(255, 158, 168, 0.25)');
+  shGrad.addColorStop(1, 'rgba(255, 158, 168, 0)');
+  shg.fillStyle = shGrad;
+  shg.fillRect(0, 0, 128, 128);
+  const shTex = new THREE.CanvasTexture(shCanvas);
+  const sunriseHaloMat = new THREE.MeshBasicMaterial({
+    map: shTex,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  });
+  const sunriseHaloMesh = new THREE.Mesh(new THREE.PlaneGeometry(17, 17), sunriseHaloMat);
+  sunriseGroup.add(sunriseHaloMesh);
+  scene.add(sunriseGroup);
+
   return {
     waterMesh,
     moatTex,
@@ -5930,6 +5970,10 @@ export function buildAncientWorld(
     nightSkyGroup,
     starMat,
     moonMat,
+    sunriseGroup,
+    sunriseDiscMat,
+    sunriseHaloMesh,
+    sunriseHaloMat,
     heartTreeNight: heartTreeNightData,
     waterY: WATER_Y,
     rideToys,

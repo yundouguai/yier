@@ -2888,8 +2888,9 @@ export class FlightChessEngine {
     this.emitSnapshot();
   }
 
-  public setGameSpeed(speed: number): void {
-    const clamped = Math.min(2.5, Math.max(1.0, Math.round(speed * 10) / 10));
+  public setGameSpeed(speed: number, gmMode = false): void {
+    const maxCap = gmMode ? 8.0 : 1.5;
+    const clamped = Math.min(maxCap, Math.max(1.0, Math.round(speed * 10) / 10));
     if (this.gameSpeed === clamped) return;
     this.gameSpeed = clamped;
     this.emitSnapshot();
@@ -5350,6 +5351,8 @@ export class FlightChessEngine {
     const stage = Math.min(3, maxDone);
     if (stage <= this.maxDoneStage) return;
     this.maxDoneStage = stage;
+    const stageSpeedFloor = stage === 1 ? 1.1 : stage === 2 ? 1.2 : stage >= 3 ? 1.3 : 1.0;
+    this.gameSpeed = Math.max(stageSpeedFloor, this.gameSpeed);
     const order: TimeOfDay[] = ['morning', 'noon', 'afternoon', 'evening'];
     const nextTod = order[stage];
     this.todFrom = this.mapConfig.timePresets[this.timeOfDay];
@@ -5443,20 +5446,29 @@ export class FlightChessEngine {
       this.world.nightSkyGroup.visible = starOp > 0.015;
     }
 
+    const sunriseOp = THREE.MathUtils.clamp(mistOp / 0.45, 0, 1);
+    if (this.world.sunriseGroup && this.world.sunriseDiscMat && this.world.sunriseHaloMat) {
+      this.world.sunriseDiscMat.opacity = sunriseOp * 0.96;
+      this.world.sunriseHaloMat.opacity = sunriseOp * 0.85;
+      this.world.sunriseGroup.visible = sunriseOp > 0.015;
+    }
+
     const htn = this.world.heartTreeNight;
     if (htn) {
-      const active = nightScale > 0.02;
-      htn.heartMat.opacity = nightScale * 0.98;
+      // 爱心树夜景秀、透明灯带与一二布布拍照小剧场仅在夜晚（evening）开启，下午不触发
+      const treeNightScale = THREE.MathUtils.clamp((starOp - 0.25) / 0.71, 0, 1);
+      const active = treeNightScale > 0.02;
+      htn.heartMat.opacity = treeNightScale * 0.98;
       htn.heartPoints.visible = active;
-      htn.groundHaloMat.opacity = nightScale * 0.85;
+      htn.groundHaloMat.opacity = treeNightScale * 0.85;
       htn.groundHalo.visible = active;
-      htn.spotLight.intensity = nightScale * 7.6;
-      htn.dioramaGroup.visible = nightScale > 0.15;
+      htn.spotLight.intensity = treeNightScale * 7.6;
+      htn.dioramaGroup.visible = treeNightScale > 0.15;
       htn.baseStripMesh.visible = active;
-      htn.baseStripMat.opacity = nightScale * 0.88;
+      htn.baseStripMat.opacity = treeNightScale * 0.88;
       htn.baseStripGlowMesh.visible = active;
-      htn.baseStripGlowMat.opacity = nightScale * 0.65;
-      htn.plaqueMat.emissiveIntensity = 0.2 + nightScale * 0.95;
+      htn.baseStripGlowMat.opacity = treeNightScale * 0.65;
+      htn.plaqueMat.emissiveIntensity = 0.2 + treeNightScale * 0.95;
       if (!active) {
         htn.waveHaloMats.forEach((wh) => { wh.opacity = 0; });
       }
@@ -5559,6 +5571,11 @@ export class FlightChessEngine {
 
       if (this.world.nightSkyGroup?.visible) {
         this.world.nightSkyGroup.rotation.y = t * 0.006;
+      }
+      if (this.world.sunriseGroup?.visible && this.world.sunriseHaloMesh) {
+        this.world.sunriseHaloMesh.quaternion.copy(this.camera.quaternion);
+        const ss = 1 + Math.sin(t * 1.4) * 0.045;
+        this.world.sunriseHaloMesh.scale.set(ss, ss, 1);
       }
 
       if (this.stage4CampfireActive) {

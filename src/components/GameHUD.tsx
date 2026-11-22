@@ -34,7 +34,7 @@ interface GameHUDProps {
   onGmClearItems: () => void;
   onSetGmTimeOfDay: (tod: TimeOfDay) => void;
   onToggleGmAutoPlay: () => void;
-  onSetGameSpeed: (speed: number) => void;
+  onSetGameSpeed: (speed: number, gmMode?: boolean) => void;
   onActionPod: () => void;
   onUseItem: (item: ItemType) => void;
   onPickItemTarget: (pid: number, idx: number) => void;
@@ -73,7 +73,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 }) => {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [camMenuOpen, setCamMenuOpen] = useState(false);
-  const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [partyExpanded, setPartyExpanded] = useState(true);
@@ -893,6 +892,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   </button>
                 ))}
               </div>
+              <div className="flex items-center gap-2">
+                <span className="w-[58px] shrink-0 text-center rounded-md bg-amber-500/20 px-1.5 py-0.5 font-mono text-[11px] font-bold text-amber-300 border border-amber-400/30">
+                  倍速
+                </span>
+                <input
+                  type="range"
+                  min={1.0}
+                  max={8.0}
+                  step={0.5}
+                  value={snap.gameSpeed}
+                  onChange={(e) => onSetGameSpeed(parseFloat(e.target.value), true)}
+                  aria-label="GM 倍速"
+                  className="h-1.5 flex-1 min-w-0 cursor-pointer accent-amber-400"
+                />
+                <span className="w-10 shrink-0 text-right font-mono text-[11px] font-bold tabular-nums text-amber-300">
+                  {snap.gameSpeed.toFixed(1)}x
+                </span>
+              </div>
             </div>
           )}
 
@@ -1163,77 +1180,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           aria-label="天色、视角、规则、声音与设置"
         >
 
-          {/* 倍速开关（1.0x ~ 2.5x，加速投骰与棋子移动） */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                setSpeedMenuOpen((v) => !v);
-                setCamMenuOpen(false);
-                setSettingsMenuOpen(false);
-              }}
-              title="调节游戏倍速（1.0x ~ 2.5x）"
-              aria-expanded={speedMenuOpen}
-              className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold tabular-nums transition-colors whitespace-nowrap cursor-pointer ${
-                speedMenuOpen
-                  ? 'bg-white/55 text-slate-900 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]'
-                  : snap.gameSpeed > 1.0
-                    ? 'bg-amber-400/20 text-amber-900 hover:bg-amber-400/30'
-                    : 'text-slate-700 hover:bg-white/40'
-              }`}
-            >
-              <span>⚡</span>
-              <span>{snap.gameSpeed.toFixed(1)}x</span>
-            </button>
-
-            {speedMenuOpen && (
-              <div className="anim-card-pop absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/70 bg-white/82 p-2.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)] backdrop-blur-md">
-                <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-700">
-                  <span>节奏倍速</span>
-                  <span className="tabular-nums text-emerald-700">{snap.gameSpeed.toFixed(1)}x</span>
-                </div>
-                <input
-                  type="range"
-                  min={1.0}
-                  max={2.5}
-                  step={0.1}
-                  value={snap.gameSpeed}
-                  onChange={(e) => onSetGameSpeed(parseFloat(e.target.value))}
-                  aria-label="游戏倍速"
-                  className="mb-2.5 h-1.5 w-full cursor-pointer accent-emerald-600"
-                />
-                <div className="grid grid-cols-4 gap-1">
-                  {[1.0, 1.5, 2.0, 2.5].map((sp) => (
-                    <button
-                      key={sp}
-                      type="button"
-                      onClick={() => {
-                        onSetGameSpeed(sp);
-                        setSpeedMenuOpen(false);
-                      }}
-                      className={`rounded-lg py-1 text-[11px] font-bold tabular-nums transition-colors cursor-pointer ${
-                        Math.abs(snap.gameSpeed - sp) < 0.05
-                          ? 'bg-emerald-500/18 text-emerald-800 ring-1 ring-emerald-500/30'
-                          : 'bg-white/60 text-slate-700 hover:bg-white'
-                      }`}
-                    >
-                      {sp.toFixed(1)}x
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <span className="h-4 w-px bg-slate-700/15" aria-hidden="true" />
-
           {/* 视角下拉按钮 */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setCamMenuOpen((v) => !v);
-                setSpeedMenuOpen(false);
                 setSettingsMenuOpen(false);
               }}
               title="切换视角（快捷键 V）"
@@ -1302,7 +1254,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             type="button"
             onClick={() => {
               setCamMenuOpen(false);
-              setSpeedMenuOpen(false);
               setSettingsMenuOpen(false);
               setEmoteOpen(false);
               setRulesOpen(true);
@@ -1374,7 +1325,6 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               onClick={() => {
                 setSettingsMenuOpen((v) => !v);
                 setCamMenuOpen(false);
-                setSpeedMenuOpen(false);
               }}
               title="设置"
               aria-label="设置"
@@ -1402,7 +1352,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </button>
 
             {settingsMenuOpen && (
-              <div className="anim-card-pop absolute right-0 top-full mt-2 w-40 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-[0_12px_30px_rgba(15,23,42,0.18)] backdrop-blur-md">
                 <div className="px-2 py-1.5">
                   <div className="mb-1 text-[11px] font-bold text-slate-600">🎨 画质</div>
                   <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-0.5">
@@ -1424,6 +1374,39 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                         }`}
                       >
                         {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="my-1 h-px bg-slate-100" />
+                <div className="px-2 py-1.5">
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-bold text-slate-600">
+                    <span>⚡ 节奏倍速</span>
+                    <span className="tabular-nums text-emerald-700">{snap.gameSpeed.toFixed(1)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1.0}
+                    max={1.5}
+                    step={0.1}
+                    value={Math.min(1.5, snap.gameSpeed)}
+                    onChange={(e) => onSetGameSpeed(parseFloat(e.target.value))}
+                    aria-label="游戏倍速"
+                    className="mb-1.5 h-1.5 w-full cursor-pointer accent-emerald-600"
+                  />
+                  <div className="grid grid-cols-4 gap-1">
+                    {[1.0, 1.2, 1.3, 1.5].map((sp) => (
+                      <button
+                        key={sp}
+                        type="button"
+                        onClick={() => onSetGameSpeed(sp)}
+                        className={`rounded-md py-1 text-[10px] font-bold tabular-nums transition-colors cursor-pointer ${
+                          Math.abs(snap.gameSpeed - sp) < 0.05
+                            ? 'bg-[#2c9a60] text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {sp.toFixed(1)}x
                       </button>
                     ))}
                   </div>
