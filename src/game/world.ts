@@ -289,6 +289,8 @@ export interface WorldRefs {
     flashLight: THREE.PointLight;
     flashHalo: THREE.Mesh;
     flashHaloMat: THREE.MeshBasicMaterial;
+    timerLedMat: THREE.MeshBasicMaterial;
+    camScreenMat: THREE.MeshBasicMaterial;
   };
   boardNightStrips?: {
     coreMesh: THREE.Mesh;
@@ -2854,6 +2856,27 @@ export function buildAncientWorld(
       const flashHalo = new THREE.Mesh(new THREE.CircleGeometry(0.18, 20), flashHaloMat);
       flashHalo.position.set(0, 0.44, 0.08);
       camGrp.add(flashHalo);
+
+      // 3 秒倒计时红色自拍提示灯 + 背面发光取景屏
+      const timerLedMat = new THREE.MeshBasicMaterial({
+        color: 0xff2a3c,
+        transparent: true,
+        opacity: 0,
+      });
+      const timerLed = new THREE.Mesh(new THREE.SphereGeometry(0.017, 8, 6), timerLedMat);
+      timerLed.position.set(0.056, 0.402, 0.052);
+      camGrp.add(timerLed);
+
+      const camScreenMat = new THREE.MeshBasicMaterial({
+        color: 0xffe8f0,
+        transparent: true,
+        opacity: 0,
+      });
+      const camScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.072), camScreenMat);
+      camScreen.rotation.y = Math.PI;
+      camScreen.position.set(0, 0.37, -0.048);
+      camGrp.add(camScreen);
+
       dioramaGroup.add(camGrp);
 
       dioramaGroup.visible = false;
@@ -2883,6 +2906,8 @@ export function buildAncientWorld(
         flashLight,
         flashHalo,
         flashHaloMat,
+        timerLedMat,
+        camScreenMat,
       };
 
       heartTree.position.set(Math.sin(ha) * 12.15, -0.63, Math.cos(ha) * 12.15);
@@ -5768,11 +5793,11 @@ export function buildAncientWorld(
     scene.add(pt);
     nightLights.push({ light: pt, baseIntensity });
   };
-  // 中央骰台上方暖金主灯（柔和照亮棋盘中心与小熊）
-  addNightLight(0, 4.6, 0, 0xffb85c, 2.8, 19, 1.35);
-  // 2 盏对角广域暖橘灯覆盖四座熊熊坊/城门（与自发光灯笼配合，减少点光源着色器循环）
-  addNightLight(6.2, 3.0, 6.2, 0xff9a42, 2.6, 18.0, 1.35);
-  addNightLight(-6.2, 3.0, -6.2, 0xff9a42, 2.6, 18.0, 1.35);
+  // 中央骰台上方暖金广域主灯（零新增光源，调低衰减并抬高灯位以均匀照亮整个棋盘与外圈小熊）
+  addNightLight(0, 6.0, 0, 0xffc872, 9.5, 25, 1.0);
+  // 2 盏对角广域暖橘灯覆盖四座熊熊坊、庭院与城门（与自发光灯笼及隐藏灯带配合，兼顾夜景氛围与性能）
+  addNightLight(6.4, 3.8, 6.4, 0xffa652, 5.5, 20.5, 1.1);
+  addNightLight(-6.4, 3.8, -6.4, 0xffa652, 5.5, 20.5, 1.1);
   // 爱心古榕树灯笼暖光
   addNightLight(-11.5, 2.5, 0, 0xff9442, 2.6, 13.5, 1.4);
 
@@ -6332,18 +6357,93 @@ export function buildAncientWorld(
     -0.55,
     bubuFishZ + Math.sin(bubuFaceYaw) * 0.42,
   );
+  // 精致中空编织竹鱼篓（开放口 + 编织纹路 + 双道竹箍 + 提手 + 内部清澈水波）
+  const creelCanvas = document.createElement('canvas');
+  creelCanvas.width = 128;
+  creelCanvas.height = 128;
+  const cc = creelCanvas.getContext('2d')!;
+  cc.fillStyle = '#c89b54';
+  cc.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y += 8) {
+    cc.fillStyle = y % 16 === 0 ? '#b27f3a' : '#d8ae66';
+    cc.fillRect(0, y, 128, 6);
+  }
+  for (let x = 0; x < 128; x += 12) {
+    cc.fillStyle = 'rgba(122, 78, 28, 0.42)';
+    cc.fillRect(x, 0, 4, 128);
+  }
+  const creelTex = new THREE.CanvasTexture(creelCanvas);
+  creelTex.wrapS = THREE.RepeatWrapping;
+  creelTex.wrapT = THREE.RepeatWrapping;
+  creelTex.repeat.set(3, 2);
+
   const fishBucket = new THREE.Group();
-  const bucketBody = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.12, 0.24, 12), mat(0xa16227, 0.72));
-  bucketBody.position.y = 0.12;
-  bucketBody.castShadow = true;
-  fishBucket.add(bucketBody);
+  const creelMat = new THREE.MeshStandardMaterial({
+    map: creelTex,
+    roughness: 0.76,
+    side: THREE.DoubleSide,
+  });
+  const creelPts = [
+    new THREE.Vector2(0.0, 0.0),
+    new THREE.Vector2(0.125, 0.005),
+    new THREE.Vector2(0.168, 0.085),
+    new THREE.Vector2(0.172, 0.165),
+    new THREE.Vector2(0.142, 0.245),
+    new THREE.Vector2(0.148, 0.275),
+  ];
+  const creelShell = new THREE.Mesh(new THREE.LatheGeometry(creelPts, 20), creelMat);
+  creelShell.castShadow = true;
+  creelShell.receiveShadow = true;
+  fishBucket.add(creelShell);
+
+  const bambooRimMat = mat(0x7c4d21, 0.65);
+  const mouthRim = new THREE.Mesh(new THREE.TorusGeometry(0.146, 0.015, 8, 24), bambooRimMat);
+  mouthRim.rotation.x = Math.PI / 2;
+  mouthRim.position.y = 0.275;
+  fishBucket.add(mouthRim);
+
+  for (const [hy, hr] of [[0.09, 0.169], [0.18, 0.167]] as [number, number][]) {
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(hr, 0.008, 6, 22), bambooRimMat);
+    hoop.rotation.x = Math.PI / 2;
+    hoop.position.y = hy;
+    fishBucket.add(hoop);
+  }
+
+  const handleArc = new THREE.Mesh(new THREE.TorusGeometry(0.145, 0.01, 6, 18, Math.PI), bambooRimMat);
+  handleArc.position.y = 0.27;
+  handleArc.rotation.y = 0.4;
+  fishBucket.add(handleArc);
+
+  const innerDark = new THREE.Mesh(new THREE.CircleGeometry(0.142, 18), mat(0x3a2614, 0.92));
+  innerDark.rotation.x = -Math.PI / 2;
+  innerDark.position.y = 0.14;
+  fishBucket.add(innerDark);
+
+  // 鱼篓里清晰可见的清澈碧水与微光涟漪
   const bucketWater = new THREE.Mesh(
-    new THREE.CircleGeometry(0.132, 12),
-    new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.75 }),
+    new THREE.CircleGeometry(0.14, 20),
+    new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x0ea5e9,
+      emissiveIntensity: 0.22,
+      roughness: 0.12,
+      metalness: 0.15,
+      transparent: true,
+      opacity: 0.88,
+    }),
   );
   bucketWater.rotation.x = -Math.PI / 2;
-  bucketWater.position.y = 0.22;
+  bucketWater.position.y = 0.225;
   fishBucket.add(bucketWater);
+
+  const bucketWave = new THREE.Mesh(
+    new THREE.RingGeometry(0.045, 0.068, 18),
+    new THREE.MeshBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.65, side: THREE.DoubleSide }),
+  );
+  bucketWave.rotation.x = -Math.PI / 2;
+  bucketWave.position.y = 0.228;
+  fishBucket.add(bucketWave);
+
   fishBucket.position.set(bucketPos.x, -0.66, bucketPos.z);
   stage1FishGroup.add(fishBucket);
 
@@ -6453,9 +6553,153 @@ export function buildAncientWorld(
   caughtFish.visible = false;
   stage1FishGroup.add(caughtFish);
 
-  // 超大锦鲤河王（有概率咬钩把布布直接拉下河！）
-  const giantFishBuilt = makeDetailedFish(0xe11d48, 0xfde047, 2.55);
-  const giantFish = giantFishBuilt.group;
+  // 超美丽超精致的「丹顶蝴蝶大锦鲤」（珍珠白底 + 金边鱼鳞 + 绯红丹顶与云锦斑 + 半透飘逸蝶翼金红长鳍）
+  const koiCanvas = document.createElement('canvas');
+  koiCanvas.width = 256;
+  koiCanvas.height = 128;
+  const kc = koiCanvas.getContext('2d')!;
+  const kGrad = kc.createLinearGradient(0, 0, 0, 128);
+  kGrad.addColorStop(0, '#fff9f0');
+  kGrad.addColorStop(0.55, '#fffdf9');
+  kGrad.addColorStop(1, '#ffe8c2');
+  kc.fillStyle = kGrad;
+  kc.fillRect(0, 0, 256, 128);
+  // 精致红白锦鲤云纹斑块（含额头丹顶圆印）
+  kc.fillStyle = '#ef3340';
+  kc.beginPath();
+  kc.ellipse(42, 48, 22, 16, 0.1, 0, Math.PI * 2);
+  kc.fill();
+  kc.beginPath();
+  kc.ellipse(112, 34, 42, 26, -0.12, 0, Math.PI * 2);
+  kc.fill();
+  kc.beginPath();
+  kc.ellipse(186, 46, 30, 20, 0.15, 0, Math.PI * 2);
+  kc.fill();
+  kc.fillStyle = '#ff9f1c';
+  kc.beginPath();
+  kc.ellipse(152, 62, 18, 12, 0.2, 0, Math.PI * 2);
+  kc.fill();
+  // 细腻金边鱼鳞纹理
+  kc.strokeStyle = 'rgba(245, 184, 65, 0.42)';
+  kc.lineWidth = 1.6;
+  for (let row = 0; row < 9; row++) {
+    for (let col = 0; col < 18; col++) {
+      const sx = col * 15 + (row % 2) * 7;
+      const sy = row * 14 + 8;
+      kc.beginPath();
+      kc.arc(sx, sy, 8, -0.6, 0.6);
+      kc.stroke();
+    }
+  }
+  const koiTex = new THREE.CanvasTexture(koiCanvas);
+  const koiBodyMat = new THREE.MeshStandardMaterial({
+    map: koiTex,
+    roughness: 0.2,
+    metalness: 0.16,
+    emissive: 0xffc864,
+    emissiveIntensity: 0.14,
+  });
+  const koiVeilMat = new THREE.MeshStandardMaterial({
+    color: 0xffd166,
+    emissive: 0xff6b4a,
+    emissiveIntensity: 0.22,
+    roughness: 0.25,
+    transparent: true,
+    opacity: 0.86,
+    side: THREE.DoubleSide,
+  });
+  const koiCoralFinMat = new THREE.MeshStandardMaterial({
+    color: 0xff5a5f,
+    emissive: 0xf59e0b,
+    emissiveIntensity: 0.18,
+    roughness: 0.28,
+    transparent: true,
+    opacity: 0.9,
+    side: THREE.DoubleSide,
+  });
+
+  const giantFish = new THREE.Group();
+  // 流线型优美锦鲤身躯（LatheGeometry 沿 Z 轴塑形）
+  const koiProfile = [
+    new THREE.Vector2(0.0, -0.52),
+    new THREE.Vector2(0.045, -0.44),
+    new THREE.Vector2(0.085, -0.32),
+    new THREE.Vector2(0.145, -0.14),
+    new THREE.Vector2(0.185, 0.05),
+    new THREE.Vector2(0.175, 0.22),
+    new THREE.Vector2(0.125, 0.36),
+    new THREE.Vector2(0.052, 0.45),
+    new THREE.Vector2(0.0, 0.48),
+  ];
+  const koiBodyGeo = new THREE.LatheGeometry(koiProfile, 22);
+  koiBodyGeo.rotateX(Math.PI / 2);
+  const koiBody = new THREE.Mesh(koiBodyGeo, koiBodyMat);
+  koiBody.scale.set(0.76, 1.04, 1.0);
+  koiBody.castShadow = true;
+  giantFish.add(koiBody);
+
+  // 飘逸高耸背鳍（双层渐层流光）
+  const dorsalShape = new THREE.Shape();
+  dorsalShape.moveTo(0.24, 0);
+  dorsalShape.quadraticCurveTo(0.08, 0.22, -0.22, 0.19);
+  dorsalShape.quadraticCurveTo(-0.34, 0.12, -0.28, 0);
+  dorsalShape.closePath();
+  const dorsalGeo = new THREE.ShapeGeometry(dorsalShape);
+  dorsalGeo.rotateY(Math.PI / 2);
+  const koiDorsal = new THREE.Mesh(dorsalGeo, koiCoralFinMat);
+  koiDorsal.position.set(0, 0.15, 0);
+  giantFish.add(koiDorsal);
+
+  // 宽大飘逸蝴蝶双尾纱鳍
+  const tailShape = new THREE.Shape();
+  tailShape.moveTo(0, 0);
+  tailShape.bezierCurveTo(-0.18, 0.16, -0.38, 0.28, -0.48, 0.22);
+  tailShape.bezierCurveTo(-0.38, 0.08, -0.32, 0.02, -0.26, 0);
+  tailShape.bezierCurveTo(-0.32, -0.02, -0.38, -0.08, -0.48, -0.22);
+  tailShape.bezierCurveTo(-0.38, -0.28, -0.18, -0.16, 0, 0);
+  const tailGeo = new THREE.ShapeGeometry(tailShape);
+  tailGeo.rotateY(Math.PI / 2);
+  for (const sAng of [-0.24, 0.24]) {
+    const tailVeil = new THREE.Mesh(tailGeo, koiVeilMat);
+    tailVeil.position.set(0, 0, -0.48);
+    tailVeil.rotation.y = sAng;
+    giantFish.add(tailVeil);
+  }
+
+  // 蝴蝶胸鳍、腹鳍、金色虹膜大眼与双根飘逸金色龙须
+  const pecShape = new THREE.Shape();
+  pecShape.moveTo(0, 0);
+  pecShape.bezierCurveTo(0.14, 0.06, 0.30, -0.04, 0.34, -0.18);
+  pecShape.bezierCurveTo(0.20, -0.22, 0.06, -0.14, 0, -0.04);
+  const pecGeo = new THREE.ShapeGeometry(pecShape);
+  const koiGoldEye = mat(0xfbbf24, 0.2);
+  const koiPupilMat = mat(0x111827, 0.15);
+  for (const sx of [-1, 1]) {
+    const pec = new THREE.Mesh(pecGeo, koiVeilMat);
+    pec.scale.x = sx;
+    pec.position.set(sx * 0.12, -0.04, 0.16);
+    pec.rotation.set(0.35, -sx * 0.35, sx * 0.25);
+    giantFish.add(pec);
+
+    const pelv = new THREE.Mesh(pecGeo, koiCoralFinMat);
+    pelv.scale.set(sx * 0.55, 0.55, 0.55);
+    pelv.position.set(sx * 0.07, -0.11, -0.12);
+    pelv.rotation.set(0.45, -sx * 0.25, sx * 0.45);
+    giantFish.add(pelv);
+
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), koiGoldEye);
+    iris.position.set(sx * 0.105, 0.055, 0.31);
+    giantFish.add(iris);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), koiPupilMat);
+    pupil.position.set(sx * 0.124, 0.058, 0.328);
+    giantFish.add(pupil);
+
+    const barbel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.002, 0.19, 6), koiGoldEye);
+    barbel.position.set(sx * 0.078, -0.02, 0.44);
+    barbel.rotation.set(0.55, 0, sx * 0.85);
+    giantFish.add(barbel);
+  }
+  giantFish.scale.setScalar(1.38);
   giantFish.visible = false;
   stage1FishGroup.add(giantFish);
 

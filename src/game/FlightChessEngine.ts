@@ -307,6 +307,8 @@ export class FlightChessEngine {
   }[] = [];
   private openingTalentItems: Record<number, ItemType[]> = {};
   private openingTalentsAnnounced = false;
+  private stage1YierBubble: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean } | null = null;
+  private photoReviewBubble: { root: HTMLDivElement; text: HTMLSpanElement; visible: boolean } | null = null;
   private stage0RunState = {
     bubuTh: 0.72 + Math.PI,
     yierPhase: 'climb' as 'climb' | 'steal' | 'climbDown' | 'run',
@@ -631,8 +633,8 @@ export class FlightChessEngine {
     };
 
     this.poemBubbles = {
-      scholar: makePoemBubble('青衣布布', '#2e6f6d'),
-      maiden: makePoemBubble('白衣一二', '#b85c6b'),
+      scholar: makePoemBubble('', '#2e6f6d'),
+      maiden: makePoemBubble('', '#b85c6b'),
     };
     this.stage0Bubbles = {
       bubu: makePoemBubble('', '#2563eb'),
@@ -642,6 +644,9 @@ export class FlightChessEngine {
       const b = makePoemBubble('', P.uiColor);
       return { root: b.root, text: b.text, plane: null, untilMs: 0 };
     });
+    this.stage1YierBubble = makePoemBubble('', '#e11d48');
+    this.stage1YierBubble.text.textContent = '好大的锦鲤！';
+    this.photoReviewBubble = makePoemBubble('', '#ec4899');
 
     this.players.forEach((P, pid) => {
       for (let i = 0; i < 4; i++) {
@@ -4182,7 +4187,7 @@ export class FlightChessEngine {
       const rx = rest[ix];
       const ry = rest[ix + 1];
       const rz = rest[ix + 2];
-      const u = Math.min(1, Math.abs(rx) / 0.46);
+      const u = Math.min(1, Math.abs(rx) / 0.414);
       const env = Math.pow(u, 1.15);
       arr[ix + 1] = ry + Math.cos(u * 3.8 - phase * 1.3) * env * 0.065;
       arr[ix + 2] = rz + Math.sin(u * 4.4 - phase * 1.5) * env * 0.095;
@@ -5993,9 +5998,9 @@ export class FlightChessEngine {
       const boardNightScale = THREE.MathUtils.clamp((starOp - 0.25) / 0.71, 0, 1);
       const bActive = boardNightScale > 0.02;
       bns.coreMesh.visible = bActive;
-      bns.coreMat.opacity = boardNightScale * 0.84;
+      bns.coreMat.opacity = boardNightScale * 0.94;
       bns.glowMesh.visible = bActive;
-      bns.glowMat.opacity = boardNightScale * 0.56;
+      bns.glowMat.opacity = boardNightScale * 0.78;
     }
 
     if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
@@ -6389,70 +6394,197 @@ export class FlightChessEngine {
 
         // 5) 树下「一二 & 布布」10 秒许愿拍照小剧场
         if (htn.dioramaGroup.visible) {
-          const cyc = t % 10.0;
+          // 28 秒完整夜景小剧场：0-8s 许愿赏树 -> 8-13s 转身商量动作 -> 13-18s 4 套轮换 Pose + 3 秒红灯倒计时 + 16.2s 闪光 -> 18-23.2s 凑到相机后看成片冒气泡 -> 23.2-28s 欢呼回位
+          const cyc = t % 28.0;
+          const poseIdx = Math.floor(t / 28.0) % 4;
           const yPt = htn.yierMesh.userData.parts as PlaneParts | undefined;
           const bPt = htn.bubuMesh.userData.parts as PlaneParts | undefined;
           const lerpYaw = (cur: number, target: number) => {
             let diff = ((target - cur + Math.PI) % (Math.PI * 2)) - Math.PI;
             if (diff < -Math.PI) diff += Math.PI * 2;
-            return cur + diff * Math.min(1, dt * 10);
+            return cur + diff * Math.min(1, dt * 8);
           };
-          const setPose = (
+
+          const setActor = (
             mesh: THREE.Group,
             pt: PlaneParts | undefined,
-            sideSign: number,
+            sideSign: number, // -1 = 一二(左), +1 = 布布(右)
           ) => {
             if (!pt) return;
             const fp = pt.headMesh.userData.faceParts as HeadFaceParts | undefined;
-            if (cyc < 4.0) {
-              // 阶段1：面向爱心树（+Z）仰望许愿（双手合十）
-              mesh.rotation.y = lerpYaw(mesh.rotation.y, -sideSign * 0.18);
-              pt.animRoot.position.y = Math.sin(t * 2.2) * 0.015;
-              pt.headPivot.rotation.x = -0.34;
-              pt.headPivot.rotation.z = sideSign * 0.08;
-              pt.leftArm.rotation.x = -1.05;
-              pt.leftArm.rotation.z = 0.45;
-              pt.rightArm.rotation.x = -1.05;
-              pt.rightArm.rotation.z = -0.45;
+            let tx = sideSign * 0.31;
+            let tz = -1.36;
+            let targetYaw = -sideSign * 0.18;
+            pt.animRoot.rotation.set(0, 0, 0);
+            pt.leftFoot.rotation.x = 0;
+            pt.rightFoot.rotation.x = 0;
+            pt.headPivot.rotation.set(0, 0, 0);
+
+            if (cyc < 8.0) {
+              // 1) 面向爱心树（+Z）仰望许愿，偶尔转头对视点头
+              targetYaw = -sideSign * 0.18;
+              pt.animRoot.position.y = Math.sin(t * 2.0 + sideSign) * 0.015;
+              const glance = cyc > 3.6 && cyc < 5.6 ? Math.sin(((cyc - 3.6) / 2.0) * Math.PI) : 0;
+              pt.headPivot.rotation.x = -0.32 * (1 - glance * 0.65);
+              pt.headPivot.rotation.y = -sideSign * 0.55 * glance;
+              pt.headPivot.rotation.z = sideSign * 0.06;
+              pt.leftArm.rotation.set(-1.02, 0, 0.44);
+              pt.rightArm.rotation.set(-1.02, 0, -0.44);
               if (fp) { fp.mouthW.visible = true; fp.mouthOpen.visible = false; }
-            } else if (cyc < 7.2) {
-              // 阶段2：转身面向三脚架相机（-Z）比耶贴脸合影
-              mesh.rotation.y = lerpYaw(mesh.rotation.y, Math.PI + sideSign * 0.16);
-              pt.animRoot.position.y = 0;
-              pt.headPivot.rotation.x = 0.04;
-              pt.headPivot.rotation.z = sideSign * 0.14;
-              if (sideSign < 0) {
-                pt.leftArm.rotation.x = -0.5;
-                pt.leftArm.rotation.z = 1.35 + Math.sin(t * 7) * 0.18;
-                pt.rightArm.rotation.x = -0.3;
-                pt.rightArm.rotation.z = -0.4;
+            } else if (cyc < 13.0) {
+              // 2) 转身面向相机并稍微靠拢商量摆拍姿势
+              const p = Math.min(1, (cyc - 8.0) / 1.4);
+              tx = sideSign * THREE.MathUtils.lerp(0.31, 0.25, p);
+              tz = THREE.MathUtils.lerp(-1.36, -1.42, p);
+              targetYaw = Math.PI + sideSign * 0.16;
+              const talk = Math.sin(t * 6.5 + sideSign);
+              pt.animRoot.position.y = Math.abs(talk) * 0.02;
+              pt.headPivot.rotation.y = -sideSign * 0.32 * Math.abs(Math.sin((cyc - 8.0) * 1.1));
+              pt.headPivot.rotation.z = sideSign * 0.1;
+              pt.leftArm.rotation.set(-0.35 + talk * 0.2, 0, 0.35);
+              pt.rightArm.rotation.set(-0.35 - talk * 0.2, 0, -0.35);
+              if (fp) { fp.mouthW.visible = true; fp.mouthOpen.visible = false; }
+            } else if (cyc < 18.0) {
+              // 3) 4 套轮换双人摆拍 Pose（16.2s 闪光定格）
+              tz = -1.42;
+              if (poseIdx === 0) {
+                // Pose 0：经典贴贴比心
+                tx = sideSign * 0.22;
+                targetYaw = Math.PI + sideSign * 0.14;
+                pt.animRoot.position.y = 0;
+                pt.animRoot.rotation.z = sideSign * 0.11;
+                pt.headPivot.rotation.z = sideSign * 0.16;
+                if (sideSign < 0) {
+                  pt.rightArm.rotation.set(-0.25, 0, -2.25);
+                  pt.leftArm.rotation.set(-0.2, 0, 0.45);
+                } else {
+                  pt.leftArm.rotation.set(-0.25, 0, 2.25);
+                  pt.rightArm.rotation.set(-0.2, 0, -0.45);
+                }
+              } else if (poseIdx === 1) {
+                // Pose 1：一二抢镜高高跳拍，布布稳稳比耶
+                tx = sideSign * 0.27;
+                targetYaw = Math.PI + sideSign * 0.12;
+                if (sideSign < 0) {
+                  const jumpP = cyc >= 15.65 && cyc <= 16.85 ? Math.sin(((cyc - 15.65) / 1.2) * Math.PI) : 0;
+                  pt.animRoot.position.y = jumpP * 0.28;
+                  pt.leftArm.rotation.set(-0.2, 0, 1.55 + jumpP * 0.65);
+                  pt.rightArm.rotation.set(-0.2, 0, -1.55 - jumpP * 0.65);
+                  pt.leftFoot.rotation.x = jumpP * 0.55;
+                  pt.rightFoot.rotation.x = -jumpP * 0.55;
+                } else {
+                  pt.animRoot.position.y = 0;
+                  pt.rightArm.rotation.set(-0.45, 0, -1.45);
+                  pt.leftArm.rotation.set(-0.2, 0, 0.35);
+                }
+              } else if (poseIdx === 2) {
+                // Pose 2：俏皮大幅歪头杀 + 双手托腮
+                tx = sideSign * 0.24;
+                targetYaw = Math.PI + sideSign * 0.1;
+                pt.animRoot.position.y = 0;
+                pt.headPivot.rotation.z = -sideSign * 0.34 + Math.sin(t * 4) * 0.05;
+                pt.leftArm.rotation.set(-1.35, 0, 0.55);
+                pt.rightArm.rotation.set(-1.35, 0, -0.55);
               } else {
-                pt.rightArm.rotation.x = -0.5;
-                pt.rightArm.rotation.z = -1.35 - Math.sin(t * 7) * 0.18;
-                pt.leftArm.rotation.x = -0.3;
-                pt.leftArm.rotation.z = 0.4;
+                // Pose 3：背靠背酷拍，闪光前齐刷刷回头看镜头
+                tx = sideSign * 0.19;
+                targetYaw = Math.PI - sideSign * 1.15;
+                pt.animRoot.position.y = 0;
+                pt.headPivot.rotation.y = sideSign * 0.92;
+                pt.headPivot.rotation.x = -0.06;
+                pt.leftArm.rotation.set(-0.15, 0, 0.48);
+                pt.rightArm.rotation.set(-0.15, 0, -0.48);
+              }
+              if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
+            } else if (cyc < 23.2) {
+              // 4) 绕到三脚架相机背面凑在一起低头看成片
+              const walkP = Math.min(1, (cyc - 18.0) / 1.4);
+              const arcOut = Math.sin(walkP * Math.PI) * 0.42;
+              tx = THREE.MathUtils.lerp(sideSign * 0.25, sideSign * 0.19, walkP) + sideSign * arcOut;
+              tz = THREE.MathUtils.lerp(-1.42, -2.54, walkP);
+              if (walkP < 1) {
+                targetYaw = Math.PI - sideSign * 0.35;
+                const wStep = Math.sin(t * 11);
+                pt.animRoot.position.y = Math.abs(wStep) * 0.04;
+                pt.leftFoot.rotation.x = wStep * 0.75;
+                pt.rightFoot.rotation.x = -wStep * 0.75;
+                pt.leftArm.rotation.set(-wStep * 0.65, 0, 0.15);
+                pt.rightArm.rotation.set(wStep * 0.65, 0, -0.15);
+              } else {
+                // 面对相机背面（+Z）凑头看照片并点头
+                targetYaw = -sideSign * 0.24;
+                pt.animRoot.position.y = 0;
+                pt.animRoot.rotation.x = 0.16;
+                pt.headPivot.rotation.x = 0.14 + Math.sin(t * 4.5 + sideSign) * 0.08;
+                pt.headPivot.rotation.z = sideSign * 0.08;
+                pt.leftArm.rotation.set(-0.45, 0, 0.22);
+                pt.rightArm.rotation.set(-0.45, 0, -0.22);
               }
               if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
             } else {
-              // 阶段3：拍完面向相机开心蹦跳
-              const jump = Math.abs(Math.sin((cyc - 7.2) * Math.PI * 2.5));
-              mesh.rotation.y = lerpYaw(mesh.rotation.y, Math.PI + sideSign * 0.12);
-              pt.animRoot.position.y = jump * 0.11;
-              pt.headPivot.rotation.x = 0;
-              pt.headPivot.rotation.z = Math.sin(t * 8) * 0.12;
-              pt.leftArm.rotation.x = 0;
-              pt.leftArm.rotation.z = 1.2 + jump * 0.3;
-              pt.rightArm.rotation.x = 0;
-              pt.rightArm.rotation.z = -1.2 - jump * 0.3;
-              if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
+              // 5) 看完照片开心欢呼小跳，再悠闲走回树池边
+              if (cyc < 25.0) {
+                tx = sideSign * 0.22;
+                tz = -2.54;
+                targetYaw = -sideSign * 0.65;
+                const jump = Math.abs(Math.sin((cyc - 23.2) * Math.PI * 2.2));
+                pt.animRoot.position.y = jump * 0.11;
+                pt.leftArm.rotation.set(0, 0, 1.25 + jump * 0.35);
+                pt.rightArm.rotation.set(0, 0, -1.25 - jump * 0.35);
+                if (fp) { fp.mouthW.visible = false; fp.mouthOpen.visible = true; }
+              } else {
+                const backP = Math.min(1, (cyc - 25.0) / 2.6);
+                const arcOut = Math.sin(backP * Math.PI) * 0.44;
+                tx = THREE.MathUtils.lerp(sideSign * 0.22, sideSign * 0.31, backP) + sideSign * arcOut;
+                tz = THREE.MathUtils.lerp(-2.54, -1.36, backP);
+                targetYaw = backP < 0.85 ? -sideSign * 0.25 : -sideSign * 0.18;
+                const wStep = backP < 1 ? Math.sin(t * 9.5) : 0;
+                pt.animRoot.position.y = Math.abs(wStep) * 0.035;
+                pt.leftFoot.rotation.x = wStep * 0.65;
+                pt.rightFoot.rotation.x = -wStep * 0.65;
+                pt.leftArm.rotation.set(-wStep * 0.55, 0, 0.12);
+                pt.rightArm.rotation.set(wStep * 0.55, 0, -0.12);
+                if (fp) { fp.mouthW.visible = true; fp.mouthOpen.visible = false; }
+              }
             }
-          };
-          setPose(htn.yierMesh, yPt, -1);
-          setPose(htn.bubuMesh, bPt, 1);
 
-          // 相机闪光灯在 cyc = 6.1s 触发脉冲
-          if (cyc >= 6.1 && cyc < 6.6) {
-            const fp = 1 - (cyc - 6.1) / 0.5;
+            mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, tx, Math.min(1, dt * 8));
+            mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, tz, Math.min(1, dt * 8));
+            mesh.rotation.y = lerpYaw(mesh.rotation.y, targetYaw);
+          };
+
+          setActor(htn.yierMesh, yPt, -1);
+          setActor(htn.bubuMesh, bPt, 1);
+
+          // 3 秒自拍红灯倒计时（13.2s - 16.2s 由慢到快闪 3 下）
+          const redBlink =
+            (cyc >= 13.2 && cyc < 13.7) ||
+            (cyc >= 14.3 && cyc < 14.7) ||
+            (cyc >= 15.25 && cyc < 15.5) ||
+            (cyc >= 15.75 && cyc < 16.0);
+          htn.timerLedMat.opacity = redBlink ? 0.98 : 0;
+
+          // 相机背面小取景屏在看照片阶段亮起暖白微光
+          htn.camScreenMat.opacity = cyc >= 18.8 && cyc < 23.4 ? 0.88 : 0;
+
+          // 看成片气泡（按 4 套 Pose 切换专属台词）
+          if (this.photoReviewBubble) {
+            const reviewLines = [
+              '这张把爱心树也拍进去啦！',
+              '哈哈一二宝刚才跳得好高~',
+              '布布歪头好可爱呀~',
+              '背靠背这张太酷啦！',
+            ];
+            const showReview = cyc >= 19.4 && cyc < 23.0;
+            this.photoReviewBubble.visible = showReview;
+            if (showReview) {
+              this.photoReviewBubble.text.textContent = reviewLines[poseIdx];
+            }
+          }
+
+          // 相机闪光灯每 28 秒在 cyc = 16.2s 触发一次脉冲
+          if (cyc >= 16.2 && cyc < 16.75) {
+            const fp = 1 - (cyc - 16.2) / 0.55;
             htn.flashLight.intensity = this.quality === 'low' ? 0 : fp * fp * 4.5;
             htn.flashHaloMat.opacity = fp * 0.95;
             htn.flashHalo.scale.setScalar(0.6 + (1 - fp) * 1.4);
@@ -6460,6 +6592,8 @@ export class FlightChessEngine {
             htn.flashLight.intensity = 0;
             htn.flashHaloMat.opacity = 0;
           }
+        } else if (this.photoReviewBubble) {
+          this.photoReviewBubble.visible = false;
         }
       }
 
@@ -7068,15 +7202,50 @@ export class FlightChessEngine {
         }
       }
       for (const d of this.world.moatDucks) {
-        const r = this.world.moatChannelR(d.th, d.rOff, 0.92);
-        const px = Math.cos(d.th) * r;
-        const pz = Math.sin(d.th) * r;
+        const px = d.g.position.x;
+        const pz = d.g.position.z;
         d.th += dt * d.speed;
-        const r2 = this.world.moatChannelR(d.th, d.rOff, 0.92);
+        const baseR = this.world.moatChannelR(d.th, d.rOff, 0.92);
+        const minBankR = this.world.moatInnerR(d.th) + 0.58;
+        const maxBankR = this.world.moatOuterR(d.th) - 0.58;
+        let targetAvoid = 0;
+        for (const b of this.world.boats) {
+          if (!b.g.visible) continue;
+          const bTh = Math.atan2(b.g.position.z, b.g.position.x);
+          let dAng = ((d.th - bTh + Math.PI) % (Math.PI * 2)) - Math.PI;
+          if (dAng < -Math.PI) dAng += Math.PI * 2;
+          const absAng = Math.abs(dAng);
+          if (absAng < 0.25) {
+            const bR = Math.hypot(b.g.position.x, b.g.position.z);
+            const rDiff = baseR - bR;
+            const needGap = 1.48;
+            if (Math.abs(rDiff) < needGap) {
+              const weight = Math.pow(1 - absAng / 0.25, 0.75);
+              // 优先往河道更宽敞的一侧丝滑让行，避免穿模进船身
+              const spaceOut = maxBankR - bR;
+              const spaceIn = bR - minBankR;
+              const pushDir =
+                Math.abs(rDiff) > 0.28
+                  ? Math.sign(rDiff)
+                  : spaceOut >= spaceIn
+                    ? 1
+                    : -1;
+              const desiredR = THREE.MathUtils.clamp(bR + pushDir * needGap, minBankR, maxBankR);
+              const shift = (desiredR - baseR) * weight;
+              if (Math.abs(shift) > Math.abs(targetAvoid)) targetAvoid = shift;
+            }
+          }
+        }
+        const prevAvoid = (d.g.userData.avoidR as number | undefined) ?? 0;
+        const nextAvoid = THREE.MathUtils.lerp(prevAvoid, targetAvoid, Math.min(1, dt * 4.5));
+        d.g.userData.avoidR = nextAvoid;
+        const r2 = THREE.MathUtils.clamp(baseR + nextAvoid, minBankR, maxBankR);
         const nx = Math.cos(d.th) * r2;
         const nz = Math.sin(d.th) * r2;
         d.g.position.set(nx, wy - 0.004 + Math.sin(t * 2 + d.bob) * 0.014, nz);
-        d.g.rotation.y = Math.atan2(nx - px, nz - pz);
+        if (Math.hypot(nx - px, nz - pz) > 1e-4) {
+          d.g.rotation.y = Math.atan2(nx - px, nz - pz);
+        }
       }
 
       const h = this.turnArrow.userData.home as { x: number; z: number };
@@ -8371,6 +8540,9 @@ export class FlightChessEngine {
     if (s1) {
       const showS1 = this.maxDoneStage === 1;
       s1.group.visible = showS1;
+      if (!showS1 && this.stage1YierBubble) {
+        this.stage1YierBubble.visible = false;
+      }
       if (showS1 && !this.paused) {
         // A) 布布河边钓鱼（约 40 秒一次咬钩：普通彩鱼拉进木桶；35% 概率出现超大河王鱼直接把布布拉进河里，湿漉漉爬上岸站立 7.5 秒抖水后再坐下继续钓）
         const fSt = this.stage1FishState;
@@ -8661,11 +8833,28 @@ export class FlightChessEngine {
           );
         }
 
-        // B) 一二河边晃脚玩水 + 偶尔伸爪进蜂蜜罐粘出蜂蜜放嘴里吃（9.2 秒循环）
+        // B) 一二河边晃脚玩水 + 偶尔伸爪进蜂蜜罐粘出蜂蜜放嘴里吃；若布布钓起超大锦鲤则惊喜转头欢呼「好大的锦鲤！」
         const yCyc = t % 9.2;
         const ysPt = s1.yier.userData.parts as PlaneParts | undefined;
         const ysFp = ysPt?.headMesh.userData.faceParts as HeadFaceParts | undefined;
-        if (ysPt) {
+        const amazedByKoi = fSt.isGiant && fc >= 29.0 && fc < 33.4;
+        if (this.stage1YierBubble) {
+          this.stage1YierBubble.visible = amazedByKoi;
+        }
+        if (ysPt && amazedByKoi) {
+          const hop = Math.abs(Math.sin(t * 10));
+          ysPt.leftFoot.rotation.x = -1.05 + Math.sin(t * 11) * 0.45;
+          ysPt.rightFoot.rotation.x = -1.05 - Math.sin(t * 11) * 0.45;
+          ysPt.leftArm.rotation.x = -1.45 - hop * 0.35;
+          ysPt.leftArm.rotation.z = -0.32;
+          ysPt.rightArm.rotation.x = -1.75 - hop * 0.45;
+          ysPt.rightArm.rotation.z = 0.45;
+          ysPt.animRoot.rotation.z = Math.sin(t * 9) * 0.08;
+          ysPt.headPivot.rotation.x = -0.14;
+          ysPt.headPivot.rotation.y = 0.62;
+          s1.honeyGlob.visible = false;
+          if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
+        } else if (ysPt) {
           // 双脚垂在水边欢快交替拍水
           const kick = Math.sin(t * 5.2);
           ysPt.leftFoot.rotation.x = -1.05 + kick * 0.36;
@@ -8781,6 +8970,44 @@ export class FlightChessEngine {
       };
       projectObj(s0.bubu, this.stage0Bubbles.bubu);
       projectObj(s0.yier, this.stage0Bubbles.yier);
+    }
+
+    const s1Egg = this.world.stage1FishEgg;
+    if (this.stage1YierBubble) {
+      if (!s1Egg || !s1Egg.group.visible || !this.stage1YierBubble.visible || this.paused) {
+        this.stage1YierBubble.root.style.opacity = '0';
+      } else {
+        s1Egg.yier.updateMatrixWorld();
+        _scratchBoatAnchor.set(0, 0.92, 0).applyMatrix4(s1Egg.yier.matrixWorld);
+        _scratchProj.copy(_scratchBoatAnchor).project(this.camera);
+        if (_scratchProj.z > 1 || _scratchProj.z < -1) {
+          this.stage1YierBubble.root.style.opacity = '0';
+        } else {
+          const sx = THREE.MathUtils.clamp((_scratchProj.x * 0.5 + 0.5) * w, 86, w - 86);
+          const sy = THREE.MathUtils.clamp((-_scratchProj.y * 0.5 + 0.5) * h, 64, h - 40);
+          this.stage1YierBubble.root.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+          this.stage1YierBubble.root.style.opacity = '1';
+        }
+      }
+    }
+
+    const htnEgg = this.world.heartTreeNight;
+    if (this.photoReviewBubble) {
+      if (!htnEgg || !htnEgg.dioramaGroup.visible || !this.photoReviewBubble.visible || this.paused) {
+        this.photoReviewBubble.root.style.opacity = '0';
+      } else {
+        htnEgg.yierMesh.updateMatrixWorld();
+        _scratchBoatAnchor.set(0, 0.92, 0).applyMatrix4(htnEgg.yierMesh.matrixWorld);
+        _scratchProj.copy(_scratchBoatAnchor).project(this.camera);
+        if (_scratchProj.z > 1 || _scratchProj.z < -1) {
+          this.photoReviewBubble.root.style.opacity = '0';
+        } else {
+          const sx = THREE.MathUtils.clamp((_scratchProj.x * 0.5 + 0.5) * w, 86, w - 86);
+          const sy = THREE.MathUtils.clamp((-_scratchProj.y * 0.5 + 0.5) * h, 64, h - 40);
+          this.photoReviewBubble.root.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -100%)`;
+          this.photoReviewBubble.root.style.opacity = '1';
+        }
+      }
     }
 
     for (const tb of this.talentBubbles) {

@@ -759,7 +759,7 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   // 跳舞庆祝专属红绸飘带（从背后绕过腰背，双手各握一端左右挥甩，默认隐藏）
   const redScarf = new THREE.Group();
   const ribbonMat = new THREE.MeshStandardMaterial({
-    color: 0xf4605c,
+    color: P.species === 'bear' ? 0x3b82f6 : 0xf4605c,
     roughness: 0.42,
     metalness: 0.04,
     side: THREE.DoubleSide,
@@ -823,8 +823,8 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
     const pivot = new THREE.Group();
     pivot.position.set(0.032 * sideSign, -0.055, 0.022);
 
-    const geo = new THREE.BoxGeometry(0.46, 0.052, 0.011, 24, 1, 1);
-    geo.translate(0.22 * sideSign, 0, 0);
+    const geo = new THREE.BoxGeometry(0.414, 0.052, 0.011, 24, 1, 1);
+    geo.translate(0.198 * sideSign, 0, 0);
     const posAttr = geo.attributes.position as THREE.BufferAttribute;
     geo.userData.restPos = (posAttr.array as Float32Array).slice();
     geo.userData.sideSign = sideSign;
