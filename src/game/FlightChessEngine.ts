@@ -5482,8 +5482,8 @@ export class FlightChessEngine {
     const t = this.clock.elapsedTime;
     this.frameCounter++;
 
-    if (!this.isSoftwareGl && !this.renderer.shadowMap.autoUpdate) {
-      // 高画质静止思考时按 4 帧节流重绘阴影，仅在棋子/骰子动画时每帧刷新
+    if (!this.paused && !this.isSoftwareGl && !this.renderer.shadowMap.autoUpdate) {
+      // 高画质静止思考时按 4 帧节流重绘阴影，仅在棋子/骰子动画或天色渐变时每帧刷新
       const effInterval =
         this.quality === 'high' && this.anims.length === 0 && this.todBlend >= 1
           ? 4

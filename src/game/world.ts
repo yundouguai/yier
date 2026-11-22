@@ -2493,6 +2493,7 @@ export function buildAncientWorld(
         lanternSpecs.push([lx, ly, zBand, cordLen]);
       }
 
+      const lanternsGroup = new THREE.Group();
       lanternSpecs.forEach(([lx, ly, lz, cordLen], lIdx) => {
         const lg = new THREE.Group();
         const cord = new THREE.Mesh(
@@ -2522,8 +2523,10 @@ export function buildAncientWorld(
         lg.add(tassel);
 
         lg.position.set(lx, ly, lz);
-        heartTree.add(lg);
+        lanternsGroup.add(lg);
       });
+      batchStaticGroup(lanternsGroup);
+      heartTree.add(lanternsGroup);
 
 
 
@@ -3487,6 +3490,7 @@ export function buildAncientWorld(
       { name: 'right', ex: R, ez: 0, nx: 1, nz: 0, horiz: false },
     ] as const;
 
+    const courtyardFenceGroup = new THREE.Group();
     const addWoodPillar = (
       px: number,
       pz: number,
@@ -3502,7 +3506,7 @@ export function buildAncientWorld(
       plinth.position.set(px, 0.112, pz);
       plinth.castShadow = true;
       plinth.receiveShadow = true;
-      scene.add(plinth);
+      courtyardFenceGroup.add(plinth);
 
       const post = new THREE.Mesh(
         new THREE.BoxGeometry(postW, postH, postW),
@@ -3511,7 +3515,7 @@ export function buildAncientWorld(
       post.position.set(px, 0.146 + postH * 0.5, pz);
       post.castShadow = true;
       post.receiveShadow = true;
-      scene.add(post);
+      courtyardFenceGroup.add(post);
 
       const collar = new THREE.Mesh(
         new THREE.BoxGeometry(postW + 0.024, 0.026, postW + 0.024),
@@ -3519,7 +3523,7 @@ export function buildAncientWorld(
       );
       collar.position.set(px, 0.146 + postH + 0.004, pz);
       collar.castShadow = true;
-      scene.add(collar);
+      courtyardFenceGroup.add(collar);
 
       const cap = new THREE.Mesh(
         new THREE.SphereGeometry(0.044 * capScale, 12, 10),
@@ -3528,7 +3532,7 @@ export function buildAncientWorld(
       cap.scale.y = 0.88;
       cap.position.set(px, 0.146 + postH + 0.044 * capScale, pz);
       cap.castShadow = true;
-      scene.add(cap);
+      courtyardFenceGroup.add(cap);
     };
 
     const addFenceSpan = (
@@ -3552,7 +3556,7 @@ export function buildAncientWorld(
       stoneCurb.position.set(sx, 0.11, sz);
       stoneCurb.castShadow = true;
       stoneCurb.receiveShadow = true;
-      scene.add(stoneCurb);
+      courtyardFenceGroup.add(stoneCurb);
 
       // 下槛 + 腰枋 + 寻杖扶手（浅原木三层清雅栏杆）
       const rails: [number, number, number, THREE.Material][] = [
@@ -3568,7 +3572,7 @@ export function buildAncientWorld(
         rail.position.set(sx, ry, sz);
         rail.castShadow = true;
         rail.receiveShadow = true;
-        scene.add(rail);
+        courtyardFenceGroup.add(rail);
       }
 
       // 竖向清雅细木棂
@@ -3586,7 +3590,7 @@ export function buildAncientWorld(
           );
           baluster.position.set(horiz ? pos : fixedX, 0.258, horiz ? fixedZ : pos);
           baluster.castShadow = true;
-          scene.add(baluster);
+          courtyardFenceGroup.add(baluster);
         }
       }
     };
@@ -3618,7 +3622,7 @@ export function buildAncientWorld(
           drum.position.set(px + s.nx * 0.08, 0.142, pz + s.nz * 0.08);
           drum.castShadow = true;
           drum.receiveShadow = true;
-          scene.add(drum);
+          courtyardFenceGroup.add(drum);
         });
       } else {
         const centerCoord = horiz ? cx : cz;
@@ -3643,6 +3647,9 @@ export function buildAncientWorld(
     ]) {
       addWoodPillar(cx + sx * (R - 0.02), cz + sz * (R - 0.02), 0.115, 0.33, 0.15, 1.0);
     }
+
+    batchStaticGroup(courtyardFenceGroup);
+    scene.add(courtyardFenceGroup);
 
     if (P) {
       const toy = buildRideToy(P, j);
