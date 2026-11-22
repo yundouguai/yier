@@ -212,6 +212,7 @@ export class FlightChessEngine {
   private finishedOrder: number[] = [];
   private gmNextDie: number | null = null;
   private gmAutoPlay = false;
+  private gameSpeed = 1.0;
   private lastSec = -1;
 
   // 道具与任务系统状态
@@ -909,11 +910,13 @@ export class FlightChessEngine {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise((r) => this.after(ms, r));
+    const scaled = Math.max(16, ms / this.gameSpeed);
+    return new Promise((r) => this.after(scaled, r));
   }
 
   private tween(dur: number, fn: (k: number) => void): Promise<void> {
-    return new Promise((res) => this.anims.push({ t0: this.timeMs, dur, fn, res }));
+    const scaled = Math.max(16, dur / this.gameSpeed);
+    return new Promise((res) => this.anims.push({ t0: this.timeMs, dur: scaled, fn, res }));
   }
 
   private cur(): PlayerConfig {
@@ -1198,6 +1201,7 @@ export class FlightChessEngine {
       rankings: this.getRankings(),
       gmDie: this.gmNextDie,
       gmAutoPlay: this.gmAutoPlay,
+      gameSpeed: this.gameSpeed,
       turnUsedAtkDef: this.turnUsedAtkDef,
       turnUsedDef: this.turnUsedDef,
       armedSixDie: this.armedSixDie,
@@ -1440,7 +1444,7 @@ export class FlightChessEngine {
     q.stomped += count;
     while (q.stomped >= 2) {
       q.stomped -= 2;
-      const reward: ItemType = Math.random() < 0.5 ? 'shield' : 'twinDice';
+      const reward: ItemType = Math.random() < 0.7 ? 'shield' : 'twinDice';
       this.grantItem(victimPid, reward);
       const def = ITEM_DEFS[reward];
       const pl = this.players[victimPid];
@@ -2881,6 +2885,13 @@ export class FlightChessEngine {
     this.timeOfDay = tod;
     this.todBlend = 0;
     this.onEnterTimeOfDay(tod);
+    this.emitSnapshot();
+  }
+
+  public setGameSpeed(speed: number): void {
+    const clamped = Math.min(2.5, Math.max(1.0, Math.round(speed * 10) / 10));
+    if (this.gameSpeed === clamped) return;
+    this.gameSpeed = clamped;
     this.emitSnapshot();
   }
 
@@ -5434,8 +5445,10 @@ export class FlightChessEngine {
       htn.groundHalo.visible = active;
       htn.spotLight.intensity = nightScale * 7.6;
       htn.dioramaGroup.visible = nightScale > 0.15;
-      htn.baseLampMat.emissiveIntensity = nightScale * 2.6;
-      htn.baseHaloMats.forEach((hm) => { hm.opacity = nightScale * 0.58; });
+      htn.baseStripMesh.visible = active;
+      htn.baseStripMat.opacity = nightScale * 0.88;
+      htn.baseStripGlowMesh.visible = active;
+      htn.baseStripGlowMat.opacity = nightScale * 0.65;
       htn.basePointLights.forEach((bpl) => { bpl.intensity = nightScale * 1.45; });
       htn.plaqueMat.emissiveIntensity = 0.2 + nightScale * 0.95;
       if (!active) {

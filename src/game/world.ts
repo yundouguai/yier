@@ -230,8 +230,10 @@ export interface WorldRefs {
     waveMats: THREE.MeshStandardMaterial[];
     waveHaloMats: THREE.MeshBasicMaterial[];
     canopyGlowLight: THREE.PointLight;
-    baseLampMat: THREE.MeshStandardMaterial;
-    baseHaloMats: THREE.MeshBasicMaterial[];
+    baseStripMesh: THREE.Mesh;
+    baseStripMat: THREE.MeshBasicMaterial;
+    baseStripGlowMesh: THREE.Mesh;
+    baseStripGlowMat: THREE.MeshBasicMaterial;
     basePointLights: THREE.PointLight[];
     plaqueMat: THREE.MeshStandardMaterial;
     wishingPlaques: { group: THREE.Group; phase: number; baseRotZ: number }[];
@@ -2275,29 +2277,7 @@ export function buildAncientWorld(
         return [rawX * sideTuck, hy, lowFrac];
       };
 
-      // 深绿内芯打底（饱满立体厚度，防止叶缝漏光）
-      const heartShape = new THREE.Shape();
-      const shapeSegs = 64;
-      for (let i = 0; i <= shapeSegs; i++) {
-        const t = (i / shapeSegs) * Math.PI * 2;
-        const [sx, sy] = heartPos(t, 0.72);
-        if (i === 0) heartShape.moveTo(sx, sy);
-        else heartShape.lineTo(sx, sy);
-      }
-      const canopyBodyGeo = new THREE.ExtrudeGeometry(heartShape, {
-        depth: 0.44,
-        bevelEnabled: true,
-        bevelThickness: 0.56,
-        bevelSize: 0.24,
-        bevelSegments: 10,
-        curveSegments: 40,
-      });
-      canopyBodyGeo.translate(0, 0, -0.22);
-      const canopyBodyMat = mat(0x215824, 0.84);
-      const canopyBodyMesh = new THREE.Mesh(canopyBodyGeo, canopyBodyMat);
-      canopyBodyMesh.castShadow = true;
-      canopyBodyMesh.receiveShadow = true;
-      heartTree.add(canopyBodyMesh);
+      // 内部深绿叶芯填充层（用小叶簇填实中空，不使用平直挤出板，确保全树都是自然树叶）
 
       // 细密蓬松的榕叶簇 InstancedMesh（550+ 枚小叶簇沿饱满弧面密铺，既有丰富叶感又平整柔和）
       interface LeafTuft {
@@ -2388,6 +2368,10 @@ export function buildAncientWorld(
               sizeScale,
               0.56,
             );
+          }
+          // 内层实体叶芯防透光
+          if (ring.s <= 0.78 && i % 2 === 0) {
+            pushTuft(hx, hy, 0, sizeScale * 1.35, 1.8);
           }
         }
       }
@@ -2572,53 +2556,46 @@ export function buildAncientWorld(
         wishingPlaques.push({ group: pg, phase: nextRand() * Math.PI * 2, baseRotZ });
       }
 
-      // 4c. 树池底座围一圈暖光小地灯（16 盏石座灯笼，夜晚亮起）
-      const baseLampPostMat = mat(0x3a2b22, 0.72);
-      const baseLampMat = new THREE.MeshStandardMaterial({
-        color: 0xffe6a3,
-        emissive: 0xffa834,
-        emissiveIntensity: 0,
-        roughness: 0.25,
+      // 4c. 树池底座透明隐藏式暖金灯带（白天完全隐形透明，仅夜晚亮起柔光）
+      const baseStripMat = new THREE.MeshBasicMaterial({
+        color: 0xffd584,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
       });
-      const baseHaloMats: THREE.MeshBasicMaterial[] = [];
-      const basePostGeo = new THREE.CylinderGeometry(0.026, 0.036, 0.14, 8);
-      const baseOrbGeo = new THREE.SphereGeometry(0.046, 10, 8);
-      const baseCapGeo = new THREE.ConeGeometry(0.062, 0.042, 8);
-      const baseHaloGeo = new THREE.CircleGeometry(0.18, 14);
-      for (let i = 0; i < 16; i++) {
-        const ang = (i / 16) * Math.PI * 2;
-        const bx = Math.cos(ang) * 1.19;
-        const bz = Math.sin(ang) * 1.19;
-        const lamp = new THREE.Group();
-        lamp.position.set(bx, 0.02, bz);
+      const baseStripMesh = new THREE.Mesh(
+        new THREE.TorusGeometry(1.155, 0.024, 12, 64),
+        baseStripMat,
+      );
+      baseStripMesh.rotation.x = Math.PI / 2;
+      baseStripMesh.position.y = 0.026;
+      baseStripMesh.visible = false;
+      heartTree.add(baseStripMesh);
 
-        const post = new THREE.Mesh(basePostGeo, baseLampPostMat);
-        post.position.y = 0.07;
-        lamp.add(post);
-
-        const orb = new THREE.Mesh(baseOrbGeo, baseLampMat);
-        orb.position.y = 0.16;
-        lamp.add(orb);
-
-        const cap = new THREE.Mesh(baseCapGeo, baseLampPostMat);
-        cap.position.y = 0.21;
-        lamp.add(cap);
-
-        const hMat = new THREE.MeshBasicMaterial({
-          color: 0xffc46b,
-          transparent: true,
-          opacity: 0,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        });
-        baseHaloMats.push(hMat);
-        const halo = new THREE.Mesh(baseHaloGeo, hMat);
-        halo.rotation.x = -Math.PI / 2;
-        halo.position.y = 0.015;
-        lamp.add(halo);
-
-        heartTree.add(lamp);
-      }
+      const sgCanvas = document.createElement('canvas');
+      sgCanvas.width = sgCanvas.height = 128;
+      const sgg = sgCanvas.getContext('2d')!;
+      const sgGrad = sgg.createRadialGradient(64, 64, 40, 64, 64, 63);
+      sgGrad.addColorStop(0, 'rgba(255, 200, 110, 0)');
+      sgGrad.addColorStop(0.45, 'rgba(255, 210, 125, 0.85)');
+      sgGrad.addColorStop(0.72, 'rgba(255, 180, 85, 0.45)');
+      sgGrad.addColorStop(1, 'rgba(255, 180, 85, 0)');
+      sgg.fillStyle = sgGrad;
+      sgg.fillRect(0, 0, 128, 128);
+      const sgTex = new THREE.CanvasTexture(sgCanvas);
+      const baseStripGlowMat = new THREE.MeshBasicMaterial({
+        map: sgTex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const baseStripGlowMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.85, 2.85), baseStripGlowMat);
+      baseStripGlowMesh.rotation.x = -Math.PI / 2;
+      baseStripGlowMesh.position.y = 0.022;
+      baseStripGlowMesh.visible = false;
+      heartTree.add(baseStripGlowMesh);
       const basePointLights: THREE.PointLight[] = [];
       for (const lx of [-1.25, 1.25]) {
         const bpl = new THREE.PointLight(0xffb454, 0, 4.4, 1.6);
@@ -2800,8 +2777,10 @@ export function buildAncientWorld(
         waveMats: treeWaveMats,
         waveHaloMats,
         canopyGlowLight,
-        baseLampMat,
-        baseHaloMats,
+        baseStripMesh,
+        baseStripMat,
+        baseStripGlowMesh,
+        baseStripGlowMat,
         basePointLights,
         plaqueMat,
         wishingPlaques,

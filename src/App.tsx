@@ -82,6 +82,7 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   rankings: [],
   gmDie: null,
   gmAutoPlay: false,
+  gameSpeed: 1.0,
   turnUsedAtkDef: false,
   turnUsedDef: false,
   armedSixDie: false,
@@ -465,6 +466,7 @@ export default function App() {
           onGmClearItems={() => engineRef.current?.gmClearItems()}
           onSetGmTimeOfDay={(tod) => engineRef.current?.setGmTimeOfDay(tod)}
           onToggleGmAutoPlay={() => engineRef.current?.toggleGmAutoPlay()}
+          onSetGameSpeed={(speed) => engineRef.current?.setGameSpeed(speed)}
           onActionPod={() => engineRef.current?.triggerActionPod()}
           onUseItem={(item) => engineRef.current?.useItem(item)}
           onPickItemTarget={(pid, idx) => engineRef.current?.pickItemTarget(pid, idx)}

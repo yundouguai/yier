@@ -207,7 +207,7 @@ export const GIFT_QUEST_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, num
   1: { sixDie: 85 / 3, twinDice: 85 / 3, refuel: 85 / 3, shield: 10, missile: 5 },
   // 阶段 2~3：奶油派 10%，其余 4 种平分剩余 90%
   2: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
-  3: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
+  3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
 };
 
 /** 按阶段（全场最多完赛棋子数 0/1/2/3）配置「道具商店」各道具出现权重/概率 */
@@ -215,7 +215,7 @@ export const SHOP_ITEM_WEIGHTS: Record<ProgressStage, Record<ItemType, number>> 
   // 阶段 0：奶油派 0%，其余 4 种平均分配
   0: { sixDie: 25, twinDice: 25, refuel: 25, shield: 25, missile: 0 },
   // 阶段 1：奶油派 10%，其余 4 种平分剩余 90%
-  1: { sixDie: 22.5, twinDice: 22.5, refuel: 22.5, shield: 22.5, missile: 10 },
+  1: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
   // 阶段 2~3：所有道具概率平均分配
   2: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
   3: { sixDie: 20, twinDice: 20, refuel: 20, shield: 20, missile: 20 },
@@ -520,6 +520,7 @@ export interface GameHudSnapshot {
   rankings: number[];
   gmDie: number | null;
   gmAutoPlay: boolean;
+  gameSpeed: number;
   turnUsedAtkDef: boolean;
   turnUsedDef: boolean;
   armedSixDie: boolean;

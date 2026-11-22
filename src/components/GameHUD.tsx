@@ -34,6 +34,7 @@ interface GameHUDProps {
   onGmClearItems: () => void;
   onSetGmTimeOfDay: (tod: TimeOfDay) => void;
   onToggleGmAutoPlay: () => void;
+  onSetGameSpeed: (speed: number) => void;
   onActionPod: () => void;
   onUseItem: (item: ItemType) => void;
   onPickItemTarget: (pid: number, idx: number) => void;
@@ -58,6 +59,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onGmClearItems,
   onSetGmTimeOfDay,
   onToggleGmAutoPlay,
+  onSetGameSpeed,
   onActionPod,
   onUseItem,
   onPickItemTarget,
@@ -71,6 +73,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 }) => {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [camMenuOpen, setCamMenuOpen] = useState(false);
+  const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [partyExpanded, setPartyExpanded] = useState(true);
@@ -1160,12 +1163,77 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           aria-label="天色、视角、规则、声音与设置"
         >
 
+          {/* 倍速开关（1.0x ~ 2.5x，加速投骰与棋子移动） */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setSpeedMenuOpen((v) => !v);
+                setCamMenuOpen(false);
+                setSettingsMenuOpen(false);
+              }}
+              title="调节游戏倍速（1.0x ~ 2.5x）"
+              aria-expanded={speedMenuOpen}
+              className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] md:text-xs font-bold tabular-nums transition-colors whitespace-nowrap cursor-pointer ${
+                speedMenuOpen
+                  ? 'bg-white/55 text-slate-900 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]'
+                  : snap.gameSpeed > 1.0
+                    ? 'bg-amber-400/20 text-amber-900 hover:bg-amber-400/30'
+                    : 'text-slate-700 hover:bg-white/40'
+              }`}
+            >
+              <span>⚡</span>
+              <span>{snap.gameSpeed.toFixed(1)}x</span>
+            </button>
+
+            {speedMenuOpen && (
+              <div className="anim-card-pop absolute right-0 top-full mt-2 w-48 rounded-2xl border border-white/70 bg-white/82 p-2.5 shadow-[0_12px_30px_rgba(15,23,42,0.16)] backdrop-blur-md">
+                <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-700">
+                  <span>节奏倍速</span>
+                  <span className="tabular-nums text-emerald-700">{snap.gameSpeed.toFixed(1)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min={1.0}
+                  max={2.5}
+                  step={0.1}
+                  value={snap.gameSpeed}
+                  onChange={(e) => onSetGameSpeed(parseFloat(e.target.value))}
+                  aria-label="游戏倍速"
+                  className="mb-2.5 h-1.5 w-full cursor-pointer accent-emerald-600"
+                />
+                <div className="grid grid-cols-4 gap-1">
+                  {[1.0, 1.5, 2.0, 2.5].map((sp) => (
+                    <button
+                      key={sp}
+                      type="button"
+                      onClick={() => {
+                        onSetGameSpeed(sp);
+                        setSpeedMenuOpen(false);
+                      }}
+                      className={`rounded-lg py-1 text-[11px] font-bold tabular-nums transition-colors cursor-pointer ${
+                        Math.abs(snap.gameSpeed - sp) < 0.05
+                          ? 'bg-emerald-500/18 text-emerald-800 ring-1 ring-emerald-500/30'
+                          : 'bg-white/60 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      {sp.toFixed(1)}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <span className="h-4 w-px bg-slate-700/15" aria-hidden="true" />
+
           {/* 视角下拉按钮 */}
           <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setCamMenuOpen((v) => !v);
+                setSpeedMenuOpen(false);
                 setSettingsMenuOpen(false);
               }}
               title="切换视角（快捷键 V）"
@@ -1234,6 +1302,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             type="button"
             onClick={() => {
               setCamMenuOpen(false);
+              setSpeedMenuOpen(false);
               setSettingsMenuOpen(false);
               setEmoteOpen(false);
               setRulesOpen(true);
@@ -1305,6 +1374,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               onClick={() => {
                 setSettingsMenuOpen((v) => !v);
                 setCamMenuOpen(false);
+                setSpeedMenuOpen(false);
               }}
               title="设置"
               aria-label="设置"
