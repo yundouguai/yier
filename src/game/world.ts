@@ -2252,7 +2252,7 @@ export function buildAncientWorld(
         heartTree.add(rootStrand);
       });
 
-      // 3. 平整饱满的雕塑级大爱心树冠（正反面平整利落，边缘辅以柔和叶簇）
+      // 3. 密密麻麻又平整蓬松的立体大爱心树冠（饱满弧度 + 细密小叶簇铺满正反面与边缘）
       let rngSeed = 73856093;
       const nextRand = () => {
         rngSeed = (rngSeed * 1664525 + 1013904223) >>> 0;
@@ -2275,31 +2275,31 @@ export function buildAncientWorld(
         return [rawX * sideTuck, hy, lowFrac];
       };
 
-      // 平整饱满的爱心立体主冠（ExtrudeGeometry + 圆润倒角，正反面平顺不凹凸，投影清晰）
+      // 深绿内芯打底（饱满立体厚度，防止叶缝漏光）
       const heartShape = new THREE.Shape();
       const shapeSegs = 64;
       for (let i = 0; i <= shapeSegs; i++) {
         const t = (i / shapeSegs) * Math.PI * 2;
-        const [sx, sy] = heartPos(t, 0.78);
+        const [sx, sy] = heartPos(t, 0.72);
         if (i === 0) heartShape.moveTo(sx, sy);
         else heartShape.lineTo(sx, sy);
       }
       const canopyBodyGeo = new THREE.ExtrudeGeometry(heartShape, {
-        depth: 0.24,
+        depth: 0.44,
         bevelEnabled: true,
-        bevelThickness: 0.42,
-        bevelSize: 0.34,
+        bevelThickness: 0.56,
+        bevelSize: 0.24,
         bevelSegments: 10,
         curveSegments: 40,
       });
-      canopyBodyGeo.translate(0, 0, -0.12);
-      const canopyBodyMat = mat(0x286a2a, 0.80);
+      canopyBodyGeo.translate(0, 0, -0.22);
+      const canopyBodyMat = mat(0x215824, 0.84);
       const canopyBodyMesh = new THREE.Mesh(canopyBodyGeo, canopyBodyMat);
       canopyBodyMesh.castShadow = true;
       canopyBodyMesh.receiveShadow = true;
       heartTree.add(canopyBodyMesh);
 
-      // 外缘柔和叶簇 & 正反面修平的浅层叶片（削弱颗粒球感，保留自然树叶层次）
+      // 细密蓬松的榕叶簇 InstancedMesh（550+ 枚小叶簇沿饱满弧面密铺，既有丰富叶感又平整柔和）
       interface LeafTuft {
         x: number;
         y: number;
@@ -2313,57 +2313,80 @@ export function buildAncientWorld(
         colHex: number;
       }
       const tufts: LeafTuft[] = [];
-      const leafPalette = [0x225e26, 0x2a6e2b, 0x337d31, 0x3d8d37, 0x489a3f];
+      const leafPalette = [0x1f5623, 0x286729, 0x32772f, 0x3d8836, 0x48963e];
 
       const pushTuft = (
         x: number,
         y: number,
         z: number,
         sizeBias = 1,
-        zFlat = 0.55,
+        zFlat = 0.62,
       ) => {
         const heightNorm = THREE.MathUtils.clamp((y - (heartCenterY - 1.85)) / 3.4, 0, 1);
         const shadeIdx = Math.min(
           leafPalette.length - 1,
-          Math.max(0, Math.floor(heightNorm * 3.7 + nextRand() * 1.1)),
+          Math.max(0, Math.floor(heightNorm * 3.7 + nextRand() * 1.15)),
         );
-        const baseR = (0.22 + nextRand() * 0.08) * sizeBias;
+        const baseR = (0.155 + nextRand() * 0.045) * sizeBias;
         tufts.push({
           x,
           y,
           z,
           sx: baseR * (1.02 + nextRand() * 0.16),
-          sy: baseR * (0.90 + nextRand() * 0.14),
+          sy: baseR * (0.94 + nextRand() * 0.14),
           sz: baseR * zFlat,
-          rx: (nextRand() - 0.5) * 0.25,
-          ry: (nextRand() - 0.5) * 0.35,
-          rz: (nextRand() - 0.5) * 0.35,
+          rx: (nextRand() - 0.5) * 0.35,
+          ry: (nextRand() - 0.5) * 0.45,
+          rz: (nextRand() - 0.5) * 0.45,
           colHex: leafPalette[shadeIdx],
         });
       };
 
-      // 外圈轮廓柔和叶簇（扁平化 Z 轴，告别大圆球）
-      const rimLayers: { s: number; tCount: number; zRings: number[]; zFlat: number; size: number }[] = [
-        { s: 0.96, tCount: 40, zRings: [-0.16, 0.16], zFlat: 0.55, size: 0.92 },
-        { s: 0.84, tCount: 30, zRings: [-0.36, 0.36], zFlat: 0.42, size: 0.88 },
-        { s: 0.56, tCount: 16, zRings: [-0.50, 0.50], zFlat: 0.22, size: 0.78 },
+      // 1) 外缘一圈蓬松轮廓层（中线 z = 0 与前后肩线）
+      for (let i = 0; i < 64; i++) {
+        const t = ((i + (nextRand() - 0.5) * 0.18) / 64) * Math.PI * 2;
+        const [hx, hy, lowFrac] = heartPos(t, 0.98);
+        const isTip = hy < heartCenterY - 1.5;
+        const zSpan = (isTip ? 0.14 : 0.28) * (1 - 0.30 * lowFrac);
+        for (const zr of [-zSpan, 0, zSpan]) {
+          pushTuft(
+            hx + (nextRand() - 0.5) * 0.04,
+            hy + (nextRand() - 0.5) * 0.04,
+            zr,
+            (isTip ? 0.78 : 1.02) * (1 - 0.22 * lowFrac),
+            0.78,
+          );
+        }
+      }
+
+      // 2) 正反两面密密麻麻、沿饱满弧面整齐修平的蓬松小叶簇
+      const cushionRings: { s: number; tCount: number }[] = [
+        { s: 0.88, tCount: 54 },
+        { s: 0.75, tCount: 44 },
+        { s: 0.61, tCount: 36 },
+        { s: 0.46, tCount: 26 },
+        { s: 0.30, tCount: 16 },
+        { s: 0.14, tCount: 8 },
       ];
-      for (const layer of rimLayers) {
-        for (let i = 0; i < layer.tCount; i++) {
-          const t = ((i + (nextRand() - 0.5) * 0.2) / layer.tCount) * Math.PI * 2;
-          const [hx, hy, lowFrac] = heartPos(t, layer.s);
-          const inCleft = Math.abs(hx) < 0.42 && hy > heartCenterY + 0.24;
-          const isTip = hy < heartCenterY - 1.5;
-          const zTaper = 1 - 0.35 * lowFrac;
-          for (const zr of layer.zRings) {
-            if (inCleft && Math.abs(zr) < 0.35 && layer.s > 0.75) continue;
-            if (isTip && Math.abs(zr) > 0.22) continue;
+      for (const ring of cushionRings) {
+        for (let i = 0; i < ring.tCount; i++) {
+          const t = ((i + (nextRand() - 0.5) * 0.22) / ring.tCount) * Math.PI * 2;
+          const [hx, hy, lowFrac] = heartPos(t, ring.s);
+          const inCleft = Math.abs(hx) < 0.34 && hy > heartCenterY + 0.28;
+          if (inCleft && ring.s > 0.72) continue;
+          const isTip = hy < heartCenterY - 1.52;
+          const zDome =
+            0.84 *
+            Math.sqrt(Math.max(0.08, 1 - ring.s * ring.s * 0.86)) *
+            (1 - 0.32 * lowFrac);
+          const sizeScale = (isTip ? 0.76 : 0.96) * (1 - 0.18 * lowFrac);
+          for (const side of [-1, 1]) {
             pushTuft(
               hx + (nextRand() - 0.5) * 0.05,
               hy + (nextRand() - 0.5) * 0.05,
-              zr * zTaper,
-              (isTip ? 0.70 : layer.size) * (1 - 0.20 * lowFrac),
-              layer.zFlat,
+              side * (zDome + (nextRand() - 0.5) * 0.025),
+              sizeScale,
+              0.56,
             );
           }
         }

@@ -3586,7 +3586,7 @@ export class FlightChessEngine {
         this.setMsg(`⚙️ 双倍珍珠奶茶掷出 ${d1} + ${d2} = ${this.die} 点`);
       }
       this.emitSnapshot();
-      await this.onRolled(this.die, d1 >= 5 || d2 >= 5);
+      await this.onRolled(this.die, d1 >= 5 || d2 >= 5 || this.die === 5 || this.die === 6);
       return;
     }
 

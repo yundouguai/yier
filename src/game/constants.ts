@@ -159,7 +159,7 @@ export const ITEM_DEFS: Record<ItemType, ItemDef> = {
     icon: '🧋',
     shortEffect: '同时掷两颗骰子',
     limitNote: '投出 6 无连投',
-    desc: '吨吨炫完双倍珍珠奶茶，同时掷两颗骰子按点数之和前进（任一为 5/6 可起飞）。',
+    desc: '吨吨炫完双倍珍珠奶茶，同时掷两颗骰子按点数之和前进（任一或点数之和为 5/6 可起飞）。',
     accentColor: '#c97b3e',
   },
   refuel: {
