@@ -278,6 +278,8 @@ export interface TimeOfDayPreset {
   label: string;
   icon: string;
   skyBgHex: number;
+  skyZenithHex: number;
+  skyHorizonHex: number;
   fogHex: number;
   fogNear: number;
   fogFar: number;
@@ -354,6 +356,8 @@ export const MAPS: Record<MapId, MapConfig> = {
         label: '清晨',
         icon: '🌅',
         skyBgHex: 0xfce0cf,
+        skyZenithHex: 0x7cb8f0,
+        skyHorizonHex: 0xfbe0d0,
         fogHex: 0xf9e2d2,
         fogNear: 38,
         fogFar: 96,
@@ -380,6 +384,8 @@ export const MAPS: Record<MapId, MapConfig> = {
         label: '中午',
         icon: '☀️',
         skyBgHex: 0xc5e6fc,
+        skyZenithHex: 0x4b9ce8,
+        skyHorizonHex: 0xcfeafd,
         fogHex: 0xd8ecf9,
         fogNear: 68,
         fogFar: 150,
@@ -406,6 +412,8 @@ export const MAPS: Record<MapId, MapConfig> = {
         label: '下午',
         icon: '🌇',
         skyBgHex: 0xf4b378,
+        skyZenithHex: 0x4a66a6,
+        skyHorizonHex: 0xf4ad72,
         fogHex: 0xefaa72,
         fogNear: 34,
         fogFar: 90,
@@ -432,6 +440,8 @@ export const MAPS: Record<MapId, MapConfig> = {
         label: '夜晚',
         icon: '🌙',
         skyBgHex: 0x0f182e,
+        skyZenithHex: 0x091024,
+        skyHorizonHex: 0x18284a,
         fogHex: 0x14203d,
         fogNear: 28,
         fogFar: 82,

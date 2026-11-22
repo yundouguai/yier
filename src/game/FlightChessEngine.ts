@@ -5421,6 +5421,14 @@ export class FlightChessEngine {
       this._todColB.setHex(B.skyBgHex);
       this.scene.background.copy(this._todColA).lerp(this._todColB, ease);
     }
+    if (this.world.skyDomeMat) {
+      this._todColA.setHex(A.skyZenithHex);
+      this._todColB.setHex(B.skyZenithHex);
+      this.world.skyDomeMat.uniforms.uZenith.value.copy(this._todColA).lerp(this._todColB, ease);
+      this._todColA.setHex(A.skyHorizonHex);
+      this._todColB.setHex(B.skyHorizonHex);
+      this.world.skyDomeMat.uniforms.uHorizon.value.copy(this._todColA).lerp(this._todColB, ease);
+    }
     if (this.scene.fog instanceof THREE.Fog) {
       this._todColA.setHex(A.fogHex);
       this._todColB.setHex(B.fogHex);
@@ -5501,7 +5509,7 @@ export class FlightChessEngine {
     const sunriseOp = THREE.MathUtils.clamp(mistOp / 0.45, 0, 1);
     if (this.world.sunriseGroup && this.world.sunriseDiscMat && this.world.sunriseHaloMat) {
       this.world.sunriseDiscMat.opacity = sunriseOp * 0.96;
-      this.world.sunriseHaloMat.opacity = sunriseOp * 0.85;
+      this.world.sunriseHaloMat.opacity = sunriseOp * 0.70;
       this.world.sunriseGroup.visible = sunriseOp > 0.015;
     }
 

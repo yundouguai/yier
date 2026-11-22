@@ -231,6 +231,7 @@ export interface WorldRefs {
   sunriseDiscMat?: THREE.MeshBasicMaterial;
   sunriseHaloMesh?: THREE.Mesh;
   sunriseHaloMat?: THREE.MeshBasicMaterial;
+  skyDomeMat?: THREE.ShaderMaterial;
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
     waveHaloMats: THREE.MeshBasicMaterial[];
@@ -5925,7 +5926,7 @@ export function buildAncientWorld(
     depthWrite: false,
     fog: false,
   });
-  const sunriseDiscMesh = new THREE.Mesh(new THREE.SphereGeometry(2.1, 24, 18), sunriseDiscMat);
+  const sunriseDiscMesh = new THREE.Mesh(new THREE.SphereGeometry(0.95, 24, 18), sunriseDiscMat);
   sunriseGroup.add(sunriseDiscMesh);
 
   const shCanvas = document.createElement('canvas');
@@ -5947,9 +5948,40 @@ export function buildAncientWorld(
     blending: THREE.AdditiveBlending,
     fog: false,
   });
-  const sunriseHaloMesh = new THREE.Mesh(new THREE.PlaneGeometry(17, 17), sunriseHaloMat);
+  const sunriseHaloMesh = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 7.5), sunriseHaloMat);
   sunriseGroup.add(sunriseHaloMesh);
   scene.add(sunriseGroup);
+
+  // 6) 随时辰渐变的天空穹顶（天顶蓝/夜空到地平线晨曦/晚霞自然过渡，消除单色粉黄感）
+  const skyDomeMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uZenith: { value: new THREE.Color(0x7cb8f0) },
+      uHorizon: { value: new THREE.Color(0xfbe0d0) },
+    },
+    vertexShader: `
+      varying float vH;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vH = clamp(normalize(wp.xyz).y, 0.0, 1.0);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uZenith;
+      uniform vec3 uHorizon;
+      varying float vH;
+      void main() {
+        float t = pow(vH, 0.58);
+        gl_FragColor = vec4(mix(uHorizon, uZenith, t), 1.0);
+      }
+    `,
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+  });
+  const skyDome = new THREE.Mesh(new THREE.SphereGeometry(85, 24, 16), skyDomeMat);
+  skyDome.renderOrder = -10;
+  scene.add(skyDome);
 
   return {
     waterMesh,
@@ -5977,6 +6009,7 @@ export function buildAncientWorld(
     sunriseDiscMat,
     sunriseHaloMesh,
     sunriseHaloMat,
+    skyDomeMat,
     heartTreeNight: heartTreeNightData,
     waterY: WATER_Y,
     rideToys,
