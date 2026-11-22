@@ -323,7 +323,7 @@ export class FlightChessEngine {
   };
   private stage1FishState = {
     cycleT: 20.0,
-    isGiant: false,
+    catchKind: 'normal' as 'normal' | 'giant' | 'boot',
     fishColorHex: 0xf97316,
   };
 
@@ -1362,7 +1362,16 @@ export class FlightChessEngine {
         p.shieldMesh.visible = false;
         continue;
       }
-      if (p.pos >= 1) {
+      if (p.pos === 0) {
+        const startShielded = this.planes
+          .filter((q) => q.pid === p.pid && q.pos === 0 && q.shielded)
+          .sort((a, b) => a.idx - b.idx);
+        if (startShielded.length >= 2 && startShielded[0] !== p) {
+          // 起点台有多只带盾小熊时：各自保留护盾状态，但仅渲染 1 个合并大泡泡罩包裹全员，杜绝重影穿插
+          p.shieldMesh.visible = false;
+          continue;
+        }
+      } else if (p.pos >= 1) {
         const stack = this.planes
           .filter((q) => q.pid === p.pid && q.pos === p.pos)
           .sort((a, b) => a.idx - b.idx);
@@ -6803,7 +6812,32 @@ export class FlightChessEngine {
             sIdx = foundIdx >= 0 ? foundIdx : 0;
           }
           const pulse = 1 + Math.sin(t * 2.6 + p.phase) * 0.02;
-          if (sTotal >= 2) {
+          if (p.pos === 0) {
+            const startShielded = this.planes.filter((q) => q.pid === p.pid && q.pos === 0 && q.shielded);
+            if (startShielded.length >= 2) {
+              let cx = 0;
+              let cz = 0;
+              for (const q of startShielded) {
+                cx += q.mesh.position.x;
+                cz += q.mesh.position.z;
+              }
+              cx /= startShielded.length;
+              cz /= startShielded.length;
+              const dx = cx - p.mesh.position.x;
+              const dz = cz - p.mesh.position.z;
+              const cosY = Math.cos(-p.mesh.rotation.y);
+              const sinY = Math.sin(-p.mesh.rotation.y);
+              const lx = (dx * cosY - dz * sinY) / 0.92;
+              const lz = (dx * sinY + dz * cosY) / 0.92;
+              const scXZ = (startShielded.length === 2 ? 1.34 : 1.46) * pulse;
+              const scY = (startShielded.length === 2 ? 1.12 : 1.18) * pulse;
+              p.shieldMesh.position.set(lx, -0.34 * (scY - 1), lz);
+              p.shieldMesh.scale.set(scXZ, scY, scXZ);
+            } else {
+              p.shieldMesh.position.set(0, 0, 0);
+              p.shieldMesh.scale.setScalar(pulse);
+            }
+          } else if (sTotal >= 2) {
             const centerOffsetY = ((sTotal - 1) * 0.5 - sIdx) * (STACK_STEP_Y / 0.92);
             const sx = (1 + (sTotal - 1) * 0.14) * pulse;
             const sy = (1 + (sTotal - 1) * 0.72) * pulse;
@@ -8547,10 +8581,11 @@ export class FlightChessEngine {
         // A) 布布河边钓鱼（约 40 秒一次咬钩：普通彩鱼拉进木桶；35% 概率出现超大河王鱼直接把布布拉进河里，湿漉漉爬上岸站立 7.5 秒抖水后再坐下继续钓）
         const fSt = this.stage1FishState;
         fSt.cycleT += dt;
-        const cycleDur = fSt.isGiant ? 43.5 : 40.0;
+        const cycleDur = fSt.catchKind === 'giant' ? 43.5 : 40.0;
         if (fSt.cycleT >= cycleDur) {
           fSt.cycleT = 0;
-          fSt.isGiant = Math.random() < 0.35;
+          const rr = Math.random();
+          fSt.catchKind = rr < 0.10 ? 'boot' : rr < 0.40 ? 'giant' : 'normal';
           const palette = [0xf97316, 0xfacc15, 0x0ea5e9, 0xec4899];
           fSt.fishColorHex = palette[Math.floor(Math.random() * palette.length)];
           s1.caughtFishBodyMat.color.setHex(fSt.fishColorHex);
@@ -8582,6 +8617,7 @@ export class FlightChessEngine {
           s1.bobber.visible = true;
           s1.caughtFish.visible = false;
           s1.giantFish.visible = false;
+          s1.oldBoot.visible = false;
           s1.bobber.position.set(
             s1.waterSpot.x,
             s1.waterSpot.y + Math.sin(t * 2.6) * 0.018,
@@ -8599,28 +8635,109 @@ export class FlightChessEngine {
         } else if (fc < 29.0) {
           // 鱼咬钩剧烈拉扯
           resetSeatedBubu();
-          const nibble = Math.sin((fc - 26.5) * (fSt.isGiant ? 24 : 18));
-          rodPitch = fSt.isGiant ? 0.18 + nibble * 0.14 : -0.06 + nibble * 0.08;
+          const nibble = Math.sin((fc - 26.5) * ((fSt.catchKind === 'giant') ? 24 : 18));
+          rodPitch = (fSt.catchKind === 'giant') ? 0.18 + nibble * 0.14 : -0.06 + nibble * 0.08;
           s1.bobber.visible = true;
           s1.caughtFish.visible = false;
           s1.giantFish.visible = false;
+          s1.oldBoot.visible = false;
           s1.bobber.position.set(
-            s1.waterSpot.x + Math.sin(t * 16) * (fSt.isGiant ? 0.11 : 0.05),
-            s1.waterSpot.y - (fSt.isGiant ? 0.065 : 0.035) + Math.abs(nibble) * 0.04,
-            s1.waterSpot.z + Math.cos(t * 14) * (fSt.isGiant ? 0.11 : 0.05),
+            s1.waterSpot.x + Math.sin(t * 16) * ((fSt.catchKind === 'giant') ? 0.11 : 0.05),
+            s1.waterSpot.y - ((fSt.catchKind === 'giant') ? 0.065 : 0.035) + Math.abs(nibble) * 0.04,
+            s1.waterSpot.z + Math.cos(t * 14) * ((fSt.catchKind === 'giant') ? 0.11 : 0.05),
           );
           lineTarget.copy(s1.bobber.position);
           const rp = ((fc - 26.5) * 2.4) % 1;
-          s1.bubuRipple.scale.setScalar(0.9 + rp * (fSt.isGiant ? 4.4 : 3.0));
+          s1.bubuRipple.scale.setScalar(0.9 + rp * ((fSt.catchKind === 'giant') ? 4.4 : 3.0));
           (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.85;
           if (bfPt) {
-            bfPt.animRoot.rotation.x = fSt.isGiant ? 0.22 + nibble * 0.1 : -0.06 + nibble * 0.06;
+            bfPt.animRoot.rotation.x = (fSt.catchKind === 'giant') ? 0.22 + nibble * 0.1 : -0.06 + nibble * 0.06;
             bfPt.headPivot.rotation.x = 0.06;
           }
-        } else if (!fSt.isGiant) {
+        } else if (fSt.catchKind === 'boot') {
+          // 极低概率彩蛋：钓上来一只旧靴子 -> 布布嫌弃摇头 -> 顺手扔回河里激起水花 -> 重新抛竿
+          resetSeatedBubu();
+          s1.caughtFish.visible = false;
+          s1.giantFish.visible = false;
+          const handSpot = new THREE.Vector3(
+            s1.bubuSeatPos.x + Math.sin(s1.bubuFaceYaw) * 0.44,
+            s1.bubuSeatPos.y + 0.34,
+            s1.bubuSeatPos.z + Math.cos(s1.bubuFaceYaw) * 0.44,
+          );
+          if (fc < 30.8) {
+            const p = (fc - 29.0) / 1.8;
+            const ease = 1 - Math.pow(1 - p, 2);
+            rodPitch = -0.52 * Math.sin(Math.min(1, p * 1.25) * Math.PI * 0.5);
+            s1.bobber.visible = false;
+            s1.oldBoot.visible = true;
+            const bx = THREE.MathUtils.lerp(s1.waterSpot.x, handSpot.x, ease);
+            const bz = THREE.MathUtils.lerp(s1.waterSpot.z, handSpot.z, ease);
+            const by = THREE.MathUtils.lerp(s1.waterSpot.y, handSpot.y, ease) + Math.sin(p * Math.PI) * 0.95;
+            s1.oldBoot.position.set(bx, by, bz);
+            s1.oldBoot.rotation.set(p * 4.2, s1.bubuFaceYaw + p * 2.5, Math.sin(p * Math.PI) * 0.6);
+            lineTarget.set(bx, by + 0.08, bz);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.7 * (1 - p * 1.5));
+          } else if (fc < 32.8) {
+            // 布布盯着旧靴子直摇头
+            const p = (fc - 30.8) / 2.0;
+            showLine = false;
+            s1.bobber.visible = false;
+            s1.oldBoot.visible = true;
+            s1.oldBoot.position.copy(handSpot);
+            s1.oldBoot.rotation.set(0.25, s1.bubuFaceYaw + 0.6, 0.15);
+            rodPitch = -0.32;
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = 0;
+            if (bfPt) {
+              bfPt.headPivot.rotation.x = 0.22;
+              bfPt.headPivot.rotation.y = Math.sin(p * Math.PI * 4) * 0.34;
+            }
+          } else if (fc < 34.4) {
+            // 挥手把旧靴子扔回护城河里
+            const p = (fc - 32.8) / 1.6;
+            showLine = false;
+            s1.bobber.visible = false;
+            s1.oldBoot.visible = p < 0.94;
+            const bx = THREE.MathUtils.lerp(handSpot.x, s1.waterSpot.x + 0.35, p);
+            const bz = THREE.MathUtils.lerp(handSpot.z, s1.waterSpot.z + 0.35, p);
+            const by = THREE.MathUtils.lerp(handSpot.y, s1.waterSpot.y - 0.12, p) + Math.sin(p * Math.PI) * 0.85;
+            s1.oldBoot.position.set(bx, by, bz);
+            s1.oldBoot.rotation.set(p * 6.5, s1.bubuFaceYaw, p * 4.0);
+            if (bfPt) {
+              bfPt.leftArm.rotation.x = -1.6 + p * 1.2;
+              bfPt.animRoot.rotation.x = 0.16 * Math.sin(p * Math.PI);
+            }
+            if (p > 0.75) {
+              const sp = (p - 0.75) / 0.25;
+              s1.bubuRipple.scale.setScalar(0.9 + sp * 3.8);
+              (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - sp) * 0.85;
+            } else {
+              (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = 0;
+            }
+          } else if (fc < 36.2) {
+            const p = (fc - 34.4) / 1.8;
+            rodPitch = THREE.MathUtils.lerp(-0.3, 0.0, p);
+            s1.oldBoot.visible = false;
+            s1.bobber.visible = true;
+            s1.bobber.position.set(
+              THREE.MathUtils.lerp(handSpot.x, s1.waterSpot.x, p),
+              THREE.MathUtils.lerp(handSpot.y, s1.waterSpot.y, p) + Math.sin(p * Math.PI) * 0.5,
+              THREE.MathUtils.lerp(handSpot.z, s1.waterSpot.z, p),
+            );
+            lineTarget.copy(s1.bobber.position);
+          } else {
+            s1.oldBoot.visible = false;
+            s1.bobber.visible = true;
+            s1.bobber.position.set(s1.waterSpot.x, s1.waterSpot.y + Math.sin(t * 2.6) * 0.018, s1.waterSpot.z);
+            lineTarget.copy(s1.bobber.position);
+            const rp = (t * 0.5) % 1;
+            s1.bubuRipple.scale.setScalar(0.7 + rp * 1.8);
+            (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.42;
+          }
+        } else if (fSt.catchKind === 'normal') {
           // 普通彩鱼分支：扬竿入桶 -> 开心点头 -> 重新抛竿
           resetSeatedBubu();
           s1.giantFish.visible = false;
+          s1.oldBoot.visible = false;
           if (fc < 31.2) {
             const p = (fc - 29.0) / 2.2;
             const ease = 1 - Math.pow(1 - p, 2);
@@ -8672,6 +8789,7 @@ export class FlightChessEngine {
         } else {
           // 超大鱼分支：大鱼探头猛拽 -> 布布被拉进河里扑腾 -> 湿漉漉爬上岸站立 7.5 秒抖水 -> 重新坐回抛竿
           s1.caughtFish.visible = false;
+          s1.oldBoot.visible = false;
           s1.bobber.visible = false;
           if (fc < 30.8) {
             // 超大鱼破水而出猛力拖拽，布布被拽得前倾拔河
@@ -8837,7 +8955,7 @@ export class FlightChessEngine {
         const yCyc = t % 9.2;
         const ysPt = s1.yier.userData.parts as PlaneParts | undefined;
         const ysFp = ysPt?.headMesh.userData.faceParts as HeadFaceParts | undefined;
-        const amazedByKoi = fSt.isGiant && fc >= 29.0 && fc < 33.4;
+        const amazedByKoi = fSt.catchKind === 'giant' && fc >= 29.0 && fc < 33.4;
         if (this.stage1YierBubble) {
           this.stage1YierBubble.visible = amazedByKoi;
         }

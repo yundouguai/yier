@@ -257,6 +257,7 @@ export interface WorldRefs {
     caughtFish: THREE.Group;
     caughtFishBodyMat: THREE.MeshStandardMaterial;
     giantFish: THREE.Group;
+    oldBoot: THREE.Group;
     wetDrops: THREE.Mesh[];
     bubuRipple: THREE.Mesh;
     bucketPos: THREE.Vector3;
@@ -6448,7 +6449,8 @@ export function buildAncientWorld(
   stage1FishGroup.add(fishBucket);
 
   const bubuFisher = makeStage0Bear(CHARS.bubu);
-  bubuFisher.position.set(bubuFishX, -0.52, bubuFishZ);
+  bubuFisher.scale.setScalar(0.58 * 1.2);
+  bubuFisher.position.set(bubuFishX, -0.51, bubuFishZ);
   bubuFisher.rotation.y = bubuFaceYaw;
   const bfParts = bubuFisher.userData.parts as PlaneParts;
   bfParts.leftFoot.rotation.x = -1.05;
@@ -6459,6 +6461,7 @@ export function buildAncientWorld(
   // 竹制钓鱼竿（挂在布布右前爪附近）
   const rodPivot = new THREE.Group();
   rodPivot.position.set(0.16, 0.24, 0.18);
+  rodPivot.scale.setScalar(1 / 1.2);
   const bambooMat = mat(0xb59449, 0.58);
   const rodShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.022, 2.35, 8), bambooMat);
   rodShaft.rotation.x = Math.PI / 2 - 0.34;
@@ -6480,6 +6483,7 @@ export function buildAncientWorld(
   const bobBot = new THREE.Mesh(new THREE.SphereGeometry(0.038, 10, 8), mat(0xf8fafc, 0.4));
   bobBot.position.y = -0.018;
   bobber.add(bobBot);
+  bobber.scale.setScalar(0.62);
   bobber.position.copy(waterSpot);
   stage1FishGroup.add(bobber);
 
@@ -6547,161 +6551,243 @@ export function buildAncientWorld(
     return { group: fg, bodyMat: fBodyMat };
   };
 
-  const normalFishBuilt = makeDetailedFish(0xf97316, 0xfbbf24, 1.05);
+  const normalFishBuilt = makeDetailedFish(0xf97316, 0xfbbf24, 0.735);
   const caughtFish = normalFishBuilt.group;
   const caughtFishBodyMat = normalFishBuilt.bodyMat;
   caughtFish.visible = false;
   stage1FishGroup.add(caughtFish);
 
-  // 超美丽超精致的「丹顶蝴蝶大锦鲤」（珍珠白底 + 金边鱼鳞 + 绯红丹顶与云锦斑 + 半透飘逸蝶翼金红长鳍）
+  // 黄金锦鲤（参考纯金白鳞山吹黄金鲤：光滑香槟金头 + 立体金白渐变鱼鳞 + 优雅S型流线身姿 + 细腻放射纹半透金纱鱼鳍，缩小30%）
   const koiCanvas = document.createElement('canvas');
-  koiCanvas.width = 256;
-  koiCanvas.height = 128;
+  koiCanvas.width = 512;
+  koiCanvas.height = 256;
   const kc = koiCanvas.getContext('2d')!;
-  const kGrad = kc.createLinearGradient(0, 0, 0, 128);
-  kGrad.addColorStop(0, '#fff9f0');
-  kGrad.addColorStop(0.55, '#fffdf9');
-  kGrad.addColorStop(1, '#ffe8c2');
+  // 从尾(y=0)到头(y=256)：LatheGeometry v=0 在尾部(-0.54), v=1 在吻端(+0.48)
+  const kGrad = kc.createLinearGradient(0, 0, 0, 256);
+  kGrad.addColorStop(0, '#f59e0b');
+  kGrad.addColorStop(0.45, '#fbbf24');
+  kGrad.addColorStop(0.76, '#fde68a');
+  kGrad.addColorStop(1, '#fff3c4');
   kc.fillStyle = kGrad;
-  kc.fillRect(0, 0, 256, 128);
-  // 精致红白锦鲤云纹斑块（含额头丹顶圆印）
-  kc.fillStyle = '#ef3340';
-  kc.beginPath();
-  kc.ellipse(42, 48, 22, 16, 0.1, 0, Math.PI * 2);
-  kc.fill();
-  kc.beginPath();
-  kc.ellipse(112, 34, 42, 26, -0.12, 0, Math.PI * 2);
-  kc.fill();
-  kc.beginPath();
-  kc.ellipse(186, 46, 30, 20, 0.15, 0, Math.PI * 2);
-  kc.fill();
-  kc.fillStyle = '#ff9f1c';
-  kc.beginPath();
-  kc.ellipse(152, 62, 18, 12, 0.2, 0, Math.PI * 2);
-  kc.fill();
-  // 细腻金边鱼鳞纹理
-  kc.strokeStyle = 'rgba(245, 184, 65, 0.42)';
-  kc.lineWidth = 1.6;
-  for (let row = 0; row < 9; row++) {
-    for (let col = 0; col < 18; col++) {
-      const sx = col * 15 + (row % 2) * 7;
-      const sy = row * 14 + 8;
+  kc.fillRect(0, 0, 512, 256);
+
+  // 中后段躯干（y = 14..184）绘密集精致的金白双色立体鱼鳞，头部（y > 186）保持丝滑香槟金与珍珠白
+  for (let row = 1; row < 15; row++) {
+    const sy = row * 12;
+    for (let col = 0; col < 24; col++) {
+      const sx = col * 22 + (row % 2) * 11;
+      const isPearl = ((row + col) % 3 === 0) || (col % 6 === 2);
+      const sg = kc.createRadialGradient(sx, sy - 3, 1.5, sx, sy, 11);
+      if (isPearl) {
+        sg.addColorStop(0, '#fffdf5');
+        sg.addColorStop(0.65, '#fef3c7');
+        sg.addColorStop(1, '#d97706');
+      } else {
+        sg.addColorStop(0, '#fde047');
+        sg.addColorStop(0.62, '#f59e0b');
+        sg.addColorStop(1, '#b45309');
+      }
+      kc.fillStyle = sg;
       kc.beginPath();
-      kc.arc(sx, sy, 8, -0.6, 0.6);
+      kc.arc(sx, sy, 10.5, 0, Math.PI, false);
+      kc.closePath();
+      kc.fill();
+      kc.strokeStyle = 'rgba(146, 64, 14, 0.38)';
+      kc.lineWidth = 1.2;
       kc.stroke();
     }
   }
+  // 头部与腮盖：纯滑亮金脊线 + 珍珠白颊部过渡
+  const headGrad = kc.createLinearGradient(0, 184, 0, 256);
+  headGrad.addColorStop(0, '#facc15');
+  headGrad.addColorStop(0.5, '#fde047');
+  headGrad.addColorStop(1, '#f59e0b');
+  kc.fillStyle = headGrad;
+  kc.fillRect(0, 184, 512, 72);
+  // 腮盖柔白高光带
+  kc.fillStyle = 'rgba(255, 252, 240, 0.55)';
+  kc.fillRect(0, 188, 512, 16);
+  kc.strokeStyle = 'rgba(180, 83, 9, 0.55)';
+  kc.lineWidth = 2.5;
+  kc.beginPath();
+  kc.moveTo(0, 185);
+  kc.lineTo(512, 185);
+  kc.stroke();
+
   const koiTex = new THREE.CanvasTexture(koiCanvas);
+  koiTex.wrapS = THREE.RepeatWrapping;
   const koiBodyMat = new THREE.MeshStandardMaterial({
     map: koiTex,
-    roughness: 0.2,
-    metalness: 0.16,
-    emissive: 0xffc864,
-    emissiveIntensity: 0.14,
-  });
-  const koiVeilMat = new THREE.MeshStandardMaterial({
-    color: 0xffd166,
-    emissive: 0xff6b4a,
-    emissiveIntensity: 0.22,
-    roughness: 0.25,
-    transparent: true,
-    opacity: 0.86,
-    side: THREE.DoubleSide,
-  });
-  const koiCoralFinMat = new THREE.MeshStandardMaterial({
-    color: 0xff5a5f,
+    roughness: 0.22,
+    metalness: 0.28,
     emissive: 0xf59e0b,
-    emissiveIntensity: 0.18,
-    roughness: 0.28,
+    emissiveIntensity: 0.16,
+  });
+
+  // 鱼鳍专属细腻放射鳍条半透金纱贴图
+  const finCanvas = document.createElement('canvas');
+  finCanvas.width = 128;
+  finCanvas.height = 128;
+  const fcCtx = finCanvas.getContext('2d')!;
+  const fGrad = fcCtx.createLinearGradient(0, 64, 128, 64);
+  fGrad.addColorStop(0, 'rgba(245, 158, 11, 0.96)');
+  fGrad.addColorStop(0.55, 'rgba(253, 224, 71, 0.88)');
+  fGrad.addColorStop(1, 'rgba(255, 251, 235, 0.72)');
+  fcCtx.fillStyle = fGrad;
+  fcCtx.fillRect(0, 0, 128, 128);
+  fcCtx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  fcCtx.lineWidth = 1.6;
+  for (let r = 0; r < 14; r++) {
+    const y = 8 + (r / 13) * 112;
+    fcCtx.beginPath();
+    fcCtx.moveTo(0, 64);
+    fcCtx.quadraticCurveTo(64, (64 + y) * 0.5, 128, y);
+    fcCtx.stroke();
+  }
+  const finTex = new THREE.CanvasTexture(finCanvas);
+  const koiFinMat = new THREE.MeshStandardMaterial({
+    map: finTex,
+    roughness: 0.26,
+    metalness: 0.18,
+    emissive: 0xfbbf24,
+    emissiveIntensity: 0.2,
     transparent: true,
     opacity: 0.9,
     side: THREE.DoubleSide,
   });
 
   const giantFish = new THREE.Group();
-  // 流线型优美锦鲤身躯（LatheGeometry 沿 Z 轴塑形）
+  // 优雅 S 型游动身躯（LatheGeometry + 柔和水平 S 弯曲变形）
   const koiProfile = [
-    new THREE.Vector2(0.0, -0.52),
-    new THREE.Vector2(0.045, -0.44),
-    new THREE.Vector2(0.085, -0.32),
-    new THREE.Vector2(0.145, -0.14),
-    new THREE.Vector2(0.185, 0.05),
-    new THREE.Vector2(0.175, 0.22),
-    new THREE.Vector2(0.125, 0.36),
-    new THREE.Vector2(0.052, 0.45),
-    new THREE.Vector2(0.0, 0.48),
+    new THREE.Vector2(0.0, -0.54),
+    new THREE.Vector2(0.036, -0.45),
+    new THREE.Vector2(0.068, -0.32),
+    new THREE.Vector2(0.118, -0.14),
+    new THREE.Vector2(0.158, 0.06),
+    new THREE.Vector2(0.162, 0.22),
+    new THREE.Vector2(0.132, 0.34),
+    new THREE.Vector2(0.072, 0.43),
+    new THREE.Vector2(0.022, 0.48),
+    new THREE.Vector2(0.0, 0.49),
   ];
-  const koiBodyGeo = new THREE.LatheGeometry(koiProfile, 22);
+  const koiBodyGeo = new THREE.LatheGeometry(koiProfile, 26);
   koiBodyGeo.rotateX(Math.PI / 2);
+  const kbPos = koiBodyGeo.attributes.position as THREE.BufferAttribute;
+  for (let vi = 0; vi < kbPos.count; vi++) {
+    const x = kbPos.getX(vi) * 0.82;
+    const y = kbPos.getY(vi) * 0.96;
+    const z = kbPos.getZ(vi);
+    const u = (z + 0.54) / 1.03; // 0=尾, 1=头
+    const sBend = Math.sin((u - 0.55) * Math.PI * 1.45) * 0.085;
+    kbPos.setXYZ(vi, x + sBend, y, z);
+  }
+  koiBodyGeo.computeVertexNormals();
   const koiBody = new THREE.Mesh(koiBodyGeo, koiBodyMat);
-  koiBody.scale.set(0.76, 1.04, 1.0);
   koiBody.castShadow = true;
   giantFish.add(koiBody);
 
-  // 飘逸高耸背鳍（双层渐层流光）
+  // 优雅弯曲的流金背鳍
   const dorsalShape = new THREE.Shape();
-  dorsalShape.moveTo(0.24, 0);
-  dorsalShape.quadraticCurveTo(0.08, 0.22, -0.22, 0.19);
-  dorsalShape.quadraticCurveTo(-0.34, 0.12, -0.28, 0);
+  dorsalShape.moveTo(0.22, 0);
+  dorsalShape.quadraticCurveTo(0.06, 0.17, -0.20, 0.14);
+  dorsalShape.quadraticCurveTo(-0.32, 0.08, -0.26, 0);
   dorsalShape.closePath();
   const dorsalGeo = new THREE.ShapeGeometry(dorsalShape);
   dorsalGeo.rotateY(Math.PI / 2);
-  const koiDorsal = new THREE.Mesh(dorsalGeo, koiCoralFinMat);
-  koiDorsal.position.set(0, 0.15, 0);
+  const koiDorsal = new THREE.Mesh(dorsalGeo, koiFinMat);
+  koiDorsal.position.set(0.02, 0.135, -0.02);
+  koiDorsal.rotation.y = 0.14;
   giantFish.add(koiDorsal);
 
-  // 宽大飘逸蝴蝶双尾纱鳍
+  // 宽大飘逸的折叠金纱蝴蝶双尾鳍
   const tailShape = new THREE.Shape();
   tailShape.moveTo(0, 0);
-  tailShape.bezierCurveTo(-0.18, 0.16, -0.38, 0.28, -0.48, 0.22);
-  tailShape.bezierCurveTo(-0.38, 0.08, -0.32, 0.02, -0.26, 0);
-  tailShape.bezierCurveTo(-0.32, -0.02, -0.38, -0.08, -0.48, -0.22);
-  tailShape.bezierCurveTo(-0.38, -0.28, -0.18, -0.16, 0, 0);
+  tailShape.bezierCurveTo(0.16, 0.14, 0.38, 0.24, 0.48, 0.19);
+  tailShape.bezierCurveTo(0.40, 0.06, 0.34, 0.02, 0.24, 0);
+  tailShape.bezierCurveTo(0.34, -0.02, 0.40, -0.06, 0.48, -0.19);
+  tailShape.bezierCurveTo(0.38, -0.24, 0.16, -0.14, 0, 0);
   const tailGeo = new THREE.ShapeGeometry(tailShape);
-  tailGeo.rotateY(Math.PI / 2);
-  for (const sAng of [-0.24, 0.24]) {
-    const tailVeil = new THREE.Mesh(tailGeo, koiVeilMat);
-    tailVeil.position.set(0, 0, -0.48);
+  tailGeo.rotateY(-Math.PI / 2);
+  const tailPivot = new THREE.Group();
+  tailPivot.position.set(-0.075, 0, -0.52);
+  tailPivot.rotation.y = -0.32;
+  for (const sAng of [-0.26, 0, 0.26]) {
+    const tailVeil = new THREE.Mesh(tailGeo, koiFinMat);
     tailVeil.rotation.y = sAng;
-    giantFish.add(tailVeil);
+    tailVeil.rotation.z = sAng * 0.35;
+    tailPivot.add(tailVeil);
   }
+  giantFish.add(tailPivot);
 
-  // 蝴蝶胸鳍、腹鳍、金色虹膜大眼与双根飘逸金色龙须
+  // 舒展圆润的扇形黄金胸鳍、腹鳍、金环大眼与上翘卷曲金须
   const pecShape = new THREE.Shape();
   pecShape.moveTo(0, 0);
-  pecShape.bezierCurveTo(0.14, 0.06, 0.30, -0.04, 0.34, -0.18);
-  pecShape.bezierCurveTo(0.20, -0.22, 0.06, -0.14, 0, -0.04);
+  pecShape.bezierCurveTo(0.16, 0.08, 0.30, 0.02, 0.32, -0.10);
+  pecShape.bezierCurveTo(0.24, -0.20, 0.08, -0.16, 0, -0.04);
   const pecGeo = new THREE.ShapeGeometry(pecShape);
-  const koiGoldEye = mat(0xfbbf24, 0.2);
-  const koiPupilMat = mat(0x111827, 0.15);
+  const koiGoldEye = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.18, metalness: 0.45 });
+  const koiPupilMat = mat(0x1f160c, 0.15);
   for (const sx of [-1, 1]) {
-    const pec = new THREE.Mesh(pecGeo, koiVeilMat);
+    const pec = new THREE.Mesh(pecGeo, koiFinMat);
     pec.scale.x = sx;
-    pec.position.set(sx * 0.12, -0.04, 0.16);
-    pec.rotation.set(0.35, -sx * 0.35, sx * 0.25);
+    pec.position.set(sx * 0.12 + 0.04, -0.03, 0.16);
+    pec.rotation.set(0.28, -sx * 0.42, sx * 0.22);
     giantFish.add(pec);
 
-    const pelv = new THREE.Mesh(pecGeo, koiCoralFinMat);
-    pelv.scale.set(sx * 0.55, 0.55, 0.55);
-    pelv.position.set(sx * 0.07, -0.11, -0.12);
-    pelv.rotation.set(0.45, -sx * 0.25, sx * 0.45);
+    const pelv = new THREE.Mesh(pecGeo, koiFinMat);
+    pelv.scale.set(sx * 0.48, 0.48, 0.48);
+    pelv.position.set(sx * 0.065 - 0.02, -0.095, -0.14);
+    pelv.rotation.set(0.38, -sx * 0.3, sx * 0.38);
     giantFish.add(pelv);
 
-    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), koiGoldEye);
-    iris.position.set(sx * 0.105, 0.055, 0.31);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), koiGoldEye);
+    iris.position.set(sx * 0.092 + 0.058, 0.048, 0.33);
     giantFish.add(iris);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), koiPupilMat);
-    pupil.position.set(sx * 0.124, 0.058, 0.328);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.017, 8, 6), koiPupilMat);
+    pupil.position.set(sx * 0.108 + 0.058, 0.05, 0.345);
     giantFish.add(pupil);
 
-    const barbel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.002, 0.19, 6), koiGoldEye);
-    barbel.position.set(sx * 0.078, -0.02, 0.44);
-    barbel.rotation.set(0.55, 0, sx * 0.85);
+    // 上翘卷曲锦鲤金须（与参考图一致）
+    const barbelCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(sx * 0.038 + 0.072, -0.012, 0.45),
+      new THREE.Vector3(sx * 0.082 + 0.072, 0.005, 0.485),
+      new THREE.Vector3(sx * 0.105 + 0.072, 0.045, 0.465),
+    ]);
+    const barbel = new THREE.Mesh(
+      new THREE.TubeGeometry(barbelCurve, 10, 0.006, 6, false),
+      koiGoldEye,
+    );
     giantFish.add(barbel);
   }
-  giantFish.scale.setScalar(1.38);
+  // 相比此前 1.38 缩小 30% -> 0.96
+  giantFish.scale.setScalar(0.96);
   giantFish.visible = false;
   stage1FishGroup.add(giantFish);
+
+  // 低概率钓上来的旧皮靴（被布布嫌弃地扔回河里）
+  const oldBoot = new THREE.Group();
+  const bootLeatherMat = mat(0x5c3d28, 0.85);
+  const bootSoleMat = mat(0x2b211a, 0.92);
+  const bootShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.052, 0.16, 12), bootLeatherMat);
+  bootShaft.position.set(0, 0.11, -0.02);
+  bootShaft.rotation.x = -0.1;
+  oldBoot.add(bootShaft);
+  const bootCuff = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.011, 6, 14), mat(0x462d1c, 0.88));
+  bootCuff.rotation.x = Math.PI / 2;
+  bootCuff.position.set(0, 0.19, -0.028);
+  oldBoot.add(bootCuff);
+  const bootVamp = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), bootLeatherMat);
+  bootVamp.scale.set(0.92, 0.68, 1.48);
+  bootVamp.position.set(0, 0.04, 0.045);
+  oldBoot.add(bootVamp);
+  const bootSole = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.024, 0.21), bootSoleMat);
+  bootSole.position.set(0, 0.012, 0.028);
+  oldBoot.add(bootSole);
+  const bootHeel = new THREE.Mesh(new THREE.BoxGeometry(0.098, 0.032, 0.065), bootSoleMat);
+  bootHeel.position.set(0, 0.004, -0.045);
+  oldBoot.add(bootHeel);
+  oldBoot.visible = false;
+  stage1FishGroup.add(oldBoot);
 
   // 布布落水爬上岸后身上滴落的湿漉漉水珠
   const wetDropMat = new THREE.MeshBasicMaterial({
@@ -6746,7 +6832,8 @@ export function buildAncientWorld(
   const yierFaceYaw = Math.atan2(yierSitX, yierSitZ);
 
   const yierSitter = makeStage0Bear(CHARS.yier);
-  yierSitter.position.set(yierSitX, -0.58, yierSitZ);
+  yierSitter.scale.setScalar(0.58 * 1.2);
+  yierSitter.position.set(yierSitX, -0.56, yierSitZ);
   yierSitter.rotation.y = yierFaceYaw;
   const ysParts = yierSitter.userData.parts as PlaneParts;
 
@@ -6794,6 +6881,7 @@ export function buildAncientWorld(
     caughtFish,
     caughtFishBodyMat,
     giantFish,
+    oldBoot,
     wetDrops,
     bubuRipple,
     bucketPos,
