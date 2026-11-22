@@ -15,8 +15,7 @@ import {
   lineOf,
   ringColor,
 } from './constants';
-import { buildPlaneMesh, makePlaneModel } from './pieces';
-import type { PlaneParts } from './pieces';
+import { buildPlaneMesh, makePlaneModel, PlaneParts } from './pieces';
 import {
   createAncientTileTexture,
   createBrickBankTexture,
@@ -268,6 +267,12 @@ export interface WorldRefs {
     flashLight: THREE.PointLight;
     flashHalo: THREE.Mesh;
     flashHaloMat: THREE.MeshBasicMaterial;
+  };
+  boardNightStrips?: {
+    coreMesh: THREE.Mesh;
+    coreMat: THREE.MeshBasicMaterial;
+    glowMesh: THREE.Mesh;
+    glowMat: THREE.MeshBasicMaterial;
   };
   waterY: number;
   rideToys: RideToyAnim[];
@@ -4055,6 +4060,166 @@ export function buildAncientWorld(
   }
   scene.add(altarGroup);
 
+  // 夜晚棋盘与庭院隐藏式暖光灯带（零点光源，仅夜晚亮起，合并为 2 个 Draw Call）
+  const stripGlowCanvas = document.createElement('canvas');
+  stripGlowCanvas.width = 16;
+  stripGlowCanvas.height = 64;
+  const sgc = stripGlowCanvas.getContext('2d')!;
+  const sgLin = sgc.createLinearGradient(0, 0, 0, 64);
+  sgLin.addColorStop(0, 'rgba(255, 190, 60, 0)');
+  sgLin.addColorStop(0.28, 'rgba(255, 198, 72, 0.34)');
+  sgLin.addColorStop(0.5, 'rgba(255, 212, 108, 0.82)');
+  sgLin.addColorStop(0.72, 'rgba(255, 198, 72, 0.34)');
+  sgLin.addColorStop(1, 'rgba(255, 190, 60, 0)');
+  sgc.fillStyle = sgLin;
+  sgc.fillRect(0, 0, 16, 64);
+  const stripGlowTex = new THREE.CanvasTexture(stripGlowCanvas);
+  stripGlowTex.wrapS = THREE.ClampToEdgeWrapping;
+  stripGlowTex.wrapT = THREE.ClampToEdgeWrapping;
+
+  const stripCoreGeos: THREE.BufferGeometry[] = [];
+  const stripGlowGeos: THREE.BufferGeometry[] = [];
+  const addBoardStripSeg = (
+    x1: number,
+    z1: number,
+    x2: number,
+    z2: number,
+    yCore = 0.086,
+    yGlow = 0.0825,
+    coreThick = 0.022,
+    glowWidth = 0.44,
+  ) => {
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    if (len < 0.05) return;
+    const mx = (x1 + x2) * 0.5;
+    const mz = (z1 + z2) * 0.5;
+    const ang = Math.atan2(z2 - z1, x2 - x1);
+
+    const cg = new THREE.BoxGeometry(len, 0.012, coreThick);
+    cg.rotateY(-ang);
+    cg.translate(mx, yCore, mz);
+    stripCoreGeos.push(cg);
+
+    const gg = new THREE.PlaneGeometry(len, glowWidth);
+    gg.rotateX(-Math.PI / 2);
+    gg.rotateY(-ang);
+    gg.translate(mx, yGlow, mz);
+    stripGlowGeos.push(gg);
+  };
+
+  // A. 中央终点台基四边隐藏灯带（避开四向终点航道入口）
+  const centerEdge = 1.955;
+  for (const s of [-1, 1]) {
+    addBoardStripSeg(-centerEdge, s * centerEdge, -0.44, s * centerEdge, 0.086, 0.0825, 0.024, 0.48);
+    addBoardStripSeg(0.44, s * centerEdge, centerEdge, s * centerEdge, 0.086, 0.0825, 0.024, 0.48);
+    addBoardStripSeg(s * centerEdge, -centerEdge, s * centerEdge, -0.44, 0.086, 0.0825, 0.024, 0.48);
+    addBoardStripSeg(s * centerEdge, 0.44, s * centerEdge, centerEdge, 0.086, 0.0825, 0.024, 0.48);
+  }
+
+  // B. 中央八角骰盘底座环绕暖光带
+  for (let k = 0; k < 8; k++) {
+    const a1 = k * (Math.PI / 4) + Math.PI / 8;
+    const a2 = (k + 1) * (Math.PI / 4) + Math.PI / 8;
+    const rAlt = 0.708;
+    addBoardStripSeg(
+      Math.sin(a1) * rAlt,
+      Math.cos(a1) * rAlt,
+      Math.sin(a2) * rAlt,
+      Math.cos(a2) * rAlt,
+      0.115,
+      0.1135,
+      0.018,
+      0.34,
+    );
+  }
+
+  // C. 四向终点航道两侧隐藏微光带（连接庭院与中央终点区）
+  for (let q = 0; q < 4; q++) {
+    const rad = (q * Math.PI) / 2;
+    const cosA = Math.cos(rad);
+    const sinA = Math.sin(rad);
+    const rotPt = (lx: number, lz: number): [number, number] => [
+      lx * cosA - lz * sinA,
+      lx * sinA + lz * cosA,
+    ];
+    for (const side of [-1, 1]) {
+      const [sx1, sz1] = rotPt(-5.64, side * 0.425);
+      const [sx2, sz2] = rotPt(-2.0, side * 0.425);
+      addBoardStripSeg(sx1, sz1, sx2, sz2, 0.085, 0.082, 0.016, 0.30);
+    }
+  }
+
+  // D. 四座玩家庭院青石围栏外沿隐藏灯带（自动避开大门通道）
+  for (let j = 0; j < 4; j++) {
+    const slot = SLOTS[j];
+    const cx = slot.court[0];
+    const cz = slot.court[1];
+    const gx = slot.gate[0];
+    const gz = slot.gate[1];
+    const gateOpenSide =
+      slot.gateAxis === 'z' ? (gz > cz ? 'bottom' : 'top') : gx > cx ? 'right' : 'left';
+    const edgeOff = 1.982;
+    const cSides = [
+      { name: 'top', fixed: cz - edgeOff, horiz: true },
+      { name: 'bottom', fixed: cz + edgeOff, horiz: true },
+      { name: 'left', fixed: cx - edgeOff, horiz: false },
+      { name: 'right', fixed: cx + edgeOff, horiz: false },
+    ] as const;
+    for (const cs of cSides) {
+      const minE = (cs.horiz ? cx : cz) - edgeOff;
+      const maxE = (cs.horiz ? cx : cz) + edgeOff;
+      if (cs.name === gateOpenSide) {
+        const doorC = cs.horiz ? gx : gz;
+        if (cs.horiz) {
+          addBoardStripSeg(minE, cs.fixed, doorC - 0.56, cs.fixed, 0.086, 0.0825, 0.022, 0.46);
+          addBoardStripSeg(doorC + 0.56, cs.fixed, maxE, cs.fixed, 0.086, 0.0825, 0.022, 0.46);
+        } else {
+          addBoardStripSeg(cs.fixed, minE, cs.fixed, doorC - 0.56, 0.086, 0.0825, 0.022, 0.46);
+          addBoardStripSeg(cs.fixed, doorC + 0.56, cs.fixed, maxE, 0.086, 0.0825, 0.022, 0.46);
+        }
+      } else {
+        if (cs.horiz) {
+          addBoardStripSeg(minE, cs.fixed, maxE, cs.fixed, 0.086, 0.0825, 0.022, 0.46);
+        } else {
+          addBoardStripSeg(cs.fixed, minE, cs.fixed, maxE, 0.086, 0.0825, 0.022, 0.46);
+        }
+      }
+    }
+  }
+
+  const mergedStripCoreGeo = mergeGeometries(stripCoreGeos, false);
+  const mergedStripGlowGeo = mergeGeometries(stripGlowGeos, false);
+  stripCoreGeos.forEach((g) => g.dispose());
+  stripGlowGeos.forEach((g) => g.dispose());
+
+  const boardStripCoreMat = new THREE.MeshBasicMaterial({
+    color: 0xffc64a,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const boardStripCoreMesh = new THREE.Mesh(mergedStripCoreGeo, boardStripCoreMat);
+  boardStripCoreMesh.visible = false;
+  scene.add(boardStripCoreMesh);
+
+  const boardStripGlowMat = new THREE.MeshBasicMaterial({
+    map: stripGlowTex,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const boardStripGlowMesh = new THREE.Mesh(mergedStripGlowGeo, boardStripGlowMat);
+  boardStripGlowMesh.visible = false;
+  scene.add(boardStripGlowMesh);
+
+  const boardNightStrips = {
+    coreMesh: boardStripCoreMesh,
+    coreMat: boardStripCoreMat,
+    glowMesh: boardStripGlowMesh,
+    glowMat: boardStripGlowMat,
+  };
+
   const trimMat = new THREE.MeshStandardMaterial({
     color: 0xb48f3e,
     roughness: 0.36,
@@ -6136,6 +6301,7 @@ export function buildAncientWorld(
     sunriseHaloMat,
     skyDomeMat,
     heartTreeNight: heartTreeNightData,
+    boardNightStrips,
     waterY: WATER_Y,
     rideToys,
     planeMarks,

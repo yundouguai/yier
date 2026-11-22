@@ -81,10 +81,39 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [activeEmotes, setActiveEmotes] = useState<Record<number, string>>({});
   const [inspectedPid, setInspectedPid] = useState<number | null>(null);
+  const [giftOpenedKey, setGiftOpenedKey] = useState<number | null>(null);
+  const [giftDismissedKey, setGiftDismissedKey] = useState<number | null>(null);
+  const [giftCountdown, setGiftCountdown] = useState<number>(3);
   const lastHumanPidRef = useRef(0);
   const emoteTimers = useRef<Record<number, number>>({});
   const secretTapCount = useRef(0);
   const secretTapTimer = useRef<number | null>(null);
+
+  // 本地玩家任务奖励：先出现礼盒，3 秒内点击或自动打开后，再展示表情包与获得提示
+  const giftEventKey = snap.giftQuestEvent?.key ?? null;
+  const giftIsHuman = snap.giftQuestEvent?.isLocalHuman ?? false;
+  useEffect(() => {
+    if (giftEventKey === null || !giftIsHuman) return;
+    setGiftCountdown(3);
+    const cdInterval = window.setInterval(() => {
+      setGiftCountdown((prev) => (prev > 1 ? prev - 1 : 1));
+    }, 1000);
+    const autoOpenTimer = window.setTimeout(() => {
+      setGiftOpenedKey((cur) => (cur === giftEventKey ? cur : giftEventKey));
+    }, 3000);
+    return () => {
+      window.clearInterval(cdInterval);
+      window.clearTimeout(autoOpenTimer);
+    };
+  }, [giftEventKey, giftIsHuman]);
+
+  useEffect(() => {
+    if (giftEventKey === null || !giftIsHuman || giftOpenedKey !== giftEventKey) return;
+    const dismissTimer = window.setTimeout(() => {
+      setGiftDismissedKey(giftEventKey);
+    }, 5400);
+    return () => window.clearTimeout(dismissTimer);
+  }, [giftEventKey, giftIsHuman, giftOpenedKey]);
 
   // 启动时预加载全部 7 张轻量 WebP 表情包到内存，触发时零等待秒开
   useEffect(() => {
@@ -304,11 +333,100 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         </div>
       )}
 
-      {/* 一二的馈赠 / 布布不烦恼：本地玩家显示居中表情包+提示（缩小20%），AI仅显示弱化顶部小提示 */}
-      {snap.giftQuestEvent && !showSetup && (
+      {/* 一二的馈赠 / 布布不烦恼：本地玩家先弹出可点击礼盒（3秒自动打开），再展示居中表情包+获得提示；AI仅显示弱化顶部小提示 */}
+      {snap.giftQuestEvent && !showSetup && giftDismissedKey !== snap.giftQuestEvent.key && (
         snap.giftQuestEvent.isLocalHuman ? (
+          giftOpenedKey !== snap.giftQuestEvent.key ? (
+            <div
+              key={`gift-box-${snap.giftQuestEvent.key}`}
+              className="fixed inset-0 z-[22] flex items-center justify-center p-4 pointer-events-none"
+            >
+              <button
+                type="button"
+                onClick={() => setGiftOpenedKey(snap.giftQuestEvent!.key)}
+                className="pointer-events-auto group flex flex-col items-center gap-2.5 rounded-3xl border border-white/80 bg-white/85 px-6 py-5 shadow-[0_14px_36px_rgba(15,23,42,0.22)] backdrop-blur-md transition-transform duration-200 hover:scale-105 active:scale-95 cursor-pointer anim-card-pop"
+                style={{
+                  borderColor: `${snap.giftQuestEvent.playerColor}99`,
+                }}
+              >
+                <div className="flex items-center gap-1.5 text-sm md:text-base font-extrabold text-slate-900">
+                  <CharacterAvatar charKey={snap.giftQuestEvent.playerCharKey} size={22} />
+                  <span>
+                    {snap.giftQuestEvent.playerName} 完成
+                    {snap.giftQuestEvent.questType === 'bubu' ? '「布布不烦恼」' : '「一二宝的馈赠」'}
+                  </span>
+                </div>
+                <div className="relative flex h-28 w-28 items-center justify-center">
+                  {/* 旋转光芒底盘 */}
+                  <div
+                    className="anim-gift-rays absolute inset-0 rounded-full opacity-65 blur-[2px]"
+                    style={{
+                      background:
+                        snap.giftQuestEvent.questType === 'bubu'
+                          ? 'repeating-conic-gradient(from 0deg, rgba(253,224,71,0.52) 0deg 15deg, rgba(147,197,253,0.12) 15deg 30deg)'
+                          : 'repeating-conic-gradient(from 0deg, rgba(253,224,71,0.55) 0deg 15deg, rgba(244,114,182,0.14) 15deg 30deg)',
+                      maskImage: 'radial-gradient(circle, black 35%, transparent 72%)',
+                      WebkitMaskImage: 'radial-gradient(circle, black 35%, transparent 72%)',
+                    }}
+                  />
+                  {/* 柔和呼吸光晕 */}
+                  <div
+                    className="absolute inset-2 rounded-full opacity-75 blur-md animate-pulse"
+                    style={{
+                      background:
+                        snap.giftQuestEvent.questType === 'bubu'
+                          ? 'radial-gradient(circle, #fef08a 0%, #93c5fd 60%, transparent 100%)'
+                          : 'radial-gradient(circle, #fef08a 0%, #f9a8d4 60%, transparent 100%)',
+                    }}
+                  />
+                  {/* 闪烁星芒点缀 */}
+                  <span className="absolute left-2 top-2 text-sm text-amber-400 animate-ping" style={{ animationDuration: '1.8s' }}>✦</span>
+                  <span className="absolute right-2 top-3 text-xs text-amber-500 animate-pulse">✦</span>
+                  <span className="absolute left-3 bottom-3 text-xs text-yellow-400 animate-pulse">✦</span>
+                  {/* 摇晃蓄力待开礼盒 */}
+                  <svg
+                    viewBox="0 0 80 80"
+                    className="anim-gift-wiggle relative h-22 w-22 drop-shadow-[0_10px_18px_rgba(245,158,11,0.34)]"
+                    aria-hidden="true"
+                  >
+                    <rect
+                      x="14"
+                      y="32"
+                      width="52"
+                      height="36"
+                      rx="7"
+                      fill={snap.giftQuestEvent.questType === 'bubu' ? '#60a5fa' : '#f472b6'}
+                    />
+                    <rect
+                      x="10"
+                      y="22"
+                      width="60"
+                      height="13"
+                      rx="5"
+                      fill={snap.giftQuestEvent.questType === 'bubu' ? '#3b82f6' : '#ec4899'}
+                    />
+                    <rect x="35" y="22" width="10" height="46" fill="#fde047" />
+                    <rect x="14" y="45" width="52" height="8" fill="#fde047" opacity="0.92" />
+                    <path
+                      d="M40 22 C30 8, 17 14, 24 22 Z M40 22 C50 8, 63 14, 56 22 Z"
+                      fill="#facc15"
+                    />
+                    <circle cx="40" cy="22" r="4.5" fill="#eab308" />
+                  </svg>
+                  {/* 右下角动态点击手势 + 波纹引导 */}
+                  <div className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex items-center justify-center">
+                    <span className="absolute h-7 w-7 rounded-full border-2 border-amber-400/80 animate-ping" />
+                    <span className="anim-gift-tap relative text-xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.28)]">👆</span>
+                  </div>
+                </div>
+                <div className="rounded-full bg-amber-50 border border-amber-200 px-3.5 py-1 text-xs md:text-sm font-bold text-amber-700">
+                  点击礼盒开启奖励（{giftCountdown}秒后自动打开）
+                </div>
+              </button>
+            </div>
+          ) : (
           <div
-            key={snap.giftQuestEvent.key}
+            key={`gift-open-${snap.giftQuestEvent.key}`}
             className="pointer-events-none fixed inset-0 z-[22] flex items-center justify-center p-4"
           >
             <div className="hud-gift-toast-inner flex max-w-[calc(100vw-24px)] flex-col items-center">
@@ -347,6 +465,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               />
             </div>
           </div>
+          )
         ) : (
           <div
             key={snap.giftQuestEvent.key}
@@ -1474,14 +1593,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <span className="shrink-0 font-semibold text-slate-800">5 或 6 起飞</span>
                       <span>
                         掷出 <b className="text-slate-900">5</b> 或 <b className="text-slate-900">6</b>{' '}
-                        点时，可选择让停机坪棋子登上 <b className="text-slate-900">START 起点台</b>，或移动场上已有棋子。
+                        点（或使用双倍珍珠奶茶掷出总和 <b className="text-slate-900">≥ 5</b>）时，可选择让停机坪棋子登上 <b className="text-slate-900">START 起点台</b>，或移动场上已有棋子。
                       </span>
                     </li>
                     <li className="flex gap-2.5">
                       <span className="shrink-0 font-semibold text-slate-800">仅 6 奖连掷</span>
                       <span>
-                        只有掷出 <b className="text-slate-900">6</b> 点才可再掷一次（连续三个 6
-                        后第三次只走子不再投）；棋子抵达终点不额外奖励掷骰。
+                        只有自然掷出 <b className="text-slate-900">6</b> 点才可再掷一次（连续三个 6
+                        后第三次只走子不再投；使用幸运草莓蛋糕或双倍珍珠奶茶不触发连投）；棋子抵达终点不额外奖励掷骰。
                       </span>
                     </li>
                   </ul>
@@ -1502,13 +1621,13 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <span className="shrink-0 font-semibold text-slate-800">航线飞 +12</span>
                       <span>
                         落在带 <b className="text-slate-900">✈</b> 标记的己色斜角格，沿虚线直飞对岸{' '}
-                        <b className="text-slate-900">12 格</b>，并击落航线穿过的对家终点通道第 4 格（终点前第 2 格）敌机（直飞后仍可顺风连跳）。
+                        <b className="text-slate-900">12 格</b>，并击中航线穿过的对家终点通道第 4 格（终点前第 2 格）敌机（单熊送回基地，叠叠乐拆散分别退 6~9 格，有泡泡罩则抵挡；直飞后仍可顺风连跳）。
                       </span>
                     </li>
                     <li className="flex gap-2.5">
-                      <span className="shrink-0 font-semibold text-slate-800">撞机与回弹</span>
+                      <span className="shrink-0 font-semibold text-slate-800">被踩与叠叠乐</span>
                       <span>
-                        落点有敌方棋子时将其全部撞回停机坪；己方同格叠机同行；点数超出终点格会向后回弹。
+                        落点遇单只敌方小熊时直接将其送回基地；若敌方为<b className="text-slate-900">叠叠乐（≥2只同格）</b>，则伤害分摊并被拆散，分别后退 <b className="text-slate-900">6、7、8、9 格</b>（最多退至起点，不回基地）。若目标带有<b className="text-sky-700">软绵绵泡泡罩</b>，则消耗护盾抵挡 1 次踩踏并同格挤脸站立（己方多只带盾叠叠乐合体时自动合并为 1 层护盾）；点数超出终点格会向后回弹。
                       </span>
                     </li>
                   </ul>
@@ -1545,7 +1664,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                       <tbody className="divide-y divide-slate-100 bg-white">
                         {ITEM_ORDER.map((itemKey) => {
                           const def = ITEM_DEFS[itemKey];
-                          const isDefense = def.category === 'defense';
+                          const isDefense = def.category === 'defense' || def.category === 'counter';
                           return (
                             <tr key={itemKey}>
                               <td className="px-2.5 py-2 font-bold text-slate-800 whitespace-nowrap">

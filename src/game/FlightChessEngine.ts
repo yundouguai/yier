@@ -1464,7 +1464,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.giftQuestEvent = null;
         this.emitSnapshot();
-      }, pl.type !== 'human' ? 7400 : 5400);
+      }, pl.type !== 'human' ? 7400 : 8800);
     }
     this.emitSnapshot();
   }
@@ -1495,7 +1495,7 @@ export class FlightChessEngine {
         if (this.disposed) return;
         this.giftQuestEvent = null;
         this.emitSnapshot();
-      }, pl.type !== 'human' ? 7400 : 5400);
+      }, pl.type !== 'human' ? 7400 : 8800);
     }
     this.emitSnapshot();
   }
@@ -5652,6 +5652,16 @@ export class FlightChessEngine {
       if (!active) {
         htn.waveHaloMats.forEach((wh) => { wh.opacity = 0; });
       }
+    }
+
+    const bns = this.world.boardNightStrips;
+    if (bns) {
+      const boardNightScale = THREE.MathUtils.clamp((starOp - 0.25) / 0.71, 0, 1);
+      const bActive = boardNightScale > 0.02;
+      bns.coreMesh.visible = bActive;
+      bns.coreMat.opacity = boardNightScale * 0.84;
+      bns.glowMesh.visible = bActive;
+      bns.glowMat.opacity = boardNightScale * 0.56;
     }
 
     if (this.world.waterMesh && this.world.waterMesh.material instanceof THREE.MeshStandardMaterial) {
