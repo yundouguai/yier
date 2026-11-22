@@ -808,7 +808,8 @@ export function buildAncientWorld(
     group.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.InstancedMesh) return;
       if (skipSubtree(obj)) return;
-      const m = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+      if (Array.isArray(obj.material)) return;
+      const m = obj.material;
       if (!m) return;
       let cast = obj.castShadow;
       if (cast && shadowMaxRadius !== undefined) {
