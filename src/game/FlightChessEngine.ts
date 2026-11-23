@@ -1369,17 +1369,19 @@ export class FlightChessEngine {
         continue;
       }
       if (p.pos === 0) {
-        const startShielded = this.planes
-          .filter((q) => q.pid === p.pid && q.pos === 0 && q.shielded)
-          .sort((a, b) => a.idx - b.idx);
-        if (startShielded.length >= 2 && startShielded[0] !== p) {
-          // 起点台有多只带盾小熊时：各自保留护盾状态，但仅渲染 1 个合并大泡泡罩包裹全员，杜绝重影穿插
-          p.shieldMesh.visible = false;
-          continue;
-        }
+        // 起点台每只带盾小熊保持各自独立泡泡罩，由片元着色器自动裁切内部重叠并融合成一体肥皂泡
+        p.shieldMesh.visible = true;
+        continue;
       } else if (p.pos >= 1) {
+        // 仅在双方均已落地（或同组一起飞行且物理重叠）时合并泡泡罩，避免起跳前提前合并/变大
         const stack = this.planes
-          .filter((q) => q.pid === p.pid && q.pos === p.pos)
+          .filter(
+            (q) =>
+              q.pid === p.pid &&
+              q.pos === p.pos &&
+              q.animating === p.animating &&
+              Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z) < 0.35,
+          )
           .sort((a, b) => a.idx - b.idx);
         const firstShielded = stack.find((q) => q.shielded);
         if (firstShielded && firstShielded !== p) {
@@ -2511,7 +2513,8 @@ export class FlightChessEngine {
   }
 
   private async aiTryUseItems(): Promise<boolean> {
-    if (this.disposed || this.phase !== 'aiWait' || !this.isAI()) return false;
+    const isAutoHuman = !this.isAI() && this.gmAutoPlay && this.phase === 'awaitRoll';
+    if (this.disposed || (!isAutoHuman && (this.phase !== 'aiWait' || !this.isAI()))) return false;
     let usedAnyItem = false;
     const me = this.turn;
     const inv = this.playerItems[me];
@@ -2530,8 +2533,25 @@ export class FlightChessEngine {
     const maxUnshieldedRisk = boardRisks[0]?.valueRisk ?? 0;
     const pursuerPidSet = new Set<number>(boardRisks.flatMap((r) => r.pursuerPids));
 
+    const hasInBase = myPlanes.some((p) => p.pos === -1);
+    const onBoardCount = activeBoard.length;
+
+    // 0) 棋盘上没有任何可移动棋子（全在基地）且持有「幸运草莓蛋糕」时，优先立即使用起飞
+    if (!this.turnUsedAtkDef && onBoardCount === 0 && hasInBase && inv.sixDie > 0) {
+      this.armedSixDie = true;
+      if (this.isAI()) {
+        inv.sixDie -= 1;
+        this.turnUsedAtkDef = true;
+        this.setMsg(`🎲 ${P.name} 使用了「幸运草莓蛋糕」！`, P.uiColor);
+        this.showItemSplash(P, 'sixDie');
+        this.emitAiEmote(me, 'useSpeedItem', 1800);
+      }
+      this.emitSnapshot();
+      return true;
+    }
+
     // 1) 环境反制导弹：获得后先观望，结合性格、威胁系数与追兵被踩风险决定是否发射
-    if (inv.missile > 0) {
+    if (inv.missile > 0 && !this.turnUsedAtkDef) {
       const held = turnsHeld('missile');
       const targets = this.buildTargetChoices('missile', me);
       if (targets.length > 0) {
@@ -2586,11 +2606,9 @@ export class FlightChessEngine {
     }
 
     // 2) 每回合最多 1 张攻击/防御类道具（需评估被踩风险 + 持有回合 + 性格策略）
-    if (!this.turnUsedAtkDef) {
-      const hasInBase = myPlanes.some((p) => p.pos === -1);
-      const onBoardCount = activeBoard.length;
+    if (!this.turnUsedAtkDef || !this.turnUsedDef) {
       const tryShield = async (minRisk: number): Promise<boolean> => {
-        if (inv.shield <= 0) return false;
+        if (inv.shield <= 0 || this.turnUsedDef) return false;
         const shieldCands = this.buildTargetChoices('shield', me);
         const endangered = shieldCands
           .map((c) => {
@@ -2602,7 +2620,8 @@ export class FlightChessEngine {
         if (endangered.length > 0 && endangered[0].rawProb > 0 && endangered[0].valueRisk >= minRisk) {
           inv.shield -= 1;
           endangered[0].c.plane.shielded = true;
-          this.turnUsedAtkDef = true;
+          this.turnUsedDef = true;
+          if (this.isAI()) this.turnUsedAtkDef = true;
           this.syncShieldVisuals();
           const cPos = this.posToCell(P, endangered[0].c.plane.pos);
           this.spawnShieldBreak(cPos[0], cPos[1]);
@@ -2698,6 +2717,8 @@ export class FlightChessEngine {
         return usedAnyItem;
       }
 
+      if (this.turnUsedAtkDef) return usedAnyItem;
+
       // 2) 评估加速/进攻卡使用时机（不能刚拿就无脑丢）
       const twinEval = () => {
         if (onBoardCount === 0 && hasInBase) {
@@ -2735,6 +2756,12 @@ export class FlightChessEngine {
       const twinHeld = turnsHeld('twinDice');
       const refuelHeld = turnsHeld('refuel');
       const escapeNeed = maxUnshieldedRisk >= 28;
+
+      // 棋盘上无任何可移动棋子且没有幸运草莓蛋糕时，用双倍珍珠奶茶提高起飞概率
+      if (onBoardCount === 0 && hasInBase && inv.twinDice > 0 && stwin.shouldTakeoff) {
+        await useTwinDice();
+        return usedAnyItem;
+      }
 
       if (personality === 'rusher') {
         if (
@@ -3153,8 +3180,7 @@ export class FlightChessEngine {
     ensureAudio();
     if (this.pendingItemTarget !== null) this.cancelItemTarget();
     const canTryItems =
-      !this.turnUsedAtkDef &&
-      !this.turnUsedDef &&
+      (!this.turnUsedAtkDef || !this.turnUsedDef) &&
       !this.armedSixDie &&
       !this.armedTwinDice &&
       !this.armedRefuel;
@@ -6810,48 +6836,72 @@ export class FlightChessEngine {
           let sTotal = 1;
           let sIdx = 0;
           if (p.pos >= 1 && p.pos < HOME_END) {
+            // 仅把物理上已同格叠在一起且同处静止/飞行状态的小熊计入叠叠乐，防止 A 起跳前泡泡罩就提前变大
             const liveStack = this.planes
-              .filter((q) => q.pid === p.pid && q.pos === p.pos)
+              .filter(
+                (q) =>
+                  q.pid === p.pid &&
+                  q.pos === p.pos &&
+                  q.animating === p.animating &&
+                  Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z) < 0.28,
+              )
               .sort((a, b) => a.idx - b.idx);
             sTotal = Math.max(1, liveStack.length);
             const foundIdx = liveStack.indexOf(p);
             sIdx = foundIdx >= 0 ? foundIdx : 0;
           }
           const pulse = 1 + Math.sin(t * 2.6 + p.phase) * 0.02;
+          const fusionU = p.shieldMesh.userData.bubbleFusionUniforms as
+            | { uOtherCount: { value: number }; uOtherBubbles: { value: THREE.Vector4[] } }
+            | undefined;
           if (p.pos === 0) {
-            const startShielded = this.planes.filter((q) => q.pid === p.pid && q.pos === 0 && q.shielded);
-            if (startShielded.length >= 2) {
-              let cx = 0;
-              let cz = 0;
-              for (const q of startShielded) {
-                cx += q.mesh.position.x;
-                cz += q.mesh.position.z;
+            const others = this.planes.filter(
+              (q) =>
+                q !== p &&
+                q.pid === p.pid &&
+                q.pos === 0 &&
+                q.shielded &&
+                q.shieldMesh?.visible,
+            );
+            // 多只带盾小熊在起点紧贴时略微收紧单泡半径（0.94），让 3 只带盾时紧贴包裹且不侵占第 4 只无盾熊
+            const startBubbleScale = (others.length > 0 && !p.animating ? 0.94 : 1.0) * pulse;
+            p.shieldMesh.position.set(0, 0, 0);
+            p.shieldMesh.scale.setScalar(startBubbleScale);
+            if (eqRing) {
+              // 融合集群时仅最先编号的小熊保留外围飘浮迷你泡，避免 12~16 颗小泡过于杂乱
+              eqRing.visible = others.length === 0 || others.every((q) => p.idx < q.idx);
+            }
+            if (fusionU) {
+              const count = Math.min(3, others.length);
+              fusionU.uOtherCount.value = count;
+              for (let oi = 0; oi < count; oi++) {
+                const q = others[oi];
+                const qPulse = 1 + Math.sin(t * 2.6 + q.phase) * 0.02;
+                const qStartScale = (!q.animating ? 0.94 : 1.0) * qPulse;
+                const qMeshScale = q.mesh.scale.x || 0.92;
+                const qWorldR = 0.46 * qMeshScale * qStartScale;
+                const qWorldY = q.mesh.position.y + 0.35 * qMeshScale * qStartScale;
+                fusionU.uOtherBubbles.value[oi].set(
+                  q.mesh.position.x,
+                  qWorldY,
+                  q.mesh.position.z,
+                  qWorldR,
+                );
               }
-              cx /= startShielded.length;
-              cz /= startShielded.length;
-              const dx = cx - p.mesh.position.x;
-              const dz = cz - p.mesh.position.z;
-              const cosY = Math.cos(-p.mesh.rotation.y);
-              const sinY = Math.sin(-p.mesh.rotation.y);
-              const lx = (dx * cosY - dz * sinY) / 0.92;
-              const lz = (dx * sinY + dz * cosY) / 0.92;
-              const scXZ = (startShielded.length === 2 ? 1.34 : 1.46) * pulse;
-              const scY = (startShielded.length === 2 ? 1.12 : 1.18) * pulse;
-              p.shieldMesh.position.set(lx, -0.34 * (scY - 1), lz);
-              p.shieldMesh.scale.set(scXZ, scY, scXZ);
+            }
+          } else {
+            if (eqRing) eqRing.visible = true;
+            if (fusionU) fusionU.uOtherCount.value = 0;
+            if (sTotal >= 2) {
+            const centerOffsetY = ((sTotal - 1) * 0.5 - sIdx) * (STACK_STEP_Y / 0.92);
+            const sx = (1 + (sTotal - 1) * 0.14) * pulse;
+            const sy = (1 + (sTotal - 1) * 0.72) * pulse;
+              p.shieldMesh.position.set(0, centerOffsetY - 0.34 * (sy - 1), 0);
+              p.shieldMesh.scale.set(sx, sy, sx);
             } else {
               p.shieldMesh.position.set(0, 0, 0);
               p.shieldMesh.scale.setScalar(pulse);
             }
-          } else if (sTotal >= 2) {
-            const centerOffsetY = ((sTotal - 1) * 0.5 - sIdx) * (STACK_STEP_Y / 0.92);
-            const sx = (1 + (sTotal - 1) * 0.14) * pulse;
-            const sy = (1 + (sTotal - 1) * 0.72) * pulse;
-            p.shieldMesh.position.set(0, centerOffsetY - 0.34 * (sy - 1), 0);
-            p.shieldMesh.scale.set(sx, sy, sx);
-          } else {
-            p.shieldMesh.position.set(0, 0, 0);
-            p.shieldMesh.scale.setScalar(pulse);
           }
         }
 

@@ -688,18 +688,70 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   });
   // 软绵绵泡泡罩：珠光肥皂泡 + 漫画高光点 + 环绕迷你副泡泡
   const shieldMesh = new THREE.Group();
+  const bubbleFusionUniforms = {
+    uOtherCount: { value: 0 },
+    uOtherBubbles: {
+      value: [
+        new THREE.Vector4(0, -999, 0, 0),
+        new THREE.Vector4(0, -999, 0, 0),
+        new THREE.Vector4(0, -999, 0, 0),
+      ],
+    },
+  };
+  const domeMat = new THREE.MeshStandardMaterial({
+    color: 0xe6f8ff,
+    emissive: 0xf0b8ff,
+    emissiveIntensity: 0.18,
+    roughness: 0.06,
+    metalness: 0.12,
+    transparent: true,
+    opacity: 0.24,
+    depthWrite: false,
+  });
+  domeMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uOtherCount = bubbleFusionUniforms.uOtherCount;
+    shader.uniforms.uOtherBubbles = bubbleFusionUniforms.uOtherBubbles;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec3 vBubbleWorldPos;',
+      )
+      .replace(
+        '#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\nvBubbleWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform int uOtherCount;
+uniform vec4 uOtherBubbles[3];
+varying vec3 vBubbleWorldPos;`,
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `if (uOtherCount > 0) {
+  float seamGlow = 0.0;
+  for (int i = 0; i < 3; i++) {
+    if (i < uOtherCount) {
+      float d = distance(vBubbleWorldPos, uOtherBubbles[i].xyz);
+      float r = uOtherBubbles[i].w;
+      if (d < r - 0.003) discard;
+      seamGlow = max(seamGlow, 1.0 - smoothstep(r - 0.003, r + 0.052, d));
+    }
+  }
+  if (seamGlow > 0.001) {
+    gl_FragColor.rgb += vec3(0.20, 0.28, 0.36) * seamGlow * 0.55;
+    gl_FragColor.a = min(0.44, gl_FragColor.a + seamGlow * 0.14);
+  }
+}
+#include <dithering_fragment>`,
+      );
+  };
+  domeMat.customProgramCacheKey = () => 'shield-bubble-fusion-v1';
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(0.46, 26, 20),
-    new THREE.MeshStandardMaterial({
-      color: 0xe6f8ff,
-      emissive: 0xf0b8ff,
-      emissiveIntensity: 0.18,
-      roughness: 0.06,
-      metalness: 0.12,
-      transparent: true,
-      opacity: 0.24,
-      depthWrite: false,
-    }),
+    domeMat,
   );
   dome.position.y = 0.35;
   dome.renderOrder = 4;
@@ -754,6 +806,7 @@ export function buildPlaneMesh(P: PlayerConfig, anisotropy: number): THREE.Group
   shieldMesh.add(eqRing);
   shieldMesh.visible = false;
   shieldMesh.userData.eqRing = eqRing;
+  shieldMesh.userData.bubbleFusionUniforms = bubbleFusionUniforms;
   g.add(shieldMesh);
 
   // 跳舞庆祝专属红绸飘带（从背后绕过腰背，双手各握一端左右挥甩，默认隐藏）
