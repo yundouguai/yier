@@ -41,6 +41,7 @@ export interface PlaneData {
   animating: boolean;
   phase: number;
   shielded: boolean;
+  enteredSeq?: number;
   shieldMesh?: THREE.Group;
   mesh: THREE.Group;
 }

@@ -258,6 +258,10 @@ export class FlightChessEngine {
   private lastAiEmoteAt: number[] = [];
   private turnSeq = 0;
   private totalCompletedTurns = 0;
+  private cellEnterCounter = 10;
+  // 0/1 阶段早期出现 3~4 只叠叠乐过半格子时，未来 3 个回合内把其余玩家的奶油派炸弹获取率临时调高到 50%
+  private megaStackMissileBoostTurns = 0;
+  private megaStackOwnerPid: number | null = null;
 
   private message: string | null = null;
   private messageColor: string | null = null;
@@ -1353,11 +1357,19 @@ export class FlightChessEngine {
   }
 
   /* ================= Item & Quest Helpers ================= */
+  private compareArrivalOrder(a: PlaneData, b: PlaneData): number {
+    return (a.enteredSeq ?? a.idx) - (b.enteredSeq ?? b.idx) || a.idx - b.idx;
+  }
+
+  private stampArrival(plane: PlaneData): void {
+    plane.enteredSeq = ++this.cellEnterCounter;
+  }
+
   private resolveBottomOfStack(plane: PlaneData): PlaneData {
     if (plane.pos < 1 || plane.pos >= HOME_END) return plane;
     const sameStack = this.planes
       .filter((p) => p.pid === plane.pid && p.pos === plane.pos)
-      .sort((a, b) => a.idx - b.idx);
+      .sort((a, b) => this.compareArrivalOrder(a, b));
     return sameStack[0] ?? plane;
   }
 
@@ -1382,7 +1394,7 @@ export class FlightChessEngine {
               q.animating === p.animating &&
               Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z) < 0.35,
           )
-          .sort((a, b) => a.idx - b.idx);
+          .sort((a, b) => this.compareArrivalOrder(a, b));
         const firstShielded = stack.find((q) => q.shielded);
         if (firstShielded && firstShielded !== p) {
           p.shielded = false;
@@ -1570,15 +1582,88 @@ export class FlightChessEngine {
     return candidates[candidates.length - 1];
   }
 
-  private pickUniqueShopOffer(): ItemType[] {
+  /** 检查阶段 0/1 是否存在 3~4 只同阵营叠叠乐已超过棋盘一半格子（pos > 25 且未完赛） */
+  private findEarlyMegaStackOwner(): number | null {
+    const stage = this.getProgressStage();
+    if (stage > 1) return null;
+    const counts = new Map<string, { pid: number; pos: number; count: number }>();
+    for (const pl of this.planes) {
+      if (pl.pos > 25 && pl.pos < HOME_END) {
+        const key = `${pl.pid}:${pl.pos}`;
+        const cur = counts.get(key);
+        if (cur) cur.count += 1;
+        else counts.set(key, { pid: pl.pid, pos: pl.pos, count: 1 });
+      }
+    }
+    let best: { pid: number; pos: number; count: number } | null = null;
+    for (const entry of counts.values()) {
+      if (entry.count >= 3 && (!best || entry.pos > best.pos)) {
+        best = entry;
+      }
+    }
+    return best ? best.pid : null;
+  }
+
+  /**
+   * 阶段预算 12/8/8/12：仅在阶段 0/1 且当前累计大轮数 < (前置累轮数 + 当前阶段轮数 / 2) 时，
+   * 若存在 3~4 只叠叠乐超过棋盘一半格子，为接下来 3 个回合（主要面向其他玩家）将奶油派炸弹获取率提升至 50%，
+   * 直到叠叠乐被拆散或被退回一半格子（pos <= 25）及后面。
+   */
+  private updateMegaStackMissileBoost(justEndedPid: number): void {
+    const ownerPid = this.findEarlyMegaStackOwner();
+    if (ownerPid === null) {
+      this.megaStackMissileBoostTurns = 0;
+      this.megaStackOwnerPid = null;
+      return;
+    }
+    const stage = this.getProgressStage();
+    const stageBudgets = [12, 8, 8, 12];
+    const prevCum = stage === 0 ? 0 : stageBudgets[0];
+    const earlyThreshold = prevCum + stageBudgets[stage] / 2; // 阶段 0 -> 6 轮，阶段 1 -> 16 轮
+    const curRound = Math.max(1, ...this.playerTurnCount);
+
+    if (justEndedPid === ownerPid && curRound < earlyThreshold) {
+      this.megaStackMissileBoostTurns = 3;
+      this.megaStackOwnerPid = ownerPid;
+    } else if (this.megaStackMissileBoostTurns > 0) {
+      this.megaStackMissileBoostTurns = Math.max(0, this.megaStackMissileBoostTurns - 1);
+      if (this.megaStackMissileBoostTurns === 0) {
+        this.megaStackOwnerPid = null;
+      }
+    } else if (curRound < earlyThreshold && this.megaStackOwnerPid !== ownerPid) {
+      this.megaStackMissileBoostTurns = 3;
+      this.megaStackOwnerPid = ownerPid;
+    }
+  }
+
+  private isMegaStackMissileBoostActiveFor(pid: number): boolean {
+    const liveOwner = this.findEarlyMegaStackOwner();
+    if (liveOwner === null) {
+      this.megaStackMissileBoostTurns = 0;
+      this.megaStackOwnerPid = null;
+      return false;
+    }
+    return this.megaStackMissileBoostTurns > 0 && pid !== liveOwner;
+  }
+
+  private pickUniqueShopOffer(pid?: number): ItemType[] {
     const stage = this.getProgressStage();
     const weights = SHOP_ITEM_WEIGHTS[stage];
     const picked = new Set<ItemType>();
     const offer: ItemType[] = [];
+    const boostedMissile = pid !== undefined && this.isMegaStackMissileBoostActiveFor(pid);
     // 进入阶段 3，商店三选一必定刷出奶油派炸弹
     if (stage >= 3) {
       picked.add('missile');
       offer.push('missile');
+    } else if (boostedMissile) {
+      if (Math.random() < 0.5) {
+        picked.add('missile');
+        offer.push('missile');
+      } else {
+        // 精准控制商店出现奶油派炸弹的概率为 50%
+        picked.add('missile');
+      }
     }
     while (offer.length < 3) {
       const next = this.pickWeightedItem(weights, picked);
@@ -1601,7 +1686,15 @@ export class FlightChessEngine {
 
   private grantRandomItem(pid: number): ItemType {
     const stage = this.getProgressStage();
-    const item = this.pickWeightedItem(GIFT_QUEST_ITEM_WEIGHTS[stage]);
+    let item: ItemType;
+    if (this.isMegaStackMissileBoostActiveFor(pid)) {
+      item =
+        Math.random() < 0.5
+          ? 'missile'
+          : this.pickWeightedItem(GIFT_QUEST_ITEM_WEIGHTS[stage], new Set<ItemType>(['missile']));
+    } else {
+      item = this.pickWeightedItem(GIFT_QUEST_ITEM_WEIGHTS[stage]);
+    }
     this.grantItem(pid, item);
     return item;
   }
@@ -3539,8 +3632,78 @@ export class FlightChessEngine {
       const total = grp.length;
       const distinctPids = new Set(grp.map((g) => g.pid)).size;
       const isMixedRingHuddle = k.startsWith('r') && distinctPids >= 2;
-      if (!isMixedRingHuddle) {
+      if (grp[0]?.pos === -1) {
         grp.sort((a, b) => a.idx - b.idx);
+      } else {
+        grp.sort((a, b) => this.compareArrivalOrder(a, b));
+      }
+
+      if (isMixedRingHuddle) {
+        // 多阵营护盾共格：按阵营分组（最多 4 组排 1~4 位），同阵营多只小熊在各自站位垂直叠叠乐；
+        // 最底下的小熊（以及相邻阵营同高度层的小熊）保持脸挤脸压平贴紧，绝不穿模变形。
+        const byPid = new Map<number, PlaneData[]>();
+        for (const p of grp) {
+          const list = byPid.get(p.pid) ?? [];
+          list.push(p);
+          byPid.set(p.pid, list);
+        }
+        const factionGroups = Array.from(byPid.values())
+          .map((list) => list.sort((a, b) => this.compareArrivalOrder(a, b)))
+          .sort((a, b) => this.compareArrivalOrder(a[0], b[0]));
+        const factionTotal = factionGroups.length;
+        const baseYaw = this.faceTravelDir(factionGroups[0][0]);
+        const cosY = Math.cos(baseYaw);
+        const sinY = Math.sin(baseYaw);
+
+        factionGroups.forEach((faction, fIdx) => {
+          const huddle = this.getStartHuddlePose(fIdx, factionTotal, baseYaw);
+          const c = this.posToCell(this.players[faction[0].pid], faction[0].pos);
+          const fx = c[0] + huddle.dx;
+          const fz = c[1] + huddle.dz;
+          const fyaw = baseYaw + huddle.yawOff;
+          const me = huddle.pts[Math.min(fIdx, huddle.pts.length - 1)];
+          const cYaw = Math.cos(fyaw);
+          const sYaw = Math.sin(fyaw);
+
+          faction.forEach((p, sIdx) => {
+            const fy = 0.12 + sIdx * STACK_STEP_Y;
+            p.mesh.position.set(fx, fy, fz);
+            p.mesh.rotation.set(0, fyaw, 0);
+            p.mesh.userData.stackBaseX = fx;
+            p.mesh.userData.stackBaseY = fy;
+            p.mesh.userData.stackBaseZ = fz;
+            p.mesh.userData.stackBaseYaw = fyaw;
+            p.mesh.userData.stackIdx = sIdx;
+            p.mesh.userData.stackTotal = faction.length;
+            p.mesh.userData.huddleRoll = sIdx === 0 ? huddle.leanRoll : 0;
+            p.mesh.userData.huddlePitch = sIdx === 0 ? huddle.leanPitch : 0;
+            p.mesh.userData.huddleTotal = sIdx === 0 ? factionTotal : 1;
+            p.mesh.userData.huddleIdx = fIdx;
+
+            const contacts: { nx: number; nz: number; maxProj: number }[] = [];
+            for (let j = 0; j < factionTotal; j++) {
+              if (j === fIdx) continue;
+              // 底层（sIdx === 0）必与所有同格敌方底层脸挤脸；上层仅当邻位同高度也有熊时挤脸
+              if (factionGroups[j].length <= sIdx) continue;
+              const nb = huddle.pts[Math.min(j, huddle.pts.length - 1)];
+              const dlx = nb.lx - me.lx;
+              const dlz = nb.lz - me.lz;
+              const wdx = dlx * cosY + dlz * sinY;
+              const wdz = -dlx * sinY + dlz * cosY;
+              const dist = Math.hypot(wdx, wdz) || 1;
+              const lnx = (wdx * cYaw - wdz * sYaw) / dist;
+              const lnz = (wdx * sYaw + wdz * cYaw) / dist;
+              const maxProj = (dist * 0.5) / 0.92;
+              contacts.push({ nx: lnx, nz: lnz, maxProj });
+            }
+            if (contacts.length > 0) {
+              this.applyCheekSquishDeform(p, contacts, fIdx % 2 === 0 ? 'w' : 'open');
+            } else {
+              this.applyCheekSquishDeform(p, []);
+            }
+          });
+        });
+        continue;
       }
 
       grp.forEach((p, i) => {
@@ -3556,10 +3719,10 @@ export class FlightChessEngine {
           x = b[0];
           z = b[1];
           yaw = Math.atan2(-x, -z + 2);
-        } else if (p.pos === 0 || isMixedRingHuddle) {
-          // START 区域或护盾挡踩共格：采用真实软体接触面压平，实现「脸挤脸」并排站立
+        } else if (p.pos === 0) {
+          // START 区域：采用真实软体接触面压平，实现「脸挤脸」并排站立
           const c = this.posToCell(this.players[p.pid], p.pos);
-          const baseYaw = isMixedRingHuddle ? this.faceTravelDir(grp[0]) : this.faceTravelDir(p);
+          const baseYaw = this.faceTravelDir(p);
           const huddle = this.getStartHuddlePose(i, total, baseYaw);
           x = c[0] + huddle.dx;
           z = c[1] + huddle.dz;
@@ -4146,9 +4309,18 @@ export class FlightChessEngine {
       if (flipMode === 'frontFlip') {
         const ft = t < 0.08 ? 0 : t > 0.92 ? 1 : (t - 0.08) / 0.84;
         const fe = ft < 0.5 ? 2 * ft * ft : 1 - Math.pow(-2 * ft + 2, 2) / 2;
-        pt.animRoot.rotation.x = fe * Math.PI * 2;
+        const flipAng = fe * Math.PI * 2;
+        // 绕小熊身体质心（同时也是泡泡罩球心 y=0.35）做前空翻，避免绕脚底旋转甩出泡泡外
+        const pivotY = 0.35 * syScale;
+        pt.animRoot.rotation.x = flipAng;
+        pt.animRoot.position.set(
+          0,
+          pivotY * (1 - Math.cos(flipAng)),
+          -pivotY * Math.sin(flipAng),
+        );
       } else {
         pt.animRoot.rotation.x = air * 0.16;
+        pt.animRoot.position.set(0, 0, 0);
       }
       pt.leftArm.rotation.z = 0.35 + air * 0.9;
       pt.rightArm.rotation.z = -0.35 - air * 0.9;
@@ -4165,6 +4337,7 @@ export class FlightChessEngine {
     m.userData.stackTotal = 1;
     pt.animRoot.scale.set(1, 1, 1);
     pt.animRoot.rotation.set(0, 0, 0);
+    pt.animRoot.position.set(0, 0, 0);
     pt.leftArm.rotation.set(0, 0, 0);
     pt.rightArm.rotation.set(0, 0, 0);
     pt.leftFoot.rotation.set(0, 0, 0);
@@ -4947,10 +5120,14 @@ export class FlightChessEngine {
         ? [plane]
         : this.planesOf(plane.pid)
             .filter((p) => p.pos === plane.pos && p.pos !== HOME_END)
-            .sort((a, b) => a.idx - b.idx);
+            .sort((a, b) => this.compareArrivalOrder(a, b));
     const sync = (fn: (p: PlaneData, idx: number) => Promise<void>) =>
       Promise.all(stack.map((p, i) => fn(p, i)));
-    const setPos = (v: number) => stack.forEach((p) => (p.pos = v));
+    const setPos = (v: number) =>
+      stack.forEach((p) => {
+        p.pos = v;
+        this.stampArrival(p);
+      });
     const countExistingAt = (pos: number, includeOthers = false) => {
       if (pos <= 0) return 0;
       if (includeOthers && pos <= 50) {
@@ -5001,7 +5178,9 @@ export class FlightChessEngine {
     if (plane.pos === -1) {
       setPos(0);
       const c = this.posToCell(P, 0);
-      const existingOnStart = this.planesOf(plane.pid).filter((p) => p !== plane && p.pos === 0);
+      const existingOnStart = this.planesOf(plane.pid)
+        .filter((p) => p !== plane && p.pos === 0)
+        .sort((a, b) => this.compareArrivalOrder(a, b));
       const alreadyOnStart = existingOnStart.length;
       const nextTotal = Math.min(alreadyOnStart + 1, 4);
       const baseYaw = this.faceTravelDir(plane);
@@ -5258,7 +5437,7 @@ export class FlightChessEngine {
 
       // 直接踩到商店格子时：先打开商店选购，选购完成后再继续触发同色 +4 大跳/飞行
       if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
-        const offer = this.pickUniqueShopOffer();
+        const offer = this.pickUniqueShopOffer(plane.pid);
         if (this.isAI() || this.gmAutoPlay) {
           const chosen = this.aiChooseShopItem(offer, plane.pid);
           this.grantItem(plane.pid, chosen);
@@ -5383,7 +5562,7 @@ export class FlightChessEngine {
 
     // 踩中商店格子：15 秒内从 3 张不重复随机道具卡中选择 1 张
     if (plane.pos >= 1 && plane.pos <= 50 && this.ringIndexOf(plane) === (P.start + 40) % 52) {
-      const offer = this.pickUniqueShopOffer();
+      const offer = this.pickUniqueShopOffer(plane.pid);
       if (this.isAI() || this.gmAutoPlay) {
         const chosen = this.aiChooseShopItem(offer, plane.pid);
         this.grantItem(plane.pid, chosen);
@@ -5425,7 +5604,9 @@ export class FlightChessEngine {
       this.beginRollPhase(true);
       return;
     }
+    const justEndedPid = this.turn;
     this.totalCompletedTurns += 1;
+    this.updateMegaStackMissileBoost(justEndedPid);
     let steps = 0;
     do {
       this.turn = (this.turn + 1) % this.players.length;
@@ -6845,7 +7026,7 @@ export class FlightChessEngine {
                   q.animating === p.animating &&
                   Math.hypot(q.mesh.position.x - p.mesh.position.x, q.mesh.position.z - p.mesh.position.z) < 0.28,
               )
-              .sort((a, b) => a.idx - b.idx);
+              .sort((a, b) => this.compareArrivalOrder(a, b));
             sTotal = Math.max(1, liveStack.length);
             const foundIdx = liveStack.indexOf(p);
             sIdx = foundIdx >= 0 ? foundIdx : 0;
