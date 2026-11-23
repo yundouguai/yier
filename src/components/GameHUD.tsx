@@ -815,9 +815,29 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                     </div>
                   </button>
 
-                  {bubble && (
-                    <div className="anim-msg-pop pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 z-30 whitespace-nowrap rounded-full border border-amber-200 bg-white/98 px-2.5 py-1 text-[11px] font-extrabold text-slate-800 shadow-md">
-                      {bubble}
+                  {(bubble || (pl.personalBuffs && pl.personalBuffs.length > 0)) && (
+                    <div className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 z-30 flex flex-col items-start gap-1">
+                      {pl.personalBuffs && pl.personalBuffs.map((pb) => (
+                        <div
+                          key={pb.id}
+                          className="flex items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 py-1 text-[10px] md:text-[11px] font-extrabold text-white shadow-lg"
+                          style={{
+                            background: `linear-gradient(135deg, ${pb.accentColor}, #3a2318)`,
+                            border: '1.5px solid rgba(255, 232, 178, 0.85)',
+                          }}
+                        >
+                          <span>{pb.icon}</span>
+                          <span>{pb.name}</span>
+                          <span className="rounded bg-black/25 px-1.5 py-0.5 text-[9.5px] font-bold text-amber-100">
+                            {pb.detail}
+                          </span>
+                        </div>
+                      ))}
+                      {bubble && (
+                        <div className="anim-msg-pop whitespace-nowrap rounded-full border border-amber-200 bg-white/98 px-2.5 py-1 text-[11px] font-extrabold text-slate-800 shadow-md">
+                          {bubble}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1539,23 +1559,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               第 {snap.roundNumber ?? 1} 轮
             </div>
 
-            {snap.activeGlobalEvent && (
-              <div
-                className="flex h-9 md:h-10 shrink-0 items-center gap-1 rounded-2xl px-2.5 md:px-3 text-[11px] md:text-[12px] font-extrabold text-white whitespace-nowrap"
-                style={{
-                  background: `linear-gradient(135deg, ${snap.activeGlobalEvent.accentColor}, #2b1f3b)`,
-                  border: '2px solid rgba(255, 232, 168, 0.78)',
-                  boxShadow: `0 6px 16px ${snap.activeGlobalEvent.accentColor}44`,
-                }}
-                title={`${snap.activeGlobalEvent.name}：${snap.activeGlobalEvent.shortDesc}`}
-              >
-                <span>{snap.activeGlobalEvent.icon}</span>
-                <span>{snap.activeGlobalEvent.name}</span>
-                <span className="rounded-full bg-black/25 px-1.5 py-0.5 text-[10px] tabular-nums">
-                  {snap.activeGlobalEvent.isFallback ? '常驻' : `${snap.activeGlobalEvent.remainingRounds}轮`}
-                </span>
-              </div>
-            )}
+
 
             <div
               className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-2.5 md:px-3.5 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
@@ -2110,6 +2114,35 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
         )}
+
+        {/* 全局奇遇 BUFF 常驻状态栏（只要全局效果生效就一直显示详情与剩余轮数） */}
+        {snap.activeGlobalEvent && (
+          <div className="pointer-events-none fixed inset-x-0 top-2.5 md:top-3 z-30 flex justify-center px-3">
+            <div
+              className="pointer-events-auto flex max-w-[92vw] items-center gap-2 rounded-2xl px-3.5 py-1.5 md:px-4 md:py-2 text-white shadow-xl backdrop-blur-md"
+              style={{
+                background: `linear-gradient(135deg, ${snap.activeGlobalEvent.accentColor}ee, rgba(32, 22, 48, 0.94))`,
+                border: '1.5px solid rgba(255, 232, 168, 0.85)',
+                boxShadow: `0 8px 24px rgba(0,0,0,0.28), 0 0 18px ${snap.activeGlobalEvent.accentColor}44`,
+              }}
+            >
+              <span className="text-base md:text-lg leading-none">{snap.activeGlobalEvent.icon}</span>
+              <span className="shrink-0 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide">
+                全局 BUFF
+              </span>
+              <span className="shrink-0 text-[12px] md:text-[13px] font-black">
+                {snap.activeGlobalEvent.name}
+              </span>
+              <span className="truncate text-[11px] md:text-[12px] font-semibold text-amber-50/95">
+                {snap.activeGlobalEvent.shortDesc}
+              </span>
+              <span className="shrink-0 rounded-full bg-black/30 px-2 py-0.5 text-[10.5px] font-extrabold tabular-nums text-amber-200">
+                {snap.activeGlobalEvent.isFallback ? '本阶段常驻' : `剩 ${snap.activeGlobalEvent.remainingRounds} 轮`}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* 问号奇遇灯笼 · 非阻塞古风流光过场横幅（绝不拦截点击，不占用下家操作时间） */}
         {snap.randomEventBanner && (() => {
           const b = snap.randomEventBanner;

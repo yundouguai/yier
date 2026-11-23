@@ -270,6 +270,13 @@ export interface HudPlayerSnapshot {
   items: Record<ItemType, number>;
   quest: PlayerQuestState;
   talentCharges?: number;
+  personalBuffs?: {
+    id: RandomEventId;
+    icon: string;
+    name: string;
+    detail: string;
+    accentColor: string;
+  }[];
   kda: PlayerKdaStats;
 }
 

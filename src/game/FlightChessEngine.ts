@@ -277,12 +277,7 @@ export class FlightChessEngine {
   private randomEventBannerKey = 0;
   private randomEventBannerTimer: number | null = null;
   private honeyNapPending: Record<number, boolean> = {};
-  private boardLanterns: { quadrant: number; ringIdx: number; kind: LanternKind; cooldownRounds: number }[] = [
-    { quadrant: 0, ringIdx: -1, kind: 'good', cooldownRounds: 0 },
-    { quadrant: 1, ringIdx: -1, kind: 'random', cooldownRounds: 0 },
-    { quadrant: 2, ringIdx: -1, kind: 'good', cooldownRounds: 0 },
-    { quadrant: 3, ringIdx: -1, kind: 'random', cooldownRounds: 0 },
-  ];
+  private boardLanterns: { ringIdx: number; kind: LanternKind }[] = [];
   private lastEventRoundTicked = 0;
   private lanternBurstFx: {
     group: THREE.Group;
@@ -1393,6 +1388,17 @@ export class FlightChessEngine {
           items: { ...this.playerItems[i] },
           quest: { ...this.playerQuests[i] },
           talentCharges: this.talentCharges[i] ?? 0,
+          personalBuffs: this.honeyNapPending[i]
+            ? [
+                {
+                  id: 'honeyNap' as RandomEventId,
+                  icon: '🍯',
+                  name: '贪吃打盹',
+                  detail: '下次掷骰步数 -2（最低 1 格）',
+                  accentColor: '#c97b3e',
+                },
+              ]
+            : [],
           kda: { ...this.playerKda[i] },
         };
       }),
@@ -1731,11 +1737,11 @@ export class FlightChessEngine {
   private syncBoardLanternMeshes(): void {
     const pool = this.world.mysteryLanterns;
     if (!pool) return;
-    for (let q = 0; q < 4; q++) {
-      const meshItem = pool[q];
-      const state = this.boardLanterns[q];
-      if (!meshItem || !state) continue;
-      if (state.ringIdx < 0) {
+    for (let i = 0; i < pool.length; i++) {
+      const meshItem = pool[i];
+      const state = this.boardLanterns[i];
+      if (!meshItem) continue;
+      if (!state || state.ringIdx < 0) {
         meshItem.group.visible = false;
         continue;
       }
@@ -1750,33 +1756,33 @@ export class FlightChessEngine {
     }
   }
 
-  private refreshBoardLanternsForPacing(forceAll = false): void {
-    const { deltaStage, deltaTotal } = this.getPacingDeltas();
-    const isOver = deltaStage > 0 || deltaTotal > 0;
-    const isTooFast = deltaStage <= 0 && deltaTotal <= -6;
-    const desiredQuadrants = isOver || isTooFast || forceAll ? [0, 1, 2, 3] : [0, 2];
+  /** 向棋盘追加一批灯笼（绝不消掉已有灯笼，场上最多 8 盏；优先四象限各分 1 盏，避开棋子/商店/航线格） */
+  private addLanternBatch(kinds: LanternKind[]): void {
+    const maxLanterns = 8;
+    const slotsLeft = maxLanterns - this.boardLanterns.length;
+    if (slotsLeft <= 0) return;
+
+    const toAdd = kinds.slice(0, slotsLeft);
+    const quads = [0, 1, 2, 3];
+    for (let i = quads.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [quads[i], quads[j]] = [quads[j], quads[i]];
+    }
     const excluded = this.getExcludedLanternRingSet();
 
-    for (let q = 0; q < 4; q++) {
-      const bl = this.boardLanterns[q];
-      if (!desiredQuadrants.includes(q)) {
-        bl.ringIdx = -1;
-        continue;
-      }
-      const targetKind: LanternKind = isOver
-        ? 'good'
-        : isTooFast
-          ? 'random'
-          : q % 2 === 0
-            ? 'good'
-            : 'random';
-      bl.kind = targetKind;
-      if (bl.ringIdx < 0 && (bl.cooldownRounds <= 0 || forceAll)) {
-        const picked = this.pickRingTileInQuadrant(q, excluded);
-        if (picked >= 0) {
-          bl.ringIdx = picked;
-          excluded.add(picked);
+    for (let k = 0; k < toAdd.length; k++) {
+      const q = quads[k % 4];
+      let picked = this.pickRingTileInQuadrant(q, excluded);
+      if (picked < 0) {
+        const allFree: number[] = [];
+        for (let r = 0; r < 52; r++) {
+          if (!excluded.has(r)) allFree.push(r);
         }
+        picked = allFree.length > 0 ? allFree[Math.floor(Math.random() * allFree.length)] : -1;
+      }
+      if (picked >= 0) {
+        this.boardLanterns.push({ ringIdx: picked, kind: toAdd[k] });
+        excluded.add(picked);
       }
     }
     this.syncBoardLanternMeshes();
@@ -1788,6 +1794,7 @@ export class FlightChessEngine {
     this.lastEventRoundTicked = curRound;
 
     const stage = this.getProgressStage();
+    const budget = STAGE_ROUND_BUDGETS[stage]; // [12, 8, 8, 12]
     if (stage !== this.eventStage) {
       this.eventStage = stage;
       this.stageRounds = 1;
@@ -1805,11 +1812,21 @@ export class FlightChessEngine {
       }
     }
 
-    for (const bl of this.boardLanterns) {
-      if (bl.cooldownRounds > 0) bl.cooldownRounds -= 1;
+    // 1) 每个阶段初始（第 1 轮）：刷 4 盏纯随机灯笼（不消掉已有，上限 8 盏）
+    if (this.stageRounds === 1) {
+      this.addLanternBatch(['random', 'random', 'random', 'random']);
+    }
+    // 2) 每个阶段中期（预算一半：阶段0第6轮 / 阶段1第4轮 / 阶段2第4轮 / 阶段3第6轮）：再加 4 盏纯随机灯笼
+    else if (this.stageRounds === Math.floor(budget / 2)) {
+      this.addLanternBatch(['random', 'random', 'random', 'random']);
+    }
+    // 3) 超过该阶段设定轮数后，每 3 轮再加 4 盏（2 盏金 + 2 盏紫，不消掉已有，上限 8 盏）
+    else if (this.stageRounds > budget && (this.stageRounds - (budget + 1)) % 3 === 0) {
+      this.addLanternBatch(['good', 'good', 'random', 'random']);
     }
 
-    if (this.stageRounds >= STAGE_ROUND_BUDGETS[stage] + 4 && !this.activeGlobalEvent?.isFallback) {
+    // 极端阶段兜底：单阶段滞留达到 B[s] + 4（16/12/12/16）自动点亮「满城烟火」常驻至进入下阶段
+    if (this.stageRounds >= budget + 4 && !this.activeGlobalEvent?.isFallback) {
       this.activeGlobalEvent = { id: 'cityFireworks', remainingRounds: 99, isFallback: true };
       const curP = this.cur();
       this.showRandomEventBanner(
@@ -1822,7 +1839,6 @@ export class FlightChessEngine {
       beep(880, 0.16, 'triangle', 0.14);
     }
 
-    this.refreshBoardLanternsForPacing(false);
     this.emitSnapshot();
   }
 
@@ -2117,21 +2133,23 @@ export class FlightChessEngine {
     this.showRandomEventBanner(eventId, lanternKind, P.name, P.key, detail);
   }
 
-  private checkMysteryLanternLanding(actorPlane: PlaneData, actorStack: PlaneData[]): void {
-    if (actorPlane.pos < 1 || actorPlane.pos > 50) return;
+  /** 返回 true 表示事件已改变当前棋子位置（如换位/顺风+4/蜜蜂退3），后续不应再触发原格同色大跳 */
+  private checkMysteryLanternLanding(actorPlane: PlaneData, actorStack: PlaneData[]): boolean {
+    if (actorPlane.pos < 1 || actorPlane.pos > 50) return false;
     const rIdx = this.ringIndexOf(actorPlane);
-    const hit = this.boardLanterns.find((bl) => bl.ringIdx === rIdx);
-    if (!hit) return;
-    const kind = hit.kind;
-    hit.ringIdx = -1;
-    hit.cooldownRounds = 1;
+    const hitIdx = this.boardLanterns.findIndex((bl) => bl.ringIdx === rIdx);
+    if (hitIdx < 0) return false;
+    const kind = this.boardLanterns[hitIdx].kind;
+    this.boardLanterns.splice(hitIdx, 1);
     this.syncBoardLanternMeshes();
     const tile = RING_TILES[rIdx];
     if (tile) {
       this.spawnLanternBurst(tile.cx, tile.cz, kind);
     }
+    const prevPos = actorPlane.pos;
     const chosenId = this.pickEventForLantern(kind);
     this.triggerMysteryEvent(chosenId, kind, actorPlane, actorStack);
+    return actorPlane.pos !== prevPos || chosenId === 'beeDetour';
   }
 
   public gmTriggerRandomEvent(eventId: RandomEventId): void {
@@ -2155,12 +2173,9 @@ export class FlightChessEngine {
 
   public gmRespawnLanterns(): void {
     if (this.disposed) return;
-    for (const bl of this.boardLanterns) {
-      bl.ringIdx = -1;
-      bl.cooldownRounds = 0;
-    }
-    this.refreshBoardLanternsForPacing(true);
-    this.setMsg('🏮 GM 已在四象限重新刷出 4 盏问号奇遇灯笼！');
+    this.boardLanterns = [];
+    this.addLanternBatch(['good', 'good', 'random', 'random']);
+    this.setMsg('🏮 GM 已重新刷出 4 盏问号奇遇灯笼（2 金 2 紫）！');
   }
 
   public gmSpawnLanternAhead(kind: LanternKind, stepsAhead = 1): void {
@@ -2176,12 +2191,12 @@ export class FlightChessEngine {
     }
     const targetRelPos = Math.min(50, Math.max(1, actor.pos + Math.max(1, stepsAhead)));
     const targetRingIdx = (P.start + 2 + targetRelPos) % 52;
-    const q = Math.floor(targetRingIdx / 13) % 4;
-    const bl = this.boardLanterns[q];
-    if (bl) {
-      bl.ringIdx = targetRingIdx;
-      bl.kind = kind;
-      bl.cooldownRounds = 0;
+    const existingIdx = this.boardLanterns.findIndex((b) => b.ringIdx === targetRingIdx);
+    if (existingIdx >= 0) {
+      this.boardLanterns[existingIdx].kind = kind;
+    } else {
+      if (this.boardLanterns.length >= 8) this.boardLanterns.shift();
+      this.boardLanterns.push({ ringIdx: targetRingIdx, kind });
     }
     this.syncBoardLanternMeshes();
     this.setMsg(
@@ -5845,6 +5860,7 @@ export class FlightChessEngine {
         const yaw = curStep === HOME_END ? P.finalYaw : this.faceTravelDir(plane);
         sndHop();
         let stepCapturePromise: Promise<number> | null = null;
+        const isLastStep = i === effectiveSteps - 1 || (noBounce && curStep === HOME_END);
         await hopAll(
           c,
           yaw,
@@ -5853,20 +5869,21 @@ export class FlightChessEngine {
           i % 2 === 0 ? 1 : -1,
           curStep,
           'none',
-          i === die - 1
+          isLastStep
             ? () => {
                 stepCapturePromise = this.captureAt(plane);
               }
             : undefined,
-          i < die - 1,
+          !isLastStep,
         );
         if (this.disposed) return;
-        if (i < die - 1) {
+        if (!isLastStep) {
           await this.sleep(80);
           if (this.disposed) return;
         } else if (stepCapturePromise) {
           await stepCapturePromise;
         }
+        if (isLastStep) break;
       }
       if (dir === -1) {
         this.setMsg(
@@ -5876,8 +5893,10 @@ export class FlightChessEngine {
         );
       }
 
+      const lanternMovedBear = this.checkMysteryLanternLanding(plane, stack);
+
       const runSameColorAndFlight = async () => {
-        if (this.disposed || this.lastCaptureRecoilTriggered) return;
+        if (this.disposed || this.lastCaptureRecoilTriggered || lanternMovedBear) return;
         if (
           P.key === 'caomei' &&
           (this.talentCharges[plane.pid] ?? 0) > 0 &&

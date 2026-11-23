@@ -7288,7 +7288,7 @@ export function buildAncientWorld(
   });
 
   const mysteryLanterns: NonNullable<WorldRefs['mysteryLanterns']> = [];
-  for (let li = 0; li < 4; li++) {
+  for (let li = 0; li < 8; li++) {
     const group = new THREE.Group();
     group.visible = false;
 
