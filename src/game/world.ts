@@ -253,7 +253,8 @@ export interface WorldRefs {
     bubuFaceYaw: number;
     rodPivot: THREE.Group;
     bobber: THREE.Group;
-    line: THREE.Mesh;
+    line: THREE.Line;
+    linePosAttr: THREE.BufferAttribute;
     caughtFish: THREE.Group;
     caughtFishBodyMat: THREE.MeshStandardMaterial;
     giantFish: THREE.Group;
@@ -265,6 +266,11 @@ export interface WorldRefs {
     yier: THREE.Group;
     honeyGlob: THREE.Mesh;
     yierRipple: THREE.Mesh;
+    yierAng: number;
+    yierSitPos: THREE.Vector3;
+    yierFaceYaw: number;
+    skipStone: THREE.Mesh;
+    skipRipples: THREE.Mesh[];
   };
   heartTreeNight?: {
     waveMats: THREE.MeshStandardMaterial[];
@@ -304,6 +310,7 @@ export interface WorldRefs {
   planeMarks: THREE.Group[];
   courtFences: CourtFenceHighlight[];
   shopRingIndices: number[];
+  shopSignSways?: { pivot: THREE.Group; phase: number }[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
   petals: PetalAnim[];
@@ -3114,6 +3121,148 @@ export function buildAncientWorld(
     boardTileGroup.add(r);
   };
 
+  // 商店格专属：迷你古风木质甜品小招幌 + 挑灯小摊柱（立于格子外侧青石地，绝不与棋子穿帮）
+  const shopSignSways: { pivot: THREE.Group; phase: number }[] = [];
+  const shopBannerCanvas = document.createElement('canvas');
+  shopBannerCanvas.width = 128;
+  shopBannerCanvas.height = 192;
+  const sbc = shopBannerCanvas.getContext('2d')!;
+  sbc.fillStyle = '#fff7e8';
+  sbc.fillRect(0, 0, 128, 192);
+  sbc.strokeStyle = '#c83e4d';
+  sbc.lineWidth = 8;
+  sbc.strokeRect(8, 8, 112, 176);
+  sbc.strokeStyle = '#e6b24c';
+  sbc.lineWidth = 3;
+  sbc.strokeRect(16, 16, 96, 160);
+  // 顶部可爱小草莓蛋糕图案
+  sbc.fillStyle = '#f8d5a3';
+  sbc.fillRect(40, 56, 48, 28);
+  sbc.fillStyle = '#ffffff';
+  sbc.fillRect(38, 48, 52, 12);
+  sbc.fillStyle = '#f43f5e';
+  sbc.beginPath();
+  sbc.arc(64, 42, 10, 0, Math.PI * 2);
+  sbc.fill();
+  sbc.fillStyle = '#4ade80';
+  sbc.beginPath();
+  sbc.ellipse(64, 32, 7, 3.5, 0, 0, Math.PI * 2);
+  sbc.fill();
+  // 竖排「甜品」古风字样
+  sbc.fillStyle = '#7c2d12';
+  sbc.font = 'bold 34px "Noto Serif SC", serif';
+  sbc.textAlign = 'center';
+  sbc.textBaseline = 'middle';
+  sbc.fillText('甜', 64, 116);
+  sbc.fillText('品', 64, 154);
+  const shopBannerTex = new THREE.CanvasTexture(shopBannerCanvas);
+  const shopBannerMat = new THREE.MeshStandardMaterial({
+    map: shopBannerTex,
+    roughness: 0.62,
+    side: THREE.DoubleSide,
+  });
+  const shopPostWoodMat = mat(0x5b3520, 0.72);
+  const shopPostRoofMat = mat(0x3b454f, 0.55);
+  const shopPostStoneMat = mat(0x9ca3af, 0.85);
+  const shopMiniLanternMat = new THREE.MeshStandardMaterial({
+    color: 0xffb347,
+    emissive: 0xff7b29,
+    emissiveIntensity: 0.78,
+    roughness: 0.35,
+  });
+  lanternMats.push(shopMiniLanternMat);
+
+  const buildShopSignPost = (cx: number, cz: number, idx: number) => {
+    const outX = Math.abs(cx) > Math.abs(cz) ? Math.sign(cx) : 0;
+    const outZ = Math.abs(cz) >= Math.abs(cx) ? Math.sign(cz) : 0;
+    const px = cx + outX * 0.80;
+    const pz = cz + outZ * 0.80;
+    // 朝向格子切线方向（沿路边顺展招幌，绝不探入格子正上方、4层叠叠乐也不穿模）
+    const yaw = Math.atan2(-outX, -outZ) + Math.PI / 2;
+
+    const grp = new THREE.Group();
+    grp.position.set(px, 0.08, pz);
+    grp.rotation.y = yaw;
+
+    // 青石柱础
+    const plinth = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.055, 0.18), shopPostStoneMat);
+    plinth.position.y = 0.0275;
+    plinth.castShadow = true;
+    plinth.receiveShadow = true;
+    grp.add(plinth);
+
+    // 红木雕柱
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.94, 0.068), shopPostWoodMat);
+    pole.position.y = 0.51;
+    pole.castShadow = true;
+    pole.receiveShadow = true;
+    grp.add(pole);
+
+    // 柱顶迷你小瓦帽 + 金珠顶
+    const roofCap = new THREE.Mesh(new THREE.ConeGeometry(0.135, 0.095, 4), shopPostRoofMat);
+    roofCap.rotation.y = Math.PI / 4;
+    roofCap.position.y = 1.015;
+    roofCap.castShadow = true;
+    grp.add(roofCap);
+
+    const roofFinial = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), trimGold);
+    roofFinial.position.y = 1.072;
+    grp.add(roofFinial);
+
+    // 侧挑横梁 + 榫卯斜撑
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.036, 0.42), shopPostWoodMat);
+    arm.position.set(0, 0.87, 0.19);
+    arm.castShadow = true;
+    grp.add(arm);
+
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.024, 0.22), shopPostWoodMat);
+    brace.position.set(0, 0.785, 0.09);
+    brace.rotation.x = -Math.PI / 4;
+    grp.add(brace);
+
+    // 随风轻摆的小招幌与末端暖灯笼
+    const swayPivot = new THREE.Group();
+    swayPivot.position.set(0, 0.855, 0.19);
+
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.22, 6), trimGold);
+    bar.rotation.x = Math.PI / 2;
+    bar.position.set(0, -0.025, 0);
+    swayPivot.add(bar);
+
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.30, 0.20), shopBannerMat);
+    banner.position.set(0, -0.18, 0);
+    banner.castShadow = true;
+    swayPivot.add(banner);
+
+    const bottomBar = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.21, 6), trimGold);
+    bottomBar.rotation.x = Math.PI / 2;
+    bottomBar.position.set(0, -0.335, 0);
+    swayPivot.add(bottomBar);
+
+    // 挑杆末端迷你暖光小灯笼
+    const lantCord = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.09, 4), trimGold);
+    lantCord.position.set(0, -0.045, 0.185);
+    swayPivot.add(lantCord);
+
+    const lantBody = new THREE.Mesh(new THREE.SphereGeometry(0.056, 10, 8), shopMiniLanternMat);
+    lantBody.scale.set(1, 0.88, 1);
+    lantBody.position.set(0, -0.125, 0.185);
+    swayPivot.add(lantBody);
+
+    for (const ly of [-0.08, -0.17]) {
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.012, 8), trimGold);
+      cap.position.set(0, ly, 0.185);
+      swayPivot.add(cap);
+    }
+    const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.014, 0.048, 6), trimGold);
+    tassel.position.set(0, -0.202, 0.185);
+    swayPivot.add(tassel);
+
+    grp.add(swayPivot);
+    scene.add(grp);
+    shopSignSways.push({ pivot: swayPivot, phase: idx * 1.4 });
+  };
+
   RING_TILES.forEach((t, i) => {
     const P = slotPlayer(i % 4);
     const isShopTile = !!P && shopRingSet.has(i);
@@ -3140,6 +3289,7 @@ export function buildAncientWorld(
         goldRim.rotation.x = -Math.PI / 2;
         goldRim.position.set(t.cx, 0.123, t.cz);
         scene.add(goldRim);
+        buildShopSignPost(t.cx, t.cz, i);
       } else {
         cellDisc(t.cx, t.cz, P, 0.31);
       }
@@ -6487,11 +6637,17 @@ export function buildAncientWorld(
   bobber.position.copy(waterSpot);
   stage1FishGroup.add(bobber);
 
-  const lineGeo = new THREE.CylinderGeometry(0.004, 0.004, 1, 4);
-  const lineMesh = new THREE.Mesh(
+  // 16 段柔性曲线钓线（支持自然下垂悬链线、咬钩绷紧颤动、抛竿甩弧）
+  const lineSegs = 16;
+  const linePtsArr = new Float32Array((lineSegs + 1) * 3);
+  const lineGeo = new THREE.BufferGeometry();
+  const linePosAttr = new THREE.BufferAttribute(linePtsArr, 3);
+  lineGeo.setAttribute('position', linePosAttr);
+  const lineMesh = new THREE.Line(
     lineGeo,
-    new THREE.MeshBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.78 }),
+    new THREE.LineBasicMaterial({ color: 0xf1f5f9, transparent: true, opacity: 0.85 }),
   );
+  lineMesh.frustumCulled = false;
   stage1FishGroup.add(lineMesh);
 
   const makeDetailedFish = (bodyColor: number, finColor: number, scale = 1.0) => {
@@ -6844,9 +7000,9 @@ export function buildAncientWorld(
   s1HoneyPot.rotation.z = 0.12;
   ysParts.animRoot.add(s1HoneyPot);
 
-  // 右爪粘出的一团亮金蜂蜜（伸进罐子后出现，送到嘴边吃掉）
-  const honeyGlob = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 8), honeyGlazeMat);
-  honeyGlob.position.set(0, -0.14, 0.05);
+  // 右爪尖粘出的一团亮金蜂蜜（贴在爪尖，吃蜂蜜时手臂自然凑到嘴边直接送入口中）
+  const honeyGlob = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), honeyGlazeMat);
+  honeyGlob.position.set(0.022, -0.068, 0.045);
   honeyGlob.visible = false;
   ysParts.rightArm.add(honeyGlob);
   stage1FishGroup.add(yierSitter);
@@ -6867,6 +7023,29 @@ export function buildAncientWorld(
   );
   stage1FishGroup.add(yierRipple);
 
+  // 一二打水漂用的扁平鹅卵石与 6 个水面弹跳涟漪环
+  const skipStone = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 7), mat(0x94a3b8, 0.72));
+  skipStone.scale.set(1.25, 0.34, 1.05);
+  skipStone.visible = false;
+  stage1FishGroup.add(skipStone);
+
+  const skipRipples: THREE.Mesh[] = [];
+  for (let ri = 0; ri < 6; ri++) {
+    const rMat = new THREE.MeshBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const rm = new THREE.Mesh(rippleGeo, rMat);
+    rm.rotation.x = -Math.PI / 2;
+    rm.visible = false;
+    stage1FishGroup.add(rm);
+    skipRipples.push(rm);
+  }
+  const yierSitPos = new THREE.Vector3(yierSitX, -0.56, yierSitZ);
+
   scene.add(stage1FishGroup);
 
   const stage1FishEgg = {
@@ -6878,6 +7057,7 @@ export function buildAncientWorld(
     rodPivot,
     bobber,
     line: lineMesh,
+    linePosAttr,
     caughtFish,
     caughtFishBodyMat,
     giantFish,
@@ -6889,6 +7069,11 @@ export function buildAncientWorld(
     yier: yierSitter,
     honeyGlob,
     yierRipple,
+    yierAng,
+    yierSitPos,
+    yierFaceYaw,
+    skipStone,
+    skipRipples,
   };
 
   return {
@@ -6925,6 +7110,7 @@ export function buildAncientWorld(
     planeMarks,
     courtFences,
     shopRingIndices,
+    shopSignSways,
     lotusList,
     willowDrapeList,
     petals,

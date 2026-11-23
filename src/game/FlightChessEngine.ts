@@ -326,6 +326,12 @@ export class FlightChessEngine {
     catchKind: 'normal' as 'normal' | 'giant' | 'boot',
     fishColorHex: 0xf97316,
   };
+  private stage1SkipState = {
+    cycleT: 28.0,
+    bounces: 4,
+    angSpan: -0.22,
+    rFrac: 0.42,
+  };
 
   private ray = new THREE.Raycaster();
   private ptr = new THREE.Vector2();
@@ -7285,6 +7291,11 @@ export class FlightChessEngine {
       const h = this.turnArrow.userData.home as { x: number; z: number };
       this.turnArrow.position.set(h.x, 2.05 + Math.sin(t * 2.6) * 0.16, h.z);
       this.turnArrow.rotation.y += dt * 1.4;
+      if (this.world.shopSignSways) {
+        for (const sw of this.world.shopSignSways) {
+          sw.pivot.rotation.z = Math.sin(t * 1.85 + sw.phase) * 0.085;
+        }
+      }
 
       this.pickHints.forEach((m) => {
         if (m.visible) {
@@ -8942,23 +8953,54 @@ export class FlightChessEngine {
           s1.rodPivot.rotation.x = rodPitch;
           s1.rodPivot.updateMatrixWorld(true);
           tipWorld.applyMatrix4(s1.rodPivot.matrixWorld);
-          const lineLen = Math.max(0.05, tipWorld.distanceTo(lineTarget));
-          s1.line.position.copy(tipWorld).lerp(lineTarget, 0.5);
-          s1.line.scale.set(1, lineLen, 1);
-          s1.line.quaternion.setFromUnitVectors(
-            new THREE.Vector3(0, 1, 0),
-            lineTarget.clone().sub(tipWorld).normalize(),
-          );
+          const isTaut = fc >= 26.5 && fc < 31.2;
+          const isCasting =
+            (fSt.catchKind === 'normal' && fc >= 33.4 && fc < 35.4) ||
+            (fSt.catchKind === 'boot' && fc >= 34.4 && fc < 36.2);
+          const sag = isTaut ? 0.015 : isCasting ? -0.14 : 0.17 + Math.sin(t * 2.1) * 0.025;
+          const sway = isTaut ? Math.sin(t * 52) * 0.014 : Math.sin(t * 1.9) * 0.032;
+          const posAttr = s1.linePosAttr;
+          const segs = posAttr.count - 1;
+          for (let li = 0; li <= segs; li++) {
+            const u = li / segs;
+            const arch = 4 * u * (1 - u);
+            const lx = THREE.MathUtils.lerp(tipWorld.x, lineTarget.x, u) + sway * arch;
+            const ly = THREE.MathUtils.lerp(tipWorld.y, lineTarget.y, u) - sag * arch;
+            const lz = THREE.MathUtils.lerp(tipWorld.z, lineTarget.z, u) + sway * 0.4 * arch;
+            posAttr.setXYZ(li, lx, ly, lz);
+          }
+          posAttr.needsUpdate = true;
         }
 
-        // B) 一二河边晃脚玩水 + 偶尔伸爪进蜂蜜罐粘出蜂蜜放嘴里吃；若布布钓起超大锦鲤则惊喜转头欢呼「好大的锦鲤！」
+        // B) 一二河边晃脚玩水 + 伸手沾蜂蜜送到嘴里吃 + 每 40 秒打一次水漂（河面弹跳 3~6 次不飞出河）；大锦鲤现身时欢呼
         const yCyc = t % 9.2;
+        const skSt = this.stage1SkipState;
+        skSt.cycleT += dt;
+        if (skSt.cycleT >= 40.0) {
+          skSt.cycleT = 0;
+          skSt.bounces = 3 + Math.floor(Math.random() * 4); // 3~6 次水漂
+          skSt.angSpan = -(0.18 + Math.random() * 0.08); // 沿护城河切向顺河飘出
+          skSt.rFrac = 0.34 + Math.random() * 0.28; // 严格落在河道中央偏内侧，绝不飞出河岸
+        }
+        const skT = skSt.cycleT;
         const ysPt = s1.yier.userData.parts as PlaneParts | undefined;
         const ysFp = ysPt?.headMesh.userData.faceParts as HeadFaceParts | undefined;
         const amazedByKoi = fSt.catchKind === 'giant' && fc >= 29.0 && fc < 33.4;
+        const skippingNow = !amazedByKoi && skT >= 34.0;
         if (this.stage1YierBubble) {
           this.stage1YierBubble.visible = amazedByKoi;
         }
+
+        // 重置右臂基准位置（吃蜂蜜时会平滑拉近嘴边）
+        if (ysPt) {
+          ysPt.rightArm.position.set(0.165, 0.275, 0.02);
+          ysPt.animRoot.rotation.set(0, 0, 0);
+        }
+        if (!skippingNow) {
+          s1.skipStone.visible = false;
+          s1.skipRipples.forEach((rm) => { rm.visible = false; });
+        }
+
         if (ysPt && amazedByKoi) {
           const hop = Math.abs(Math.sin(t * 10));
           ysPt.leftFoot.rotation.x = -1.05 + Math.sin(t * 11) * 0.45;
@@ -8972,6 +9014,111 @@ export class FlightChessEngine {
           ysPt.headPivot.rotation.y = 0.62;
           s1.honeyGlob.visible = false;
           if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
+        } else if (ysPt && skippingNow) {
+          // 40 秒一次的河边打水漂（34.0-35.0s 捡石蓄力 -> 35.0-35.4s 侧身甩手 -> 35.4-38.4s 河面漂 3~6 下 -> 38.4-40.0s 开心拍手）
+          const kick = Math.sin(t * 4.5);
+          ysPt.leftFoot.rotation.x = -1.05 + kick * 0.18;
+          ysPt.rightFoot.rotation.x = -1.05 - kick * 0.18;
+          ysPt.leftArm.rotation.x = -0.82;
+          ysPt.leftArm.rotation.z = -0.24;
+          s1.honeyGlob.visible = false;
+          const handWorld = new THREE.Vector3(0.18, 0.24, 0.16);
+          s1.yier.updateMatrixWorld();
+          handWorld.applyMatrix4(s1.yier.matrixWorld);
+
+          if (skT < 35.0) {
+            const p = (skT - 34.0) / 1.0;
+            ysPt.animRoot.rotation.y = -0.45 * p;
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.4, 0.65, p);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.12, -0.55, p);
+            ysPt.headPivot.rotation.x = 0.06;
+            ysPt.headPivot.rotation.y = -0.25 * p;
+            s1.skipStone.visible = p > 0.25;
+            s1.skipStone.position.copy(handWorld);
+            s1.skipRipples.forEach((rm) => { rm.visible = false; });
+            if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
+          } else if (skT < 35.4) {
+            const p = (skT - 35.0) / 0.4;
+            ysPt.animRoot.rotation.y = THREE.MathUtils.lerp(-0.45, 0.42, p);
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(0.65, -1.35, p);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(-0.55, 0.28, p);
+            ysPt.headPivot.rotation.y = THREE.MathUtils.lerp(-0.25, 0.35, p);
+            s1.skipStone.visible = true;
+            s1.skipStone.position.copy(handWorld);
+            if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
+          } else {
+            // 沿护城河内弯曲轨迹弹跳 skSt.bounces 次（3~6 次），严格在河道内不飞出河岸
+            const flyT = skT - 35.4;
+            const totalFlyDur = 2.6;
+            const nB = skSt.bounces;
+            const bDur = totalFlyDur / nB;
+            const stoneAtU = (u: number): [number, number] => {
+              const ang = s1.yierAng + skSt.angSpan * u;
+              const inner = this.world.moatInnerR(ang) + 0.72;
+              const outer = this.world.moatOuterR(ang) - 0.92;
+              const r = THREE.MathUtils.lerp(inner, THREE.MathUtils.lerp(inner, outer, skSt.rFrac), Math.min(1, u * 1.15));
+              return [Math.cos(ang) * r, Math.sin(ang) * r];
+            };
+
+            if (flyT < totalFlyDur) {
+              const u = flyT / totalFlyDur;
+              const bIdx = Math.min(nB - 1, Math.floor(flyT / bDur));
+              const localP = (flyT - bIdx * bDur) / bDur;
+              const [sx, sz] = stoneAtU(u);
+              const peakH = 0.28 * Math.pow(0.66, bIdx);
+              const sy = this.world.waterY + 0.025 + Math.sin(localP * Math.PI) * peakH;
+              s1.skipStone.visible = true;
+              s1.skipStone.position.set(sx, sy, sz);
+              s1.skipStone.rotation.set(0.12, t * 24, 0.08);
+            } else if (flyT < totalFlyDur + 0.35) {
+              // 最后一次入水沉没
+              const sinkP = (flyT - totalFlyDur) / 0.35;
+              const [sx, sz] = stoneAtU(1);
+              s1.skipStone.visible = sinkP < 0.85;
+              s1.skipStone.position.set(sx, this.world.waterY + 0.01 - sinkP * 0.14, sz);
+            } else {
+              s1.skipStone.visible = false;
+            }
+
+            // 每个弹跳落水点依次绽放白色水花涟漪
+            s1.skipRipples.forEach((rm, ri) => {
+              if (ri >= nB) {
+                rm.visible = false;
+                return;
+              }
+              const hitTime = (ri + 1) * bDur;
+              const age = flyT - hitTime;
+              if (age < 0 || age > 1.25) {
+                rm.visible = false;
+                return;
+              }
+              const [rx, rz] = stoneAtU((ri + 1) / nB);
+              rm.visible = true;
+              rm.position.set(rx, this.world.waterY + 0.016, rz);
+              const rp = age / 1.25;
+              rm.scale.setScalar(0.55 + rp * (2.6 - ri * 0.25));
+              (rm.material as THREE.MeshBasicMaterial).opacity = (1 - rp) * 0.82;
+            });
+
+            // 一二目送水漂并在结束后开心拍手
+            if (skT < 38.2) {
+              ysPt.animRoot.rotation.y = 0.25;
+              ysPt.rightArm.rotation.x = -0.85;
+              ysPt.rightArm.rotation.z = 0.18;
+              ysPt.headPivot.rotation.x = 0.04;
+              ysPt.headPivot.rotation.y = 0.32;
+              if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
+            } else {
+              const cheer = Math.abs(Math.sin(t * 10));
+              ysPt.animRoot.rotation.y = 0.1;
+              ysPt.leftArm.rotation.x = -1.35 - cheer * 0.3;
+              ysPt.rightArm.rotation.x = -1.35 - cheer * 0.3;
+              ysPt.rightArm.rotation.z = 0.35;
+              ysPt.headPivot.rotation.x = -0.08;
+              ysPt.headPivot.rotation.y = Math.sin(t * 6) * 0.16;
+              if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
+            }
+          }
         } else if (ysPt) {
           // 双脚垂在水边欢快交替拍水
           const kick = Math.sin(t * 5.2);
@@ -8994,37 +9141,52 @@ export class FlightChessEngine {
             s1.honeyGlob.visible = false;
             if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
           } else if (yCyc < 6.0) {
-            // 右手伸进蜂蜜罐里蘸蜂蜜
+            // 右手伸进蜂蜜罐里蘸蜂蜜（手臂同步微移贴近罐口）
             const p = (yCyc - 4.8) / 1.2;
             const dip = Math.sin(p * Math.PI);
-            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.62, -1.18, dip);
-            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.12, 0.52, dip);
-            ysPt.headPivot.rotation.x = 0.16 * dip;
-            ysPt.headPivot.rotation.y = -0.1 * dip;
-            s1.honeyGlob.visible = p > 0.55;
+            ysPt.rightArm.position.set(
+              THREE.MathUtils.lerp(0.165, 0.06, dip),
+              THREE.MathUtils.lerp(0.275, 0.23, dip),
+              THREE.MathUtils.lerp(0.02, 0.18, dip),
+            );
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.62, -0.95, dip);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.12, 0.42, dip);
+            ysPt.headPivot.rotation.x = 0.18 * dip;
+            ysPt.headPivot.rotation.y = -0.08 * dip;
+            s1.honeyGlob.visible = p > 0.52;
             s1.honeyGlob.scale.setScalar(1);
             if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
           } else if (yCyc < 7.8) {
-            // 把粘满金黄蜂蜜的小爪子送进嘴里美滋滋吃掉
+            // 右手与金黄蜂蜜直接够到嘴里吃掉（平移手臂枢轴贴近嘴部 + 微微低头张嘴）
             const p = (yCyc - 6.0) / 1.8;
-            const eatLift = Math.sin(Math.min(1, p * 1.25) * Math.PI * 0.5);
-            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.78, -2.05, eatLift) + Math.sin(t * 14) * 0.06;
-            ysPt.rightArm.rotation.z = 0.44;
-            ysPt.headPivot.rotation.x = -0.14 * eatLift + Math.sin(t * 12) * 0.04;
-            ysPt.headPivot.rotation.y = 0;
-            s1.honeyGlob.visible = p < 0.78;
-            s1.honeyGlob.scale.setScalar(Math.max(0.15, 1 - Math.max(0, p - 0.35) * 1.9));
+            const reach = Math.sin(Math.min(1, p * 1.35) * Math.PI * 0.5);
+            ysPt.rightArm.position.set(
+              THREE.MathUtils.lerp(0.165, 0.022, reach),
+              THREE.MathUtils.lerp(0.275, 0.425, reach),
+              THREE.MathUtils.lerp(0.02, 0.215, reach),
+            );
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.72, -1.25, reach) + Math.sin(t * 14) * 0.05;
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.22, 0.45, reach);
+            ysPt.headPivot.rotation.x = 0.14 * reach + Math.sin(t * 12) * 0.04;
+            ysPt.headPivot.rotation.y = -0.06 * reach;
+            s1.honeyGlob.visible = p < 0.72;
+            s1.honeyGlob.scale.setScalar(Math.max(0.12, 1 - Math.max(0, p - 0.30) * 2.1));
             if (ysFp) {
-              const munch = p > 0.28 && p < 0.88;
+              const munch = p > 0.22 && p < 0.88;
               ysFp.mouthW.visible = !munch;
               ysFp.mouthOpen.visible = munch;
             }
           } else {
             // 放下手开心回味
             const p = (yCyc - 7.8) / 1.4;
-            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-1.95, -0.62, p);
-            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.44, 0.12, p);
-            ysPt.headPivot.rotation.x = THREE.MathUtils.lerp(-0.1, 0.08, p);
+            ysPt.rightArm.position.set(
+              THREE.MathUtils.lerp(0.022, 0.165, p),
+              THREE.MathUtils.lerp(0.425, 0.275, p),
+              THREE.MathUtils.lerp(0.215, 0.02, p),
+            );
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-1.25, -0.62, p);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.45, 0.12, p);
+            ysPt.headPivot.rotation.x = THREE.MathUtils.lerp(0.12, 0.08, p);
             ysPt.headPivot.rotation.y = Math.sin(p * Math.PI * 2) * 0.16;
             s1.honeyGlob.visible = false;
             if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
