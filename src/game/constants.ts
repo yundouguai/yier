@@ -495,6 +495,184 @@ export interface HudEmoteEvent {
   key: number;
 }
 
+export type LanternKind = 'good' | 'random';
+
+export type RandomEventId =
+  | 'headwind'
+  | 'flightRest'
+  | 'koiTailwind'
+  | 'wishDirect'
+  | 'beeDetour'
+  | 'honeyNap'
+  | 'gardenBox'
+  | 'swapPos'
+  | 'windBoost'
+  | 'luckyExtra'
+  | 'cityFireworks';
+
+export interface RandomEventDef {
+  id: RandomEventId;
+  name: string;
+  icon: string;
+  scope: 'global' | 'personal';
+  tendency: 'brake' | 'fun' | 'boost';
+  durationRounds: number;
+  shortDesc: string;
+  accentColor: string;
+  badgeText: string;
+}
+
+export const STAGE_ROUND_BUDGETS = [12, 8, 8, 12] as const;
+export const STAGE_CUM_TARGETS = [12, 20, 28, 40] as const;
+
+export const RANDOM_EVENT_DEFS: Record<RandomEventId, RandomEventDef> = {
+  headwind: {
+    id: 'headwind',
+    name: '逆风轻拂',
+    icon: '🍃',
+    scope: 'global',
+    tendency: 'brake',
+    durationRounds: 2,
+    shortDesc: '全员外圈每次移动步数 -1（最低走 1 格）',
+    accentColor: '#5b82c7',
+    badgeText: '全局 · 2轮',
+  },
+  flightRest: {
+    id: 'flightRest',
+    name: '航线午歇',
+    icon: '☁️',
+    scope: 'global',
+    tendency: 'brake',
+    durationRounds: 2,
+    shortDesc: '4 条飞行航线临时停飞，落起飞格改为普通同色跳',
+    accentColor: '#6b7ec7',
+    badgeText: '全局 · 2轮',
+  },
+  koiTailwind: {
+    id: 'koiTailwind',
+    name: '锦鲤顺风',
+    icon: '🎏',
+    scope: 'global',
+    tendency: 'boost',
+    durationRounds: 2,
+    shortDesc: '全员外圈落点顺风 +2 格，基地 4/5/6 均可起飞',
+    accentColor: '#e58e26',
+    badgeText: '全局 · 2轮',
+  },
+  wishDirect: {
+    id: 'wishDirect',
+    name: '许愿直达',
+    icon: '✨',
+    scope: 'global',
+    tendency: 'boost',
+    durationRounds: 2,
+    shortDesc: '终点走廊溢出不再反弹，外圈踩踏改为友好借过',
+    accentColor: '#e85d75',
+    badgeText: '全局 · 2轮',
+  },
+  beeDetour: {
+    id: 'beeDetour',
+    name: '蜂群绕路',
+    icon: '🐝',
+    scope: 'personal',
+    tendency: 'brake',
+    durationRounds: 0,
+    shortDesc: '小黄蜂追着绕路，当前小熊后退 3 格（泡泡罩可抵挡）',
+    accentColor: '#d99a26',
+    badgeText: '个人奇遇',
+  },
+  honeyNap: {
+    id: 'honeyNap',
+    name: '贪吃打盹',
+    icon: '🍯',
+    scope: 'personal',
+    tendency: 'brake',
+    durationRounds: 0,
+    shortDesc: '偷吃蜂蜜犯困，下 1 次掷骰步数 -2（最低走 1 格）',
+    accentColor: '#c97b3e',
+    badgeText: '个人奇遇',
+  },
+  gardenBox: {
+    id: 'gardenBox',
+    name: '游园盲盒',
+    icon: '🎁',
+    scope: 'personal',
+    tendency: 'fun',
+    durationRounds: 0,
+    shortDesc: '拆开神秘灯笼盲盒，80% 得随机道具 / 20% 摸到旧靴子',
+    accentColor: '#9b6bff',
+    badgeText: '个人盲盒',
+  },
+  swapPos: {
+    id: 'swapPos',
+    name: '乾坤换位',
+    icon: '🔀',
+    scope: 'personal',
+    tendency: 'fun',
+    durationRounds: 0,
+    shortDesc: '星光斗转！与场上随机 1 只其他阵营外圈小熊交换位置',
+    accentColor: '#a855f7',
+    badgeText: '个人换位',
+  },
+  windBoost: {
+    id: 'windBoost',
+    name: '顺风加步',
+    icon: '🌪️',
+    scope: 'personal',
+    tendency: 'boost',
+    durationRounds: 0,
+    shortDesc: '踩中清风顺流，当前小熊立刻向前再滑行 4 格',
+    accentColor: '#1f9d8b',
+    badgeText: '个人福运',
+  },
+  luckyExtra: {
+    id: 'luckyExtra',
+    name: '福运连投',
+    icon: '🎲',
+    scope: 'personal',
+    tendency: 'boost',
+    durationRounds: 0,
+    shortDesc: '吉星高照！立刻免费获得 1 次额外摇骰机会',
+    accentColor: '#e88b26',
+    badgeText: '个人福运',
+  },
+  cityFireworks: {
+    id: 'cityFireworks',
+    name: '满城烟火',
+    icon: '🎆',
+    scope: 'global',
+    tendency: 'boost',
+    durationRounds: 99,
+    shortDesc: '常驻直至进下一阶段：全员外圈 +2 格且终点走廊免反弹',
+    accentColor: '#e84d4d',
+    badgeText: '阶段保底',
+  },
+};
+
+export interface ActiveGlobalEventSnapshot {
+  id: RandomEventId;
+  name: string;
+  icon: string;
+  shortDesc: string;
+  remainingRounds: number;
+  isFallback: boolean;
+  accentColor: string;
+}
+
+export interface RandomEventBannerSnapshot {
+  key: number;
+  id: RandomEventId;
+  name: string;
+  icon: string;
+  scope: 'global' | 'personal';
+  lanternKind: LanternKind;
+  badgeText: string;
+  actorName: string;
+  actorCharKey: CharKey;
+  detailText: string;
+  accentColor: string;
+}
+
 export interface GameHudSnapshot {
   mapId: MapId;
   timeOfDay: TimeOfDay;
@@ -545,6 +723,8 @@ export interface GameHudSnapshot {
   shopPid: number | null;
   giftQuestEvent: GiftQuestEvent | null;
   killBanner: KillBannerEvent | null;
+  activeGlobalEvent: ActiveGlobalEventSnapshot | null;
+  randomEventBanner: RandomEventBannerSnapshot | null;
   players: HudPlayerSnapshot[];
 }
 

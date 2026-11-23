@@ -320,6 +320,18 @@ export interface WorldRefs {
     phase: number;
     curScale: number;
   }[];
+  mysteryLanterns?: {
+    group: THREE.Group;
+    lanternBody: THREE.Group;
+    shellMat: THREE.MeshStandardMaterial;
+    coreMat: THREE.MeshBasicMaterial;
+    qMat: THREE.MeshBasicMaterial;
+    ringMat: THREE.MeshBasicMaterial;
+    outerRingMat: THREE.MeshBasicMaterial;
+    groundRing: THREE.Mesh;
+    setKind: (kind: 'good' | 'random') => void;
+    phase: number;
+  }[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
   petals: PetalAnim[];
@@ -7193,6 +7205,230 @@ export function buildAncientWorld(
     skipRipples,
   };
 
+  // 半透明悬浮「？」奇遇灯笼池（4 盏复用：金色问号=好事件，紫青问号=纯随机盲盒，零额外点光源）
+  const createQuestionMarkTex = (kind: 'good' | 'random'): THREE.CanvasTexture => {
+    const cv = document.createElement('canvas');
+    cv.width = 256;
+    cv.height = 256;
+    const ctx = cv.getContext('2d')!;
+    ctx.clearRect(0, 0, 256, 256);
+    // 中心柔光晕
+    const rad = ctx.createRadialGradient(128, 128, 12, 128, 128, 108);
+    if (kind === 'good') {
+      rad.addColorStop(0, 'rgba(255, 240, 170, 0.72)');
+      rad.addColorStop(0.55, 'rgba(255, 196, 66, 0.28)');
+      rad.addColorStop(1, 'rgba(255, 196, 66, 0)');
+    } else {
+      rad.addColorStop(0, 'rgba(218, 175, 255, 0.72)');
+      rad.addColorStop(0.55, 'rgba(120, 224, 255, 0.28)');
+      rad.addColorStop(1, 'rgba(130, 120, 255, 0)');
+    }
+    ctx.fillStyle = rad;
+    ctx.beginPath();
+    ctx.arc(128, 128, 108, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 立体发光问号
+    ctx.font = '900 168px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = kind === 'good' ? 'rgba(255, 210, 64, 0.95)' : 'rgba(176, 118, 255, 0.95)';
+    ctx.shadowBlur = 22;
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = kind === 'good' ? '#b86200' : '#4a2388';
+    ctx.strokeText('?', 128, 136);
+    const grad = ctx.createLinearGradient(128, 42, 128, 216);
+    if (kind === 'good') {
+      grad.addColorStop(0, '#fffbe0');
+      grad.addColorStop(0.45, '#ffd447');
+      grad.addColorStop(1, '#ff9818');
+    } else {
+      grad.addColorStop(0, '#f5e8ff');
+      grad.addColorStop(0.45, '#c88cff');
+      grad.addColorStop(1, '#58d8ff');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillText('?', 128, 136);
+
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  };
+  const qTexGood = createQuestionMarkTex('good');
+  const qTexRandom = createQuestionMarkTex('random');
+
+  // 经典圆润古风灯笼瓜棱轮廓 LatheGeometry
+  const lanternProfile = [
+    new THREE.Vector2(0.01, -0.22),
+    new THREE.Vector2(0.11, -0.21),
+    new THREE.Vector2(0.19, -0.15),
+    new THREE.Vector2(0.245, -0.05),
+    new THREE.Vector2(0.255, 0.03),
+    new THREE.Vector2(0.225, 0.13),
+    new THREE.Vector2(0.155, 0.20),
+    new THREE.Vector2(0.10, 0.22),
+    new THREE.Vector2(0.01, 0.22),
+  ];
+  const lanternShellGeo = new THREE.LatheGeometry(lanternProfile, 24);
+  const lanternCapGeo = new THREE.CylinderGeometry(0.112, 0.125, 0.045, 18);
+  const lanternRimGeo = new THREE.TorusGeometry(0.118, 0.013, 8, 22);
+  const lanternWoodMat = new THREE.MeshStandardMaterial({
+    color: 0x5c3620,
+    roughness: 0.55,
+    metalness: 0.08,
+  });
+  const lanternGoldMat = new THREE.MeshStandardMaterial({
+    color: 0xf4c553,
+    emissive: 0xd98a1e,
+    emissiveIntensity: 0.35,
+    roughness: 0.26,
+    metalness: 0.48,
+  });
+
+  const mysteryLanterns: NonNullable<WorldRefs['mysteryLanterns']> = [];
+  for (let li = 0; li < 4; li++) {
+    const group = new THREE.Group();
+    group.visible = false;
+
+    const lanternBody = new THREE.Group();
+    lanternBody.position.y = 0.48;
+    group.add(lanternBody);
+
+    // 偏透明柔光灯笼外壳
+    const shellMat = new THREE.MeshStandardMaterial({
+      color: 0xffe4a8,
+      emissive: 0xffb830,
+      emissiveIntensity: 0.55,
+      roughness: 0.14,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const shell = new THREE.Mesh(lanternShellGeo, shellMat);
+    shell.renderOrder = 6;
+    lanternBody.add(shell);
+
+    // 灯笼上下木盖 + 金箍 + 顶环 + 底部流苏
+    const topCap = new THREE.Mesh(lanternCapGeo, lanternWoodMat);
+    topCap.position.y = 0.23;
+    lanternBody.add(topCap);
+    const botCap = new THREE.Mesh(lanternCapGeo, lanternWoodMat);
+    botCap.position.y = -0.23;
+    botCap.rotation.x = Math.PI;
+    lanternBody.add(botCap);
+
+    const topRim = new THREE.Mesh(lanternRimGeo, lanternGoldMat);
+    topRim.rotation.x = Math.PI / 2;
+    topRim.position.y = 0.21;
+    lanternBody.add(topRim);
+    const botRim = new THREE.Mesh(lanternRimGeo, lanternGoldMat);
+    botRim.rotation.x = Math.PI / 2;
+    botRim.position.y = -0.21;
+    lanternBody.add(botRim);
+
+    const bail = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.009, 8, 16), lanternGoldMat);
+    bail.position.y = 0.285;
+    lanternBody.add(bail);
+
+    const tassel = new THREE.Mesh(
+      new THREE.ConeGeometry(0.032, 0.125, 10),
+      new THREE.MeshStandardMaterial({ color: 0xe64942, roughness: 0.65 }),
+    );
+    tassel.position.y = -0.31;
+    lanternBody.add(tassel);
+
+    // 灯笼内部柔光核
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xffdf7a,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+    });
+    const coreOrb = new THREE.Mesh(new THREE.SphereGeometry(0.135, 14, 12), coreMat);
+    coreOrb.renderOrder = 5;
+    lanternBody.add(coreOrb);
+
+    // 灯笼正中心交叉双面发光「？」问号（任意视角旋转都清晰立体！）
+    const qMat = new THREE.MeshBasicMaterial({
+      map: qTexGood,
+      transparent: true,
+      opacity: 0.98,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const qGeo = new THREE.PlaneGeometry(0.30, 0.30);
+    const qPlaneA = new THREE.Mesh(qGeo, qMat);
+    qPlaneA.renderOrder = 7;
+    lanternBody.add(qPlaneA);
+    const qPlaneB = new THREE.Mesh(qGeo, qMat);
+    qPlaneB.rotation.y = Math.PI / 2;
+    qPlaneB.renderOrder = 7;
+    lanternBody.add(qPlaneB);
+
+    // 格面双圈投影柔光环
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffc84a,
+      transparent: true,
+      opacity: 0.52,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const groundRing = new THREE.Mesh(new THREE.RingGeometry(0.21, 0.30, 28), ringMat);
+    groundRing.rotation.x = -Math.PI / 2;
+    groundRing.position.y = 0.128;
+    group.add(groundRing);
+
+    const outerRingMat = new THREE.MeshBasicMaterial({
+      color: 0xffe49c,
+      transparent: true,
+      opacity: 0.28,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const outerRing = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.36, 28), outerRingMat);
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.y = 0.126;
+    group.add(outerRing);
+
+    scene.add(group);
+
+    const setKind = (kind: 'good' | 'random') => {
+      if (kind === 'good') {
+        shellMat.color.setHex(0xffe6ab);
+        shellMat.emissive.setHex(0xffb52e);
+        coreMat.color.setHex(0xffe27a);
+        qMat.map = qTexGood;
+        ringMat.color.setHex(0xffc947);
+        outerRingMat.color.setHex(0xffe7a8);
+      } else {
+        shellMat.color.setHex(0xdac4ff);
+        shellMat.emissive.setHex(0x9b5cff);
+        coreMat.color.setHex(0x8ae6ff);
+        qMat.map = qTexRandom;
+        ringMat.color.setHex(0xa86bff);
+        outerRingMat.color.setHex(0x7be0ff);
+      }
+      qMat.needsUpdate = true;
+    };
+
+    mysteryLanterns.push({
+      group,
+      lanternBody,
+      shellMat,
+      coreMat,
+      qMat,
+      ringMat,
+      outerRingMat,
+      groundRing,
+      setKind,
+      phase: li * 1.57,
+    });
+  }
+
   return {
     waterMesh,
     moatTex,
@@ -7229,6 +7465,7 @@ export function buildAncientWorld(
     shopRingIndices,
     shopSignSways,
     flightHoverPlanes,
+    mysteryLanterns,
     lotusList,
     willowDrapeList,
     petals,

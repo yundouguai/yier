@@ -97,6 +97,8 @@ const INITIAL_SNAPSHOT: GameHudSnapshot = {
   latestEmote: null,
   giftQuestEvent: null,
   killBanner: null,
+  activeGlobalEvent: null,
+  randomEventBanner: null,
   players: [],
 };
 
@@ -207,6 +209,14 @@ export default function App() {
       quality,
     );
     engineRef.current = engine;
+    (window as unknown as Record<string, unknown>).__gm = {
+      triggerEvent: (id: Parameters<FlightChessEngine['gmTriggerRandomEvent']>[0]) =>
+        engine.gmTriggerRandomEvent(id),
+      spawnLanternAhead: (kind: 'good' | 'random' = 'good', steps = 1) =>
+        engine.gmSpawnLanternAhead(kind, steps),
+      respawnLanterns: () => engine.gmRespawnLanterns(),
+      clearEvent: () => engine.gmClearRandomEvent(),
+    };
 
     return () => {
       engine.dispose();
@@ -466,6 +476,10 @@ export default function App() {
           onGmGrantItem={(item) => engineRef.current?.gmGrantItem(item)}
           onGmClearItems={() => engineRef.current?.gmClearItems()}
           onGmTeleportPlane={(pid, idx, pos) => engineRef.current?.gmTeleportPlane(pid, idx, pos)}
+          onGmTriggerRandomEvent={(evId) => engineRef.current?.gmTriggerRandomEvent(evId)}
+          onGmRespawnLanterns={() => engineRef.current?.gmRespawnLanterns()}
+          onGmSpawnLanternAhead={(kind, steps) => engineRef.current?.gmSpawnLanternAhead(kind, steps)}
+          onGmClearRandomEvent={() => engineRef.current?.gmClearRandomEvent()}
           onSetGmTimeOfDay={(tod) => engineRef.current?.setGmTimeOfDay(tod)}
           onToggleGmAutoPlay={() => engineRef.current?.toggleGmAutoPlay()}
           onSetGameSpeed={(speed, gmMode) => engineRef.current?.setGameSpeed(speed, gmMode)}

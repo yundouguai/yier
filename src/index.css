@@ -215,3 +215,65 @@
 .anim-gift-tap {
   animation: giftTapBob 1.15s ease-in-out infinite;
 }
+
+
+@keyframes mysteryBannerEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(-18px) scaleX(0.74) scaleY(0.86);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(2px) scaleX(1.03) scaleY(1.02);
+  }
+  28% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  86% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.95);
+  }
+}
+
+@keyframes mysteryShimmerSweep {
+  0% {
+    transform: translateX(-130%) skewX(-24deg);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.75;
+  }
+  65% {
+    transform: translateX(240%) skewX(-24deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(240%) skewX(-24deg);
+    opacity: 0;
+  }
+}
+
+@keyframes mysteryLanternSwing {
+  0%, 100% {
+    transform: rotate(-7deg) translateY(0px);
+  }
+  50% {
+    transform: rotate(7deg) translateY(-2px);
+  }
+}
+
+@keyframes mysterySparklePop {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.75) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18) rotate(22deg);
+  }
+}

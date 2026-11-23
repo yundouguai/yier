@@ -44,8 +44,15 @@ import {
   ProgressStage,
   Point2D,
   RING,
+  RING_TILES,
   SEAT_ORDER,
   SHOP_ITEM_WEIGHTS,
+  STAGE_ROUND_BUDGETS,
+  STAGE_CUM_TARGETS,
+  RANDOM_EVENT_DEFS,
+  type LanternKind,
+  type RandomEventId,
+  type RandomEventBannerSnapshot,
   SLOTS,
   SeatConfig,
   TimeOfDay,
@@ -262,6 +269,29 @@ export class FlightChessEngine {
   // 0/1 阶段早期出现 3~4 只叠叠乐过半格子时，未来 3 个回合内把其余玩家的奶油派炸弹获取率临时调高到 50%
   private megaStackMissileBoostTurns = 0;
   private megaStackOwnerPid: number | null = null;
+  // 熊熊坊「问号奇遇灯笼」双维控时与状态
+  private eventStage = 0;
+  private stageRounds = 0;
+  private activeGlobalEvent: { id: RandomEventId; remainingRounds: number; isFallback: boolean } | null = null;
+  private randomEventBanner: RandomEventBannerSnapshot | null = null;
+  private randomEventBannerKey = 0;
+  private randomEventBannerTimer: number | null = null;
+  private honeyNapPending: Record<number, boolean> = {};
+  private boardLanterns: { quadrant: number; ringIdx: number; kind: LanternKind; cooldownRounds: number }[] = [
+    { quadrant: 0, ringIdx: -1, kind: 'good', cooldownRounds: 0 },
+    { quadrant: 1, ringIdx: -1, kind: 'random', cooldownRounds: 0 },
+    { quadrant: 2, ringIdx: -1, kind: 'good', cooldownRounds: 0 },
+    { quadrant: 3, ringIdx: -1, kind: 'random', cooldownRounds: 0 },
+  ];
+  private lastEventRoundTicked = 0;
+  private lanternBurstFx: {
+    group: THREE.Group;
+    particles: { mesh: THREE.Mesh; vx: number; vy: number; vz: number }[];
+    ring: THREE.Mesh;
+    ringMat: THREE.MeshBasicMaterial;
+    startMs: number;
+    durMs: number;
+  }[] = [];
 
   private message: string | null = null;
   private messageColor: string | null = null;
@@ -1335,6 +1365,18 @@ export class FlightChessEngine {
       shopPid: this.shopPid,
       giftQuestEvent: this.giftQuestEvent,
       killBanner: this.killBanner,
+      activeGlobalEvent: this.activeGlobalEvent
+        ? {
+            id: this.activeGlobalEvent.id,
+            name: RANDOM_EVENT_DEFS[this.activeGlobalEvent.id].name,
+            icon: RANDOM_EVENT_DEFS[this.activeGlobalEvent.id].icon,
+            shortDesc: RANDOM_EVENT_DEFS[this.activeGlobalEvent.id].shortDesc,
+            remainingRounds: this.activeGlobalEvent.remainingRounds,
+            isFallback: this.activeGlobalEvent.isFallback,
+            accentColor: RANDOM_EVENT_DEFS[this.activeGlobalEvent.id].accentColor,
+          }
+        : null,
+      randomEventBanner: this.randomEventBanner,
       players: this.players.map((pl, i) => {
         const rankIdx = this.finishedOrder.indexOf(i);
         return {
@@ -1644,6 +1686,512 @@ export class FlightChessEngine {
       return false;
     }
     return this.megaStackMissileBoostTurns > 0 && pid !== liveOwner;
+  }
+
+  private hasGlobalEvent(id: RandomEventId): boolean {
+    return this.activeGlobalEvent?.id === id;
+  }
+
+  private getPacingDeltas(): { stage: number; deltaStage: number; deltaTotal: number } {
+    const stage = this.getProgressStage();
+    const curRound = Math.max(1, ...this.playerTurnCount);
+    const deltaStage = this.stageRounds - STAGE_ROUND_BUDGETS[stage];
+    const deltaTotal = curRound - STAGE_CUM_TARGETS[stage];
+    return { stage, deltaStage, deltaTotal };
+  }
+
+  private getExcludedLanternRingSet(): Set<number> {
+    const ex = new Set<number>(this.world.shopRingIndices ?? []);
+    for (const pl of this.players) {
+      ex.add((pl.start + 2 + FLIGHT_FROM) % 52);
+      ex.add((pl.start + 2 + FLIGHT_FROM + FLIGHT_STEP) % 52);
+    }
+    for (const p of this.planes) {
+      if (p.pos >= 1 && p.pos <= 50) {
+        ex.add(this.ringIndexOf(p));
+      }
+    }
+    for (const bl of this.boardLanterns) {
+      if (bl.ringIdx >= 0) ex.add(bl.ringIdx);
+    }
+    return ex;
+  }
+
+  private pickRingTileInQuadrant(q: number, excluded: Set<number>): number {
+    const cands: number[] = [];
+    for (let offset = 0; offset < 13; offset++) {
+      const idx = q * 13 + offset;
+      if (!excluded.has(idx)) cands.push(idx);
+    }
+    if (cands.length === 0) return -1;
+    return cands[Math.floor(Math.random() * cands.length)];
+  }
+
+  private syncBoardLanternMeshes(): void {
+    const pool = this.world.mysteryLanterns;
+    if (!pool) return;
+    for (let q = 0; q < 4; q++) {
+      const meshItem = pool[q];
+      const state = this.boardLanterns[q];
+      if (!meshItem || !state) continue;
+      if (state.ringIdx < 0) {
+        meshItem.group.visible = false;
+        continue;
+      }
+      const tile = RING_TILES[state.ringIdx];
+      if (!tile) {
+        meshItem.group.visible = false;
+        continue;
+      }
+      meshItem.setKind(state.kind);
+      meshItem.group.position.set(tile.cx, 0, tile.cz);
+      meshItem.group.visible = true;
+    }
+  }
+
+  private refreshBoardLanternsForPacing(forceAll = false): void {
+    const { deltaStage, deltaTotal } = this.getPacingDeltas();
+    const isOver = deltaStage > 0 || deltaTotal > 0;
+    const isTooFast = deltaStage <= 0 && deltaTotal <= -6;
+    const desiredQuadrants = isOver || isTooFast || forceAll ? [0, 1, 2, 3] : [0, 2];
+    const excluded = this.getExcludedLanternRingSet();
+
+    for (let q = 0; q < 4; q++) {
+      const bl = this.boardLanterns[q];
+      if (!desiredQuadrants.includes(q)) {
+        bl.ringIdx = -1;
+        continue;
+      }
+      const targetKind: LanternKind = isOver
+        ? 'good'
+        : isTooFast
+          ? 'random'
+          : q % 2 === 0
+            ? 'good'
+            : 'random';
+      bl.kind = targetKind;
+      if (bl.ringIdx < 0 && (bl.cooldownRounds <= 0 || forceAll)) {
+        const picked = this.pickRingTileInQuadrant(q, excluded);
+        if (picked >= 0) {
+          bl.ringIdx = picked;
+          excluded.add(picked);
+        }
+      }
+    }
+    this.syncBoardLanternMeshes();
+  }
+
+  private tickRoundEventPacing(): void {
+    const curRound = Math.max(1, ...this.playerTurnCount);
+    if (curRound <= this.lastEventRoundTicked) return;
+    this.lastEventRoundTicked = curRound;
+
+    const stage = this.getProgressStage();
+    if (stage !== this.eventStage) {
+      this.eventStage = stage;
+      this.stageRounds = 1;
+      if (this.activeGlobalEvent?.isFallback) {
+        this.activeGlobalEvent = null;
+      }
+    } else {
+      this.stageRounds += 1;
+    }
+
+    if (this.activeGlobalEvent && !this.activeGlobalEvent.isFallback) {
+      this.activeGlobalEvent.remainingRounds -= 1;
+      if (this.activeGlobalEvent.remainingRounds <= 0) {
+        this.activeGlobalEvent = null;
+      }
+    }
+
+    for (const bl of this.boardLanterns) {
+      if (bl.cooldownRounds > 0) bl.cooldownRounds -= 1;
+    }
+
+    if (this.stageRounds >= STAGE_ROUND_BUDGETS[stage] + 4 && !this.activeGlobalEvent?.isFallback) {
+      this.activeGlobalEvent = { id: 'cityFireworks', remainingRounds: 99, isFallback: true };
+      const curP = this.cur();
+      this.showRandomEventBanner(
+        'cityFireworks',
+        'good',
+        curP.name,
+        curP.key,
+        RANDOM_EVENT_DEFS.cityFireworks.shortDesc,
+      );
+      beep(880, 0.16, 'triangle', 0.14);
+    }
+
+    this.refreshBoardLanternsForPacing(false);
+    this.emitSnapshot();
+  }
+
+  private showRandomEventBanner(
+    id: RandomEventId,
+    lanternKind: LanternKind,
+    actorName: string,
+    actorCharKey: CharKey,
+    detailText: string,
+  ): void {
+    const def = RANDOM_EVENT_DEFS[id];
+    this.randomEventBannerKey += 1;
+    this.randomEventBanner = {
+      key: this.randomEventBannerKey,
+      id,
+      name: def.name,
+      icon: def.icon,
+      scope: def.scope,
+      lanternKind,
+      badgeText: def.badgeText,
+      actorName,
+      actorCharKey,
+      detailText,
+      accentColor: def.accentColor,
+    };
+    if (this.randomEventBannerTimer !== null) {
+      window.clearTimeout(this.randomEventBannerTimer);
+    }
+    const dur = Math.max(1200, Math.round(2400 / Math.max(1, this.gameSpeed)));
+    this.randomEventBannerTimer = window.setTimeout(() => {
+      this.randomEventBanner = null;
+      this.randomEventBannerTimer = null;
+      if (!this.disposed) this.emitSnapshot();
+    }, dur);
+    this.emitSnapshot();
+  }
+
+  private spawnLanternBurst(x: number, z: number, kind: LanternKind): void {
+    const group = new THREE.Group();
+    group.position.set(x, 0.48, z);
+    const primaryHex = kind === 'good' ? 0xffcf48 : 0xb36bff;
+    const secondaryHex = kind === 'good' ? 0xfff3b0 : 0x67e4ff;
+
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: primaryHex,
+      transparent: true,
+      opacity: 0.92,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.28, 32), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = -0.32;
+    group.add(ring);
+
+    const particles: { mesh: THREE.Mesh; vx: number; vy: number; vz: number }[] = [];
+    const pGeo = new THREE.OctahedronGeometry(0.055, 0);
+    for (let i = 0; i < 16; i++) {
+      const ang = (i / 16) * Math.PI * 2 + Math.random() * 0.25;
+      const spd = 1.15 + Math.random() * 1.15;
+      const pMat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? primaryHex : secondaryHex,
+        transparent: true,
+        opacity: 0.96,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const pm = new THREE.Mesh(pGeo, pMat);
+      pm.position.set(0, (Math.random() - 0.5) * 0.14, 0);
+      group.add(pm);
+      particles.push({
+        mesh: pm,
+        vx: Math.cos(ang) * spd,
+        vy: 1.0 + Math.random() * 1.5,
+        vz: Math.sin(ang) * spd,
+      });
+    }
+    this.scene.add(group);
+    this.lanternBurstFx.push({
+      group,
+      particles,
+      ring,
+      ringMat,
+      startMs: this.timeMs,
+      durMs: 760,
+    });
+  }
+
+  private pickEventForLantern(kind: LanternKind): RandomEventId {
+    const { deltaStage, deltaTotal } = this.getPacingDeltas();
+    const isOver = deltaStage > 0 || deltaTotal > 0;
+    const isTooFast = deltaStage <= 0 && deltaTotal <= -6;
+
+    const pickFrom = (pool: RandomEventId[]): RandomEventId =>
+      pool[Math.floor(Math.random() * pool.length)];
+
+    if (kind === 'good') {
+      if (isOver) {
+        return Math.random() < 0.65
+          ? pickFrom(['koiTailwind', 'wishDirect'])
+          : pickFrom(['windBoost', 'luckyExtra']);
+      }
+      return pickFrom(['koiTailwind', 'wishDirect', 'windBoost', 'luckyExtra']);
+    }
+
+    if (isTooFast) {
+      const r = Math.random();
+      if (r < 0.42) return pickFrom(['headwind', 'flightRest']);
+      if (r < 0.72) return pickFrom(['beeDetour', 'honeyNap']);
+      return pickFrom(['swapPos', 'gardenBox']);
+    }
+    return pickFrom([
+      'swapPos',
+      'swapPos',
+      'gardenBox',
+      'beeDetour',
+      'honeyNap',
+      'headwind',
+      'flightRest',
+      'windBoost',
+      'luckyExtra',
+    ]);
+  }
+
+  private triggerMysteryEvent(
+    eventId: RandomEventId,
+    lanternKind: LanternKind,
+    actorPlane: PlaneData,
+    actorStack: PlaneData[],
+  ): void {
+    const P = this.players[actorPlane.pid];
+    const def = RANDOM_EVENT_DEFS[eventId];
+    let detail = def.shortDesc;
+
+    if (eventId === 'headwind' || eventId === 'flightRest' || eventId === 'koiTailwind' || eventId === 'wishDirect') {
+      this.activeGlobalEvent = { id: eventId, remainingRounds: def.durationRounds, isFallback: false };
+      beep(lanternKind === 'good' ? 784 : 520, 0.14, 'triangle', 0.14);
+    } else if (eventId === 'cityFireworks') {
+      this.activeGlobalEvent = { id: 'cityFireworks', remainingRounds: 99, isFallback: true };
+      beep(880, 0.16, 'triangle', 0.15);
+    } else if (eventId === 'luckyExtra') {
+      this.pendingExtraRoll = true;
+      detail = `${P.name} 吉星高照，免费获得 1 次额外摇骰机会！`;
+      this.showPieceSpeech(actorPlane, '🎲 福运连投！再摇一次~', 2400);
+      beep(820, 0.14, 'triangle', 0.14);
+    } else if (eventId === 'honeyNap') {
+      this.honeyNapPending[actorPlane.pid] = true;
+      detail = `${P.name} 偷吃蜂蜜犯困，下 1 次掷骰步数 -2（最低 1 格）`;
+      this.showPieceSpeech(actorPlane, '🍯 吃饱犯困啦，下步慢一点~', 2400);
+      beep(390, 0.14, 'sine', 0.12);
+    } else if (eventId === 'gardenBox') {
+      if (Math.random() < 0.8) {
+        const got = this.grantRandomItem(actorPlane.pid);
+        const idef = ITEM_DEFS[got];
+        detail = `${P.name} 拆开灯笼盲盒，获得 ${idef.icon} ${idef.name}！`;
+        this.showPieceSpeech(actorPlane, `${idef.icon} 开出${idef.name}！`, 2400);
+        beep(760, 0.14, 'triangle', 0.14);
+      } else {
+        detail = `${P.name} 拆开灯笼盲盒……居然摸出一只旧靴子！`;
+        this.showPieceSpeech(actorPlane, '🥾 啊这…一只旧靴子！', 2400);
+        beep(310, 0.16, 'sawtooth', 0.1);
+      }
+    } else if (eventId === 'beeDetour') {
+      const topBear = actorStack[actorStack.length - 1] ?? actorPlane;
+      if (topBear.shielded) {
+        topBear.shielded = false;
+        this.syncShieldVisuals();
+        const cc = this.posToCell(P, topBear.pos);
+        this.spawnShieldBreak(cc[0], cc[1]);
+        detail = `小黄蜂袭来，${P.name} 的泡泡罩挡下了后退！`;
+        this.showPieceSpeech(topBear, '🫧 泡泡罩挡住蜜蜂啦！', 2400);
+      } else {
+        const targetPos = Math.max(0, topBear.pos - 3);
+        detail = `小黄蜂追着绕路，${P.name} 的小熊后退 3 格！`;
+        this.showPieceSpeech(topBear, '🐝 救命！蜜蜂追过来啦~', 2400);
+        void this.knockBackTo(topBear, targetPos).then(() => {
+          if (!this.disposed) this.relayout();
+        });
+      }
+      beep(420, 0.15, 'sawtooth', 0.11);
+    } else if (eventId === 'windBoost') {
+      const prevPos = actorPlane.pos;
+      const targetPos = Math.min(50, prevPos + 4);
+      if (targetPos > prevPos) {
+        actorStack.forEach((pl) => {
+          pl.pos = targetPos;
+          this.stampArrival(pl);
+        });
+        const dest = this.posToCell(P, targetPos);
+        const yaw = this.faceTravelDir(actorPlane);
+        detail = `清风顺流！${P.name} 立刻向前再滑行 ${targetPos - prevPos} 格！`;
+        this.showPieceSpeech(actorPlane, '🌪️ 顺风起飞！再冲 4 格~', 2400);
+        void Promise.all(
+          actorStack.map((pl, idx) =>
+            this.hopTo(pl, dest[0], dest[1], yaw, 0.85, 420, 1, 0.12 + idx * STACK_STEP_Y, 'none'),
+          ),
+        ).then(() => {
+          if (!this.disposed) {
+            this.relayout();
+            this.syncShieldVisuals();
+          }
+        });
+      }
+      beep(740, 0.14, 'triangle', 0.14);
+    } else if (eventId === 'swapPos') {
+      const myRing = this.ringIndexOf(actorPlane);
+      const otherCandidates = this.planes.filter(
+        (q) =>
+          q.pid !== actorPlane.pid &&
+          q.pos >= 1 &&
+          q.pos <= 50 &&
+          !q.animating &&
+          this.ringIndexOf(q) !== myRing,
+      );
+      if (otherCandidates.length > 0) {
+        const target = otherCandidates[Math.floor(Math.random() * otherCandidates.length)];
+        const T = this.players[target.pid];
+        const targetRing = this.ringIndexOf(target);
+        const targetStack = this.planesOf(target.pid)
+          .filter((q) => q.pos === target.pos && !q.animating)
+          .sort((a, b) => this.compareArrivalOrder(a, b));
+
+        const ringToRelPos = (plStart: number, rIdx: number): number => {
+          const rel = (rIdx - plStart - 2 + 104) % 52;
+          return Math.min(50, Math.max(1, rel === 0 ? 50 : rel));
+        };
+        const newMyPos = ringToRelPos(P.start, targetRing);
+        const newTargetPos = ringToRelPos(T.start, myRing);
+
+        actorStack.forEach((pl) => {
+          pl.pos = newMyPos;
+          this.stampArrival(pl);
+        });
+        targetStack.forEach((pl) => {
+          pl.pos = newTargetPos;
+          this.stampArrival(pl);
+        });
+
+        const myDest = this.posToCell(P, newMyPos);
+        const targetDest = this.posToCell(T, newTargetPos);
+        this.spawnLanternBurst(myDest[0], myDest[1], 'random');
+        this.spawnLanternBurst(targetDest[0], targetDest[1], 'random');
+
+        detail = `星光斗转！${P.name} 与 ${T.name} 互换了棋盘位置！`;
+        this.showPieceSpeech(actorPlane, '🔀 乾坤大挪移！换位啦~', 2600);
+        this.showPieceSpeech(target, '😲 咦？我怎么飞过来了！', 2600);
+        beep(640, 0.12, 'triangle', 0.14);
+        this.after(95, () => beep(880, 0.14, 'triangle', 0.14));
+
+        const myYaw = this.faceTravelDir(actorPlane);
+        const tYaw = this.faceTravelDir(target);
+        void Promise.all([
+          ...actorStack.map((pl, idx) =>
+            this.hopTo(pl, myDest[0], myDest[1], myYaw, 1.45, 520, 1, 0.12 + idx * STACK_STEP_Y, 'spinLeft'),
+          ),
+          ...targetStack.map((pl, idx) =>
+            this.hopTo(pl, targetDest[0], targetDest[1], tYaw, 1.45, 520, -1, 0.12 + idx * STACK_STEP_Y, 'spinRight'),
+          ),
+        ]).then(() => {
+          if (!this.disposed) {
+            this.relayout();
+            this.syncShieldVisuals();
+          }
+        });
+      } else {
+        const prevPos = actorPlane.pos;
+        const targetPos = Math.min(50, prevPos + 4);
+        actorStack.forEach((pl) => {
+          pl.pos = targetPos;
+          this.stampArrival(pl);
+        });
+        const dest = this.posToCell(P, targetPos);
+        const yaw = this.faceTravelDir(actorPlane);
+        detail = `暂无可换位对手，星光化作顺风推 ${P.name} 前进 ${targetPos - prevPos} 格！`;
+        void Promise.all(
+          actorStack.map((pl, idx) =>
+            this.hopTo(pl, dest[0], dest[1], yaw, 0.85, 420, 1, 0.12 + idx * STACK_STEP_Y, 'none'),
+          ),
+        ).then(() => {
+          if (!this.disposed) this.relayout();
+        });
+      }
+    }
+
+    this.showRandomEventBanner(eventId, lanternKind, P.name, P.key, detail);
+  }
+
+  private checkMysteryLanternLanding(actorPlane: PlaneData, actorStack: PlaneData[]): void {
+    if (actorPlane.pos < 1 || actorPlane.pos > 50) return;
+    const rIdx = this.ringIndexOf(actorPlane);
+    const hit = this.boardLanterns.find((bl) => bl.ringIdx === rIdx);
+    if (!hit) return;
+    const kind = hit.kind;
+    hit.ringIdx = -1;
+    hit.cooldownRounds = 1;
+    this.syncBoardLanternMeshes();
+    const tile = RING_TILES[rIdx];
+    if (tile) {
+      this.spawnLanternBurst(tile.cx, tile.cz, kind);
+    }
+    const chosenId = this.pickEventForLantern(kind);
+    this.triggerMysteryEvent(chosenId, kind, actorPlane, actorStack);
+  }
+
+  public gmTriggerRandomEvent(eventId: RandomEventId): void {
+    if (this.disposed) return;
+    const curPlanes = this.planesOf(this.turn);
+    const actorPlane =
+      curPlanes.find((p) => p.pos >= 1 && p.pos <= 50) ??
+      curPlanes.find((p) => p.pos >= 0 && p.pos < HOME_END) ??
+      curPlanes[0];
+    if (!actorPlane) return;
+    const stack =
+      actorPlane.pos >= 1 && actorPlane.pos < HOME_END
+        ? curPlanes.filter((p) => p.pos === actorPlane.pos).sort((a, b) => this.compareArrivalOrder(a, b))
+        : [actorPlane];
+    const def = RANDOM_EVENT_DEFS[eventId];
+    const kind: LanternKind = def.tendency === 'boost' ? 'good' : 'random';
+    const c = this.posToCell(this.players[actorPlane.pid], Math.max(0, actorPlane.pos));
+    this.spawnLanternBurst(c[0], c[1], kind);
+    this.triggerMysteryEvent(eventId, kind, actorPlane, stack);
+  }
+
+  public gmRespawnLanterns(): void {
+    if (this.disposed) return;
+    for (const bl of this.boardLanterns) {
+      bl.ringIdx = -1;
+      bl.cooldownRounds = 0;
+    }
+    this.refreshBoardLanternsForPacing(true);
+    this.setMsg('🏮 GM 已在四象限重新刷出 4 盏问号奇遇灯笼！');
+  }
+
+  public gmSpawnLanternAhead(kind: LanternKind, stepsAhead = 1): void {
+    if (this.disposed) return;
+    const P = this.players[this.turn];
+    const curPlanes = this.planesOf(this.turn);
+    const actor =
+      curPlanes.find((p) => p.pos >= 1 && p.pos <= 50) ??
+      curPlanes.find((p) => p.pos === 0);
+    if (!actor || !P) {
+      this.setMsg('⚠️ 当前玩家暂无在场外圈小熊，先起飞一只再刷灯笼吧~');
+      return;
+    }
+    const targetRelPos = Math.min(50, Math.max(1, actor.pos + Math.max(1, stepsAhead)));
+    const targetRingIdx = (P.start + 2 + targetRelPos) % 52;
+    const q = Math.floor(targetRingIdx / 13) % 4;
+    const bl = this.boardLanterns[q];
+    if (bl) {
+      bl.ringIdx = targetRingIdx;
+      bl.kind = kind;
+      bl.cooldownRounds = 0;
+    }
+    this.syncBoardLanternMeshes();
+    this.setMsg(
+      kind === 'good'
+        ? `🏮 GM 已在 ${P.name} 前方 ${targetRelPos - actor.pos} 格刷出「金色好事件」灯笼！`
+        : `🏮 GM 已在 ${P.name} 前方 ${targetRelPos - actor.pos} 格刷出「星紫纯随机」灯笼！`,
+      P.uiColor,
+    );
+  }
+
+  public gmClearRandomEvent(): void {
+    if (this.disposed) return;
+    this.activeGlobalEvent = null;
+    this.randomEventBanner = null;
+    this.honeyNapPending = {};
+    this.emitSnapshot();
+    this.setMsg('🧹 GM 已清空当前全局奇遇与打盹状态');
   }
 
   private pickUniqueShopOffer(pid?: number): ItemType[] {
@@ -4169,7 +4717,7 @@ export class FlightChessEngine {
       this.sixChain = 0;
     }
     this.emitSnapshot();
-    await this.onRolled(die, die === 5 || die === 6);
+    await this.onRolled(die, die === 5 || die === 6 || (this.hasGlobalEvent('koiTailwind') && die >= 4));
   }
 
   private consumeExtraRoll(die: number): boolean {
@@ -4888,6 +5436,10 @@ export class FlightChessEngine {
         q.pid !== plane.pid && q.pos >= 1 && q.pos <= 50 && this.ringIndexOf(q) === r,
     );
     if (!victims.length) return 0;
+    if (this.hasGlobalEvent('wishDirect')) {
+      this.setMsg('✨ 许愿直达生效中，小熊们友好贴脸借过！', this.players[plane.pid].uiColor);
+      return 0;
+    }
 
     // 按阵营分组判断护盾防御
     const byPid = new Map<number, PlaneData[]>();
@@ -5255,11 +5807,27 @@ export class FlightChessEngine {
             q.pos <= 50 &&
             this.ringIndexOf(q) === this.ringIndexOf(plane),
         );
+      let effectiveSteps = die;
+      if (this.honeyNapPending[plane.pid]) {
+        this.honeyNapPending[plane.pid] = false;
+        effectiveSteps = Math.max(1, effectiveSteps - 2);
+      }
+      if (plane.pos <= 50) {
+        if (this.hasGlobalEvent('headwind')) effectiveSteps = Math.max(1, effectiveSteps - 1);
+        if (this.hasGlobalEvent('koiTailwind') || this.hasGlobalEvent('cityFireworks')) {
+          effectiveSteps += 2;
+        }
+      }
+      const noBounce = this.hasGlobalEvent('wishDirect') || this.hasGlobalEvent('cityFireworks');
       let curStep = plane.pos;
       let dir = 1;
-      for (let i = 0; i < die; i++) {
-        if (curStep === HOME_END) dir = -1;
-        else if (dir === -1 && curStep <= 51) dir = 1;
+      for (let i = 0; i < effectiveSteps; i++) {
+        if (curStep === HOME_END) {
+          if (noBounce) break;
+          dir = -1;
+        } else if (dir === -1 && curStep <= 51) {
+          dir = 1;
+        }
         curStep += dir;
         setPos(curStep);
         if ((leftStart || leftMixedRing) && i === 0) {
@@ -5341,7 +5909,7 @@ export class FlightChessEngine {
         if (plane.pos >= 1 && plane.pos <= 49 && plane.pos % 4 === 2) {
           await this.sleep(320);
           if (this.disposed) return;
-          if (plane.pos === FLIGHT_FROM) {
+          if (plane.pos === FLIGHT_FROM && !this.hasGlobalEvent('flightRest')) {
             this.setMsg('🌀 踏上飞行航线，直飞对面！');
             sndCap();
             const cFrom = this.posToCell(P, plane.pos);
@@ -5393,7 +5961,7 @@ export class FlightChessEngine {
               },
             );
             if (jumpCapture2) await jumpCapture2;
-            if (plane.pos === FLIGHT_FROM) {
+            if (plane.pos === FLIGHT_FROM && !this.hasGlobalEvent('flightRest')) {
               await this.sleep(320);
               if (this.disposed) return;
               this.setMsg('🌀 连跳触发飞行航线，直飞对面！');
@@ -5511,6 +6079,7 @@ export class FlightChessEngine {
       await Promise.all(stack.map((p) => this.celebrateGoal(p)));
     }
     this.relayout();
+    this.checkMysteryLanternLanding(plane, stack);
     this.emitSnapshot();
 
     const willRollAgain = this.consumeExtraRoll(die);
@@ -5713,6 +6282,7 @@ export class FlightChessEngine {
     const curTurnSeq = ++this.turnSeq;
     if (!isBonus && this.playerTurnCount[this.turn] !== undefined) {
       this.playerTurnCount[this.turn] += 1;
+      this.tickRoundEventPacing();
     }
     this.focusTurn();
     if (this.isAI()) {
@@ -7544,6 +8114,45 @@ export class FlightChessEngine {
             fh.model.rotation.z = Math.sin(t * 2.1 + fh.phase) * 0.14;
             const prop = fh.model.userData.prop as THREE.Object3D | undefined;
             if (prop) prop.rotation.z += dt * 15;
+          }
+        }
+      }
+
+      if (this.world.mysteryLanterns) {
+        for (const ml of this.world.mysteryLanterns) {
+          if (!ml.group.visible) continue;
+          ml.lanternBody.position.y = 0.48 + Math.sin(t * 2.4 + ml.phase) * 0.055;
+          ml.lanternBody.rotation.y = t * 0.85 + ml.phase;
+          ml.lanternBody.rotation.z = Math.sin(t * 1.7 + ml.phase) * 0.06;
+          const pulse = 0.5 + 0.5 * Math.sin(t * 3.1 + ml.phase);
+          ml.ringMat.opacity = 0.36 + pulse * 0.24;
+          ml.outerRingMat.opacity = 0.16 + pulse * 0.18;
+          ml.groundRing.scale.setScalar(0.95 + pulse * 0.12);
+        }
+      }
+      if (this.lanternBurstFx.length > 0) {
+        for (let bi = this.lanternBurstFx.length - 1; bi >= 0; bi--) {
+          const fx = this.lanternBurstFx[bi];
+          const k = (this.timeMs - fx.startMs) / fx.durMs;
+          if (k >= 1) {
+            this.scene.remove(fx.group);
+            this.disposeObject3D(fx.group);
+            this.lanternBurstFx.splice(bi, 1);
+            continue;
+          }
+          const ease = 1 - Math.pow(1 - k, 3);
+          fx.ring.scale.setScalar(1 + ease * 3.2);
+          fx.ringMat.opacity = (1 - k) * 0.88;
+          for (const pt of fx.particles) {
+            pt.mesh.position.x += pt.vx * dt;
+            pt.mesh.position.y += pt.vy * dt;
+            pt.mesh.position.z += pt.vz * dt;
+            pt.vy -= 3.2 * dt;
+            pt.mesh.rotation.x += dt * 7;
+            pt.mesh.rotation.y += dt * 6;
+            const sc = Math.max(0.01, (1 - k) * 1.15);
+            pt.mesh.scale.setScalar(sc);
+            (pt.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - k * 1.05);
           }
         }
       }

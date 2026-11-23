@@ -10,6 +10,8 @@ import {
   ITEM_DEFS,
   ITEM_ORDER,
   ItemType,
+  LanternKind,
+  RandomEventId,
   TimeOfDay,
 } from '../game/constants';
 import { CharacterAvatar } from './CharacterAvatar';
@@ -50,6 +52,10 @@ interface GameHUDProps {
   onGmGrantItem: (item: ItemType) => void;
   onGmClearItems: () => void;
   onGmTeleportPlane: (pid: number, idx: number, pos: number) => void;
+  onGmTriggerRandomEvent: (eventId: RandomEventId) => void;
+  onGmRespawnLanterns: () => void;
+  onGmSpawnLanternAhead: (kind: LanternKind, steps?: number) => void;
+  onGmClearRandomEvent: () => void;
   onSetGmTimeOfDay: (tod: TimeOfDay) => void;
   onToggleGmAutoPlay: () => void;
   onSetGameSpeed: (speed: number, gmMode?: boolean) => void;
@@ -76,6 +82,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   onGmGrantItem,
   onGmClearItems,
   onGmTeleportPlane,
+  onGmTriggerRandomEvent,
+  onGmRespawnLanterns,
+  onGmSpawnLanternAhead,
+  onGmClearRandomEvent,
   onSetGmTimeOfDay,
   onToggleGmAutoPlay,
   onSetGameSpeed,
@@ -1231,6 +1241,80 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                   ))}
                 </div>
               </div>
+              <div className="mt-2 border-t border-white/10 pt-2">
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+                  <span className="text-[10px] font-bold text-amber-200">🏮 奇遇事件 GM 指令</span>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onGmSpawnLanternAhead('good', 1)}
+                      className="rounded border border-amber-400/50 bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold text-amber-100 hover:bg-amber-500/40 cursor-pointer"
+                      title="在当前玩家在场小熊前方1格放一盏金色好事件灯笼"
+                    >
+                      前方+1金灯
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onGmSpawnLanternAhead('random', 1)}
+                      className="rounded border border-purple-400/50 bg-purple-500/25 px-1.5 py-0.5 text-[10px] font-bold text-purple-100 hover:bg-purple-500/40 cursor-pointer"
+                      title="在当前玩家在场小熊前方1格放一盏星紫纯随机灯笼"
+                    >
+                      前方+1紫灯
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onGmRespawnLanterns}
+                      className="rounded border border-amber-400/35 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-200 hover:bg-amber-500/30 cursor-pointer"
+                    >
+                      重刷4灯
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onGmClearRandomEvent}
+                      className="rounded border border-slate-400/35 bg-slate-500/20 px-1.5 py-0.5 text-[10px] font-bold text-slate-200 hover:bg-slate-500/35 cursor-pointer"
+                    >
+                      清事件
+                    </button>
+                  </div>
+                </div>
+                <div className="mb-1 flex flex-wrap gap-1">
+                  {([
+                    ['koiTailwind', '🎏全局顺风'],
+                    ['wishDirect', '✨全局直达'],
+                    ['headwind', '🍃全局逆风'],
+                    ['flightRest', '☁️航线午歇'],
+                    ['cityFireworks', '🎆满城烟火'],
+                  ] as [RandomEventId, string][]).map(([evId, evLabel]) => (
+                    <button
+                      key={evId}
+                      type="button"
+                      onClick={() => onGmTriggerRandomEvent(evId)}
+                      className="rounded border border-amber-400/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-100 hover:bg-amber-500/30 cursor-pointer"
+                    >
+                      {evLabel}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {([
+                    ['swapPos', '🔀乾坤换位'],
+                    ['windBoost', '🌪️顺风+4'],
+                    ['luckyExtra', '🎲福运连投'],
+                    ['gardenBox', '🎁游园盲盒'],
+                    ['beeDetour', '🐝蜂群绕路'],
+                    ['honeyNap', '🍯贪吃打盹'],
+                  ] as [RandomEventId, string][]).map(([evId, evLabel]) => (
+                    <button
+                      key={evId}
+                      type="button"
+                      onClick={() => onGmTriggerRandomEvent(evId)}
+                      className="rounded border border-purple-400/40 bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-bold text-purple-100 hover:bg-purple-500/30 cursor-pointer"
+                    >
+                      {evLabel}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
@@ -1454,6 +1538,24 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             >
               第 {snap.roundNumber ?? 1} 轮
             </div>
+
+            {snap.activeGlobalEvent && (
+              <div
+                className="flex h-9 md:h-10 shrink-0 items-center gap-1 rounded-2xl px-2.5 md:px-3 text-[11px] md:text-[12px] font-extrabold text-white whitespace-nowrap"
+                style={{
+                  background: `linear-gradient(135deg, ${snap.activeGlobalEvent.accentColor}, #2b1f3b)`,
+                  border: '2px solid rgba(255, 232, 168, 0.78)',
+                  boxShadow: `0 6px 16px ${snap.activeGlobalEvent.accentColor}44`,
+                }}
+                title={`${snap.activeGlobalEvent.name}：${snap.activeGlobalEvent.shortDesc}`}
+              >
+                <span>{snap.activeGlobalEvent.icon}</span>
+                <span>{snap.activeGlobalEvent.name}</span>
+                <span className="rounded-full bg-black/25 px-1.5 py-0.5 text-[10px] tabular-nums">
+                  {snap.activeGlobalEvent.isFallback ? '常驻' : `${snap.activeGlobalEvent.remainingRounds}轮`}
+                </span>
+              </div>
+            )}
 
             <div
               className="flex h-9 md:h-10 shrink-0 items-center gap-1.5 md:gap-2 rounded-2xl bg-white/95 px-2.5 md:px-3.5 text-[12px] md:text-[14px] font-bold text-slate-800 whitespace-nowrap transition-colors"
@@ -2008,6 +2110,132 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             </div>
           </div>
         )}
+        {/* 问号奇遇灯笼 · 非阻塞古风流光过场横幅（绝不拦截点击，不占用下家操作时间） */}
+        {snap.randomEventBanner && (() => {
+          const b = snap.randomEventBanner;
+          const isGood = b.lanternKind === 'good';
+          return (
+            <div
+              key={b.key}
+              className="pointer-events-none fixed inset-x-0 top-16 md:top-20 z-40 flex justify-center px-3"
+            >
+              <div
+                className="relative overflow-hidden rounded-[22px] px-4 py-2.5 md:px-6 md:py-3.5 max-w-[92vw] md:max-w-[520px]"
+                style={{
+                  background: isGood
+                    ? 'linear-gradient(135deg, rgba(52, 27, 10, 0.94) 0%, rgba(92, 47, 14, 0.95) 52%, rgba(44, 22, 8, 0.94) 100%)'
+                    : 'linear-gradient(135deg, rgba(28, 19, 54, 0.94) 0%, rgba(56, 33, 98, 0.95) 50%, rgba(22, 42, 68, 0.94) 100%)',
+                  border: isGood
+                    ? '2px solid rgba(255, 214, 102, 0.92)'
+                    : '2px solid rgba(190, 142, 255, 0.92)',
+                  boxShadow: isGood
+                    ? '0 14px 36px rgba(0, 0, 0, 0.36), 0 0 28px rgba(255, 196, 62, 0.45), inset 0 1px 0 rgba(255, 244, 200, 0.45)'
+                    : '0 14px 36px rgba(0, 0, 0, 0.38), 0 0 28px rgba(164, 112, 255, 0.46), inset 0 1px 0 rgba(220, 204, 255, 0.42)',
+                  animation: 'mysteryBannerEnter 2.35s cubic-bezier(0.22, 1, 0.36, 1) forwards',
+                }}
+              >
+                <div
+                  className="pointer-events-none absolute inset-y-0 left-0 w-1/3"
+                  style={{
+                    background: isGood
+                      ? 'linear-gradient(90deg, transparent, rgba(255, 240, 178, 0.42), transparent)'
+                      : 'linear-gradient(90deg, transparent, rgba(160, 232, 255, 0.38), transparent)',
+                    animation: 'mysteryShimmerSweep 1.65s ease-out forwards',
+                  }}
+                />
+                <div
+                  className="pointer-events-none absolute inset-x-6 top-1 h-[1.5px] opacity-65"
+                  style={{
+                    background: isGood
+                      ? 'linear-gradient(90deg, transparent, #ffe28a, transparent)'
+                      : 'linear-gradient(90deg, transparent, #c79bff, #7ae6ff, transparent)',
+                  }}
+                />
+
+                <div className="relative flex items-center gap-3 md:gap-4">
+                  <div
+                    className="relative flex h-12 w-12 md:h-14 md:w-14 shrink-0 items-center justify-center rounded-2xl"
+                    style={{
+                      background: isGood
+                        ? 'radial-gradient(circle, rgba(255, 214, 92, 0.36) 0%, rgba(255, 168, 38, 0.08) 72%)'
+                        : 'radial-gradient(circle, rgba(186, 126, 255, 0.38) 0%, rgba(92, 216, 255, 0.08) 72%)',
+                      animation: 'mysteryLanternSwing 1.4s ease-in-out infinite',
+                    }}
+                  >
+                    <svg viewBox="0 0 48 56" className="h-11 w-10 md:h-12 md:w-11 drop-shadow">
+                      <rect x="17" y="4" width="14" height="4" rx="2" fill="#5c3620" />
+                      <ellipse
+                        cx="24"
+                        cy="26"
+                        rx="16"
+                        ry="18"
+                        fill={isGood ? 'rgba(255, 212, 92, 0.48)' : 'rgba(176, 122, 255, 0.48)'}
+                        stroke={isGood ? '#ffe285' : '#b4f0ff'}
+                        strokeWidth="2.2"
+                      />
+                      <rect x="17" y="43" width="14" height="4" rx="2" fill="#5c3620" />
+                      <path d="M24 47 L21 54 L27 54 Z" fill="#e64942" />
+                      <text
+                        x="24"
+                        y="32"
+                        textAnchor="middle"
+                        fontSize="20"
+                        fontWeight="900"
+                        fill={isGood ? '#fff9d6' : '#f2e8ff'}
+                        stroke={isGood ? '#b86200' : '#4a2388'}
+                        strokeWidth="1.2"
+                      >
+                        ?
+                      </text>
+                    </svg>
+                    <span
+                      className="absolute -right-0.5 -top-0.5 text-[11px]"
+                      style={{ animation: 'mysterySparklePop 1.1s ease-in-out infinite' }}
+                    >
+                      ✦
+                    </span>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] md:text-[11px] font-extrabold tracking-wide"
+                        style={{
+                          background: isGood ? 'rgba(255, 206, 74, 0.24)' : 'rgba(176, 126, 255, 0.26)',
+                          color: isGood ? '#ffe694' : '#dfc6ff',
+                          border: isGood
+                            ? '1px solid rgba(255, 214, 102, 0.5)'
+                            : '1px solid rgba(196, 152, 255, 0.5)',
+                        }}
+                      >
+                        {isGood ? '金色福运灯 · ' : '星紫奇遇灯 · '}
+                        {b.badgeText}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-white/80">
+                        <CharacterAvatar charKey={b.actorCharKey} size={16} />
+                        {b.actorName} 触发
+                      </span>
+                    </div>
+                    <div
+                      className="flex items-center gap-1.5 text-[17px] md:text-[20px] font-black tracking-wide text-white"
+                      style={{
+                        textShadow: isGood
+                          ? '0 2px 10px rgba(255, 196, 62, 0.55)'
+                          : '0 2px 10px rgba(164, 118, 255, 0.6)',
+                      }}
+                    >
+                      <span>{b.icon}</span>
+                      <span>{b.name}</span>
+                    </div>
+                    <div className="mt-0.5 text-[12px] md:text-[13px] font-semibold leading-snug text-amber-50/90">
+                      {b.detailText}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </>
   );
