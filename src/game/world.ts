@@ -253,7 +253,7 @@ export interface WorldRefs {
     bubuFaceYaw: number;
     rodPivot: THREE.Group;
     bobber: THREE.Group;
-    line: THREE.Line;
+    line: THREE.Mesh;
     linePosAttr: THREE.BufferAttribute;
     caughtFish: THREE.Group;
     caughtFishBodyMat: THREE.MeshStandardMaterial;
@@ -311,6 +311,15 @@ export interface WorldRefs {
   courtFences: CourtFenceHighlight[];
   shopRingIndices: number[];
   shopSignSways?: { pivot: THREE.Group; phase: number }[];
+  flightHoverPlanes?: {
+    group: THREE.Group;
+    model: THREE.Group;
+    ringMat: THREE.MeshBasicMaterial;
+    ringIdx: number;
+    baseY: number;
+    phase: number;
+    curScale: number;
+  }[];
   lotusList: LotusAnim[];
   willowDrapeList: WillowAnim[];
   petals: PetalAnim[];
@@ -3121,44 +3130,98 @@ export function buildAncientWorld(
     boardTileGroup.add(r);
   };
 
-  // 商店格专属：迷你古风木质甜品小招幌 + 挑灯小摊柱（立于格子外侧青石地，绝不与棋子穿帮）
+  // 商店格专属：迷你古风木质甜品宽招幌（大草莓小蛋糕图案）+ 挑灯小摊柱（立于格子外侧青石地，绝不穿帮）
   const shopSignSways: { pivot: THREE.Group; phase: number }[] = [];
   const shopBannerCanvas = document.createElement('canvas');
-  shopBannerCanvas.width = 128;
-  shopBannerCanvas.height = 192;
+  shopBannerCanvas.width = 256;
+  shopBannerCanvas.height = 224;
   const sbc = shopBannerCanvas.getContext('2d')!;
-  sbc.fillStyle = '#fff7e8';
-  sbc.fillRect(0, 0, 128, 192);
-  sbc.strokeStyle = '#c83e4d';
-  sbc.lineWidth = 8;
-  sbc.strokeRect(8, 8, 112, 176);
-  sbc.strokeStyle = '#e6b24c';
-  sbc.lineWidth = 3;
-  sbc.strokeRect(16, 16, 96, 160);
-  // 顶部可爱小草莓蛋糕图案
-  sbc.fillStyle = '#f8d5a3';
-  sbc.fillRect(40, 56, 48, 28);
+  // 暖奶油粉底 + 醒目草莓红双边画框，远景一眼识别甜品铺
+  const bgGrad = sbc.createLinearGradient(0, 0, 0, 224);
+  bgGrad.addColorStop(0, '#fff5f7');
+  bgGrad.addColorStop(1, '#ffe4e6');
+  sbc.fillStyle = bgGrad;
+  sbc.fillRect(0, 0, 256, 224);
+
+  sbc.strokeStyle = '#e11d48';
+  sbc.lineWidth = 14;
+  sbc.strokeRect(7, 7, 242, 210);
+  sbc.strokeStyle = '#f59e0b';
+  sbc.lineWidth = 4;
+  sbc.strokeRect(20, 20, 216, 184);
+
+  // 托盘底盘
+  sbc.fillStyle = '#fbbf24';
+  sbc.beginPath();
+  sbc.ellipse(128, 184, 78, 14, 0, 0, Math.PI * 2);
+  sbc.fill();
+
+  // 大大的双层草莓奶油小蛋糕（占满画幅中心，去掉看不清的小字）
+  // 底层海绵蛋糕 + 草莓果酱夹心 + 顶层蛋糕
+  sbc.fillStyle = '#f5c27b';
+  sbc.beginPath();
+  sbc.roundRect(56, 112, 144, 68, 14);
+  sbc.fill();
+  sbc.fillStyle = '#fb7185';
+  sbc.fillRect(58, 142, 140, 14);
+
+  // 蓬松纯白波浪奶油顶
   sbc.fillStyle = '#ffffff';
-  sbc.fillRect(38, 48, 52, 12);
-  sbc.fillStyle = '#f43f5e';
   sbc.beginPath();
-  sbc.arc(64, 42, 10, 0, Math.PI * 2);
+  sbc.roundRect(50, 96, 156, 28, 14);
   sbc.fill();
-  sbc.fillStyle = '#4ade80';
+  for (let sc = 0; sc < 5; sc++) {
+    sbc.beginPath();
+    sbc.arc(68 + sc * 30, 122, 16, 0, Math.PI * 2);
+    sbc.fill();
+  }
+  // 奶油边描线增强远景清晰度
+  sbc.strokeStyle = '#fda4af';
+  sbc.lineWidth = 3;
+  sbc.strokeRect(56, 112, 144, 68);
+
+  // 中央超大颗亮红草莓 + 翠绿果蒂 + 高光籽点
+  sbc.fillStyle = '#ef233c';
   sbc.beginPath();
-  sbc.ellipse(64, 32, 7, 3.5, 0, 0, Math.PI * 2);
+  sbc.moveTo(128, 42);
+  sbc.bezierCurveTo(162, 42, 166, 86, 128, 108);
+  sbc.bezierCurveTo(90, 86, 94, 42, 128, 42);
   sbc.fill();
-  // 竖排「甜品」古风字样
-  sbc.fillStyle = '#7c2d12';
-  sbc.font = 'bold 34px "Noto Serif SC", serif';
-  sbc.textAlign = 'center';
-  sbc.textBaseline = 'middle';
-  sbc.fillText('甜', 64, 116);
-  sbc.fillText('品', 64, 154);
+  // 草莓高光与小籽
+  sbc.fillStyle = '#ffe5ec';
+  for (const [sx, sy] of [[116, 66], [136, 62], [126, 82], [112, 82], [142, 78]] as [number, number][]) {
+    sbc.beginPath();
+    sbc.arc(sx, sy, 3.2, 0, Math.PI * 2);
+    sbc.fill();
+  }
+  // 翠绿草莓叶
+  sbc.fillStyle = '#22c55e';
+  sbc.beginPath();
+  sbc.ellipse(115, 44, 14, 7, -0.35, 0, Math.PI * 2);
+  sbc.fill();
+  sbc.beginPath();
+  sbc.ellipse(141, 44, 14, 7, 0.35, 0, Math.PI * 2);
+  sbc.fill();
+  sbc.beginPath();
+  sbc.ellipse(128, 39, 9, 6, 0, 0, Math.PI * 2);
+  sbc.fill();
+
+  // 两侧点缀两颗小草莓球
+  for (const cx of [78, 178]) {
+    sbc.fillStyle = '#f43f5e';
+    sbc.beginPath();
+    sbc.arc(cx, 92, 12, 0, Math.PI * 2);
+    sbc.fill();
+    sbc.fillStyle = '#22c55e';
+    sbc.beginPath();
+    sbc.ellipse(cx, 80, 7, 3.5, 0, 0, Math.PI * 2);
+    sbc.fill();
+  }
+
   const shopBannerTex = new THREE.CanvasTexture(shopBannerCanvas);
   const shopBannerMat = new THREE.MeshStandardMaterial({
     map: shopBannerTex,
-    roughness: 0.62,
+    roughness: 0.48,
     side: THREE.DoubleSide,
   });
   const shopPostWoodMat = mat(0x5b3520, 0.72);
@@ -3167,95 +3230,101 @@ export function buildAncientWorld(
   const shopMiniLanternMat = new THREE.MeshStandardMaterial({
     color: 0xffb347,
     emissive: 0xff7b29,
-    emissiveIntensity: 0.78,
-    roughness: 0.35,
+    emissiveIntensity: 0.85,
+    roughness: 0.32,
   });
   lanternMats.push(shopMiniLanternMat);
 
   const buildShopSignPost = (cx: number, cz: number, idx: number) => {
     const outX = Math.abs(cx) > Math.abs(cz) ? Math.sign(cx) : 0;
     const outZ = Math.abs(cz) >= Math.abs(cx) ? Math.sign(cz) : 0;
-    const px = cx + outX * 0.80;
-    const pz = cz + outZ * 0.80;
-    // 朝向格子切线方向（沿路边顺展招幌，绝不探入格子正上方、4层叠叠乐也不穿模）
-    const yaw = Math.atan2(-outX, -outZ) + Math.PI / 2;
+    // 左右两边的招牌额外朝斜前微偏 30°，避免在主俯视角下侧成一条细边
+    const isLeftRight = Math.abs(cx) > Math.abs(cz);
+    const baseYaw = Math.atan2(-outX, -outZ) + Math.PI / 2;
+    const yaw = isLeftRight ? baseYaw + (outX > 0 ? -0.52 : 0.52) : baseYaw;
+    // 立柱沿挑杆反方向偏左 0.42 站在商店格左缘，让宽招幌与灯笼正好居中对应商店格
+    const shiftLeft = -0.42;
+    const px = cx + outX * 0.82 + Math.sin(baseYaw) * shiftLeft;
+    const pz = cz + outZ * 0.82 + Math.cos(baseYaw) * shiftLeft;
 
     const grp = new THREE.Group();
     grp.position.set(px, 0.08, pz);
     grp.rotation.y = yaw;
+    grp.scale.setScalar(1.36);
 
     // 青石柱础
-    const plinth = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.055, 0.18), shopPostStoneMat);
+    const plinth = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.055, 0.19), shopPostStoneMat);
     plinth.position.y = 0.0275;
     plinth.castShadow = true;
     plinth.receiveShadow = true;
     grp.add(plinth);
 
     // 红木雕柱
-    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.94, 0.068), shopPostWoodMat);
-    pole.position.y = 0.51;
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(0.072, 1.02, 0.072), shopPostWoodMat);
+    pole.position.y = 0.54;
     pole.castShadow = true;
     pole.receiveShadow = true;
     grp.add(pole);
 
-    // 柱顶迷你小瓦帽 + 金珠顶
-    const roofCap = new THREE.Mesh(new THREE.ConeGeometry(0.135, 0.095, 4), shopPostRoofMat);
+    // 柱顶迷你灰瓦小帽 + 金珠顶
+    const roofCap = new THREE.Mesh(new THREE.ConeGeometry(0.145, 0.1, 4), shopPostRoofMat);
     roofCap.rotation.y = Math.PI / 4;
-    roofCap.position.y = 1.015;
+    roofCap.position.y = 1.09;
     roofCap.castShadow = true;
     grp.add(roofCap);
 
-    const roofFinial = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), trimGold);
-    roofFinial.position.y = 1.072;
+    const roofFinial = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), trimGold);
+    roofFinial.position.y = 1.15;
     grp.add(roofFinial);
 
-    // 侧挑横梁 + 榫卯斜撑
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.036, 0.42), shopPostWoodMat);
-    arm.position.set(0, 0.87, 0.19);
+    // 加长挑杆 + 榫卯斜撑
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.038, 0.62), shopPostWoodMat);
+    arm.position.set(0, 0.94, 0.29);
     arm.castShadow = true;
     grp.add(arm);
 
-    const brace = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.024, 0.22), shopPostWoodMat);
-    brace.position.set(0, 0.785, 0.09);
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.026, 0.24), shopPostWoodMat);
+    brace.position.set(0, 0.845, 0.105);
     brace.rotation.x = -Math.PI / 4;
     grp.add(brace);
 
-    // 随风轻摆的小招幌与末端暖灯笼
+    // 宽版大草莓蛋糕招幌 + 末端暖灯笼（整体随微风轻摆）
     const swayPivot = new THREE.Group();
-    swayPivot.position.set(0, 0.855, 0.19);
+    swayPivot.position.set(0, 0.92, 0.27);
 
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.22, 6), trimGold);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.44, 8), trimGold);
     bar.rotation.x = Math.PI / 2;
     bar.position.set(0, -0.025, 0);
     swayPivot.add(bar);
 
-    const banner = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.30, 0.20), shopBannerMat);
-    banner.position.set(0, -0.18, 0);
+    // 宽幅大招幌（0.40 宽 × 0.35 高），远景清晰看到大草莓蛋糕
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.35, 0.40), shopBannerMat);
+    banner.position.set(0, -0.205, 0);
     banner.castShadow = true;
     swayPivot.add(banner);
 
-    const bottomBar = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.21, 6), trimGold);
+    const bottomBar = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.43, 8), trimGold);
     bottomBar.rotation.x = Math.PI / 2;
-    bottomBar.position.set(0, -0.335, 0);
+    bottomBar.position.set(0, -0.388, 0);
     swayPivot.add(bottomBar);
 
-    // 挑杆末端迷你暖光小灯笼
-    const lantCord = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.09, 4), trimGold);
-    lantCord.position.set(0, -0.045, 0.185);
+    // 挑杆末端暖黄小灯笼（放大更醒目，夜晚自动发光）
+    const lantCord = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.10, 4), trimGold);
+    lantCord.position.set(0, -0.05, 0.295);
     swayPivot.add(lantCord);
 
-    const lantBody = new THREE.Mesh(new THREE.SphereGeometry(0.056, 10, 8), shopMiniLanternMat);
+    const lantBody = new THREE.Mesh(new THREE.SphereGeometry(0.072, 12, 9), shopMiniLanternMat);
     lantBody.scale.set(1, 0.88, 1);
-    lantBody.position.set(0, -0.125, 0.185);
+    lantBody.position.set(0, -0.145, 0.295);
     swayPivot.add(lantBody);
 
-    for (const ly of [-0.08, -0.17]) {
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.012, 8), trimGold);
-      cap.position.set(0, ly, 0.185);
+    for (const ly of [-0.088, -0.202]) {
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.014, 8), trimGold);
+      cap.position.set(0, ly, 0.295);
       swayPivot.add(cap);
     }
-    const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.014, 0.048, 6), trimGold);
-    tassel.position.set(0, -0.202, 0.185);
+    const tassel = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.016, 0.058, 6), trimGold);
+    tassel.position.set(0, -0.242, 0.295);
     swayPivot.add(tassel);
 
     grp.add(swayPivot);
@@ -3378,6 +3447,7 @@ export function buildAncientWorld(
   });
 
   const planeMarks: THREE.Group[] = [];
+  const flightHoverPlanes: NonNullable<WorldRefs['flightHoverPlanes']> = [];
   players.forEach((P, pIdx) => {
     const a = RING[(P.start + 2 + FLIGHT_FROM) % 52];
     const b = RING[(P.start + 2 + FLIGHT_FROM + FLIGHT_STEP) % 52];
@@ -3427,6 +3497,39 @@ export function buildAncientWorld(
     takeoffRim.position.set(a[0], 0.125, a[1]);
     takeoffPadGroup.add(takeoffRim);
     scene.add(takeoffPadGroup);
+
+    // 飞机起飞格心悬浮 3D 迷你小飞机（空置时沿航线方向悬停轻晃转桨，有小熊落入时平滑缩小让位零穿帮）
+    const hoverRingIdx = (P.start + 2 + FLIGHT_FROM) % 52;
+    const hoverWrap = new THREE.Group();
+    hoverWrap.position.set(a[0], 0.50, a[1]);
+    hoverWrap.rotation.y = fyaw;
+    const miniPlane = makePlaneModel(lineOf(P), P.colorLight, anisotropy, true);
+    miniPlane.scale.setScalar(0.48);
+    miniPlane.rotation.x = -0.15;
+    hoverWrap.add(miniPlane);
+    scene.add(hoverWrap);
+
+    const hoverAuraMat = new THREE.MeshBasicMaterial({
+      color: lineOf(P),
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const hoverAura = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.31, 28), hoverAuraMat);
+    hoverAura.rotation.x = -Math.PI / 2;
+    hoverAura.position.set(a[0], 0.128, a[1]);
+    scene.add(hoverAura);
+
+    flightHoverPlanes.push({
+      group: hoverWrap,
+      model: miniPlane,
+      ringMat: hoverAuraMat,
+      ringIdx: hoverRingIdx,
+      baseY: 0.50,
+      phase: pIdx * 1.55,
+      curScale: 1,
+    });
 
     // 飞机航线落点：使用停机坪「P」字圆盘标识替代原先的八面体三角堆
     const pPadTop = new THREE.Mesh(
@@ -6637,15 +6740,29 @@ export function buildAncientWorld(
   bobber.position.copy(waterSpot);
   stage1FishGroup.add(bobber);
 
-  // 16 段柔性曲线钓线（支持自然下垂悬链线、咬钩绷紧颤动、抛竿甩弧）
+  // 16 段立体柔性丝带钓线（突破 WebGL 1px 线宽限制，清晰展现悬链线垂弧、咬钩绷紧与抛竿甩鞭弧）
   const lineSegs = 16;
-  const linePtsArr = new Float32Array((lineSegs + 1) * 3);
+  const lineVerts = new Float32Array((lineSegs + 1) * 2 * 3);
+  const lineIndices: number[] = [];
+  for (let li = 0; li < lineSegs; li++) {
+    const a = li * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    lineIndices.push(a, b, c, b, d, c);
+  }
   const lineGeo = new THREE.BufferGeometry();
-  const linePosAttr = new THREE.BufferAttribute(linePtsArr, 3);
+  const linePosAttr = new THREE.BufferAttribute(lineVerts, 3);
   lineGeo.setAttribute('position', linePosAttr);
-  const lineMesh = new THREE.Line(
+  lineGeo.setIndex(lineIndices);
+  const lineMesh = new THREE.Mesh(
     lineGeo,
-    new THREE.LineBasicMaterial({ color: 0xf1f5f9, transparent: true, opacity: 0.85 }),
+    new THREE.MeshBasicMaterial({
+      color: 0xf8fafc,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+    }),
   );
   lineMesh.frustumCulled = false;
   stage1FishGroup.add(lineMesh);
@@ -7002,7 +7119,7 @@ export function buildAncientWorld(
 
   // 右爪尖粘出的一团亮金蜂蜜（贴在爪尖，吃蜂蜜时手臂自然凑到嘴边直接送入口中）
   const honeyGlob = new THREE.Mesh(new THREE.SphereGeometry(0.036, 10, 8), honeyGlazeMat);
-  honeyGlob.position.set(0.022, -0.068, 0.045);
+  honeyGlob.position.set(0.0, -0.032, 0.048);
   honeyGlob.visible = false;
   ysParts.rightArm.add(honeyGlob);
   stage1FishGroup.add(yierSitter);
@@ -7111,6 +7228,7 @@ export function buildAncientWorld(
     courtFences,
     shopRingIndices,
     shopSignSways,
+    flightHoverPlanes,
     lotusList,
     willowDrapeList,
     petals,

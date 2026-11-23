@@ -7296,6 +7296,26 @@ export class FlightChessEngine {
           sw.pivot.rotation.z = Math.sin(t * 1.85 + sw.phase) * 0.085;
         }
       }
+      if (this.world.flightHoverPlanes) {
+        for (const fh of this.world.flightHoverPlanes) {
+          const occupied = this.planes.some(
+            (q) => q.pos >= 1 && q.pos <= 50 && this.ringIndexOf(q) === fh.ringIdx,
+          );
+          const targetSc = occupied ? 0 : 1;
+          fh.curScale = THREE.MathUtils.lerp(fh.curScale, targetSc, Math.min(1, dt * 10));
+          const vis = fh.curScale > 0.02;
+          fh.group.visible = vis;
+          fh.ringMat.opacity = vis ? fh.curScale * (0.28 + Math.sin(t * 3.0 + fh.phase) * 0.12) : 0;
+          if (vis) {
+            const bob = Math.sin(t * 2.8 + fh.phase) * 0.06;
+            fh.group.position.y = fh.baseY + bob + (1 - fh.curScale) * 0.25;
+            fh.group.scale.setScalar(fh.curScale);
+            fh.model.rotation.z = Math.sin(t * 2.1 + fh.phase) * 0.14;
+            const prop = fh.model.userData.prop as THREE.Object3D | undefined;
+            if (prop) prop.rotation.z += dt * 15;
+          }
+        }
+      }
 
       this.pickHints.forEach((m) => {
         if (m.visible) {
@@ -8777,16 +8797,36 @@ export class FlightChessEngine {
             if (bfPt) {
               bfPt.headPivot.rotation.x = Math.sin(p * Math.PI * 2) * 0.14;
             }
-          } else if (fc < 35.4) {
-            const p = (fc - 33.4) / 2.0;
-            rodPitch = THREE.MathUtils.lerp(-0.2, 0.0, p);
+          } else if (fc < 35.6) {
+            // 真实抛竿：先向后蓄力抬竿 -> 向前大力甩竿 -> 浮漂划出高抛物线落水
+            const p = (fc - 33.4) / 2.2;
             s1.bobber.visible = true;
             s1.caughtFish.visible = false;
-            s1.bobber.position.set(
-              THREE.MathUtils.lerp(s1.bucketPos.x, s1.waterSpot.x, p),
-              THREE.MathUtils.lerp(s1.bucketPos.y + 0.25, s1.waterSpot.y, p) + Math.sin(p * Math.PI) * 0.55,
-              THREE.MathUtils.lerp(s1.bucketPos.z, s1.waterSpot.z, p),
-            );
+            if (p < 0.28) {
+              const w = p / 0.28;
+              rodPitch = THREE.MathUtils.lerp(-0.2, -0.82, w);
+              s1.bobber.position.set(
+                THREE.MathUtils.lerp(s1.bucketPos.x, s1.bubuSeatPos.x, w),
+                s1.bubuSeatPos.y + 0.55 + w * 0.45,
+                THREE.MathUtils.lerp(s1.bucketPos.z, s1.bubuSeatPos.z - 0.18, w),
+              );
+            } else {
+              const f = (p - 0.28) / 0.72;
+              const easeF = 1 - Math.pow(1 - f, 2.1);
+              rodPitch = f < 0.35
+                ? THREE.MathUtils.lerp(-0.82, 0.16, f / 0.35)
+                : THREE.MathUtils.lerp(0.16, 0.0, (f - 0.35) / 0.65);
+              s1.bobber.position.set(
+                THREE.MathUtils.lerp(s1.bubuSeatPos.x, s1.waterSpot.x, easeF),
+                THREE.MathUtils.lerp(s1.bubuSeatPos.y + 0.95, s1.waterSpot.y, easeF) + Math.sin(f * Math.PI) * 0.92,
+                THREE.MathUtils.lerp(s1.bubuSeatPos.z - 0.18, s1.waterSpot.z, easeF),
+              );
+              if (f > 0.85) {
+                const sp = (f - 0.85) / 0.15;
+                s1.bubuRipple.scale.setScalar(0.6 + sp * 2.2);
+                (s1.bubuRipple.material as THREE.MeshBasicMaterial).opacity = (1 - sp) * 0.75;
+              }
+            }
             lineTarget.copy(s1.bobber.position);
           } else {
             s1.bobber.visible = true;
@@ -8955,19 +8995,27 @@ export class FlightChessEngine {
           tipWorld.applyMatrix4(s1.rodPivot.matrixWorld);
           const isTaut = fc >= 26.5 && fc < 31.2;
           const isCasting =
-            (fSt.catchKind === 'normal' && fc >= 33.4 && fc < 35.4) ||
+            (fSt.catchKind === 'normal' && fc >= 33.4 && fc < 35.6) ||
             (fSt.catchKind === 'boot' && fc >= 34.4 && fc < 36.2);
-          const sag = isTaut ? 0.015 : isCasting ? -0.14 : 0.17 + Math.sin(t * 2.1) * 0.025;
-          const sway = isTaut ? Math.sin(t * 52) * 0.014 : Math.sin(t * 1.9) * 0.032;
+          const sag = isTaut ? 0.01 : isCasting ? -0.34 : 0.28 + Math.sin(t * 2.1) * 0.03;
+          const sway = isTaut ? Math.sin(t * 55) * 0.018 : Math.sin(t * 1.9) * 0.045;
           const posAttr = s1.linePosAttr;
-          const segs = posAttr.count - 1;
+          const segs = 16;
+          const halfW = 0.0085;
+          const dx = lineTarget.x - tipWorld.x;
+          const dz = lineTarget.z - tipWorld.z;
+          const dLen = Math.hypot(dx, dz) || 1;
+          const px = (-dz / dLen) * halfW;
+          const pz = (dx / dLen) * halfW;
           for (let li = 0; li <= segs; li++) {
             const u = li / segs;
             const arch = 4 * u * (1 - u);
-            const lx = THREE.MathUtils.lerp(tipWorld.x, lineTarget.x, u) + sway * arch;
+            const whip = isCasting ? Math.sin(u * Math.PI * 2) * 0.14 : 0;
+            const lx = THREE.MathUtils.lerp(tipWorld.x, lineTarget.x, u) + (sway + whip) * arch;
             const ly = THREE.MathUtils.lerp(tipWorld.y, lineTarget.y, u) - sag * arch;
             const lz = THREE.MathUtils.lerp(tipWorld.z, lineTarget.z, u) + sway * 0.4 * arch;
-            posAttr.setXYZ(li, lx, ly, lz);
+            posAttr.setXYZ(li * 2, lx - px, ly, lz - pz);
+            posAttr.setXYZ(li * 2 + 1, lx + px, ly, lz + pz);
           }
           posAttr.needsUpdate = true;
         }
@@ -8991,7 +9039,10 @@ export class FlightChessEngine {
           this.stage1YierBubble.visible = amazedByKoi;
         }
 
-        // 重置右臂基准位置（吃蜂蜜时会平滑拉近嘴边）
+        // 重置右臂与朝向基准位置
+        if (!skippingNow) {
+          s1.yier.rotation.y = s1.yierFaceYaw;
+        }
         if (ysPt) {
           ysPt.rightArm.position.set(0.165, 0.275, 0.02);
           ysPt.animRoot.rotation.set(0, 0, 0);
@@ -9015,16 +9066,47 @@ export class FlightChessEngine {
           s1.honeyGlob.visible = false;
           if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
         } else if (ysPt && skippingNow) {
-          // 40 秒一次的河边打水漂（34.0-35.0s 捡石蓄力 -> 35.0-35.4s 侧身甩手 -> 35.4-38.4s 河面漂 3~6 下 -> 38.4-40.0s 开心拍手）
+          // 40 秒一次的河边打水漂：先转身对准抛出方向 -> 侧身蓄力 -> 顺着朝向从手中连续抛出并在河面弹跳 3~6 下
           const kick = Math.sin(t * 4.5);
           ysPt.leftFoot.rotation.x = -1.05 + kick * 0.18;
           ysPt.rightFoot.rotation.x = -1.05 - kick * 0.18;
           ysPt.leftArm.rotation.x = -0.82;
           ysPt.leftArm.rotation.z = -0.24;
           s1.honeyGlob.visible = false;
-          const handWorld = new THREE.Vector3(0.18, 0.24, 0.16);
-          s1.yier.updateMatrixWorld();
-          handWorld.applyMatrix4(s1.yier.matrixWorld);
+
+          const nB = skSt.bounces;
+          // 预计算严格在护城河内的连续落点，u=0 严格衔接一二抛出时的手部坐标
+          const stoneWaterAtU = (u: number): [number, number] => {
+            const ang = s1.yierAng + skSt.angSpan * u;
+            const inner = this.world.moatInnerR(ang) + 0.82;
+            const outer = this.world.moatOuterR(ang) - 0.95;
+            const rTarget = THREE.MathUtils.lerp(inner, outer, skSt.rFrac);
+            const r = THREE.MathUtils.lerp(inner, rTarget, Math.min(1, u));
+            return [Math.cos(ang) * r, Math.sin(ang) * r];
+          };
+          const [firstX, firstZ] = stoneWaterAtU(1 / nB);
+          const throwYaw = Math.atan2(firstX - s1.yierSitPos.x, firstZ - s1.yierSitPos.z);
+          s1.yier.rotation.y = throwYaw;
+
+          const launchOrigin = new THREE.Vector3(
+            s1.yierSitPos.x + Math.sin(throwYaw) * 0.24,
+            s1.yierSitPos.y + 0.26,
+            s1.yierSitPos.z + Math.cos(throwYaw) * 0.24,
+          );
+          const stoneAtU = (u: number): [number, number] => {
+            if (u <= 0) return [launchOrigin.x, launchOrigin.z];
+            const [wx, wz] = stoneWaterAtU(u);
+            const firstFrac = 1 / nB;
+            if (u < firstFrac) {
+              const p0 = u / firstFrac;
+              const [fx, fz] = stoneWaterAtU(firstFrac);
+              return [
+                THREE.MathUtils.lerp(launchOrigin.x, fx, p0),
+                THREE.MathUtils.lerp(launchOrigin.z, fz, p0),
+              ];
+            }
+            return [wx, wz];
+          };
 
           if (skT < 35.0) {
             const p = (skT - 34.0) / 1.0;
@@ -9032,46 +9114,39 @@ export class FlightChessEngine {
             ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.4, 0.65, p);
             ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.12, -0.55, p);
             ysPt.headPivot.rotation.x = 0.06;
-            ysPt.headPivot.rotation.y = -0.25 * p;
+            ysPt.headPivot.rotation.y = 0.2 * p;
             s1.skipStone.visible = p > 0.25;
-            s1.skipStone.position.copy(handWorld);
+            s1.skipStone.position.copy(launchOrigin);
             s1.skipRipples.forEach((rm) => { rm.visible = false; });
             if (ysFp) { ysFp.mouthW.visible = true; ysFp.mouthOpen.visible = false; }
           } else if (skT < 35.4) {
             const p = (skT - 35.0) / 0.4;
-            ysPt.animRoot.rotation.y = THREE.MathUtils.lerp(-0.45, 0.42, p);
+            ysPt.animRoot.rotation.y = THREE.MathUtils.lerp(-0.45, 0.35, p);
             ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(0.65, -1.35, p);
             ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(-0.55, 0.28, p);
-            ysPt.headPivot.rotation.y = THREE.MathUtils.lerp(-0.25, 0.35, p);
+            ysPt.headPivot.rotation.y = 0;
             s1.skipStone.visible = true;
-            s1.skipStone.position.copy(handWorld);
+            s1.skipStone.position.copy(launchOrigin);
             if (ysFp) { ysFp.mouthW.visible = false; ysFp.mouthOpen.visible = true; }
           } else {
-            // 沿护城河内弯曲轨迹弹跳 skSt.bounces 次（3~6 次），严格在河道内不飞出河岸
             const flyT = skT - 35.4;
             const totalFlyDur = 2.6;
-            const nB = skSt.bounces;
             const bDur = totalFlyDur / nB;
-            const stoneAtU = (u: number): [number, number] => {
-              const ang = s1.yierAng + skSt.angSpan * u;
-              const inner = this.world.moatInnerR(ang) + 0.72;
-              const outer = this.world.moatOuterR(ang) - 0.92;
-              const r = THREE.MathUtils.lerp(inner, THREE.MathUtils.lerp(inner, outer, skSt.rFrac), Math.min(1, u * 1.15));
-              return [Math.cos(ang) * r, Math.sin(ang) * r];
-            };
 
             if (flyT < totalFlyDur) {
               const u = flyT / totalFlyDur;
               const bIdx = Math.min(nB - 1, Math.floor(flyT / bDur));
               const localP = (flyT - bIdx * bDur) / bDur;
               const [sx, sz] = stoneAtU(u);
-              const peakH = 0.28 * Math.pow(0.66, bIdx);
-              const sy = this.world.waterY + 0.025 + Math.sin(localP * Math.PI) * peakH;
+              const startH = bIdx === 0 ? launchOrigin.y : this.world.waterY + 0.025;
+              const peakH = bIdx === 0 ? 0.14 : 0.26 * Math.pow(0.66, bIdx);
+              const sy =
+                THREE.MathUtils.lerp(startH, this.world.waterY + 0.025, localP) +
+                Math.sin(localP * Math.PI) * peakH;
               s1.skipStone.visible = true;
               s1.skipStone.position.set(sx, sy, sz);
               s1.skipStone.rotation.set(0.12, t * 24, 0.08);
             } else if (flyT < totalFlyDur + 0.35) {
-              // 最后一次入水沉没
               const sinkP = (flyT - totalFlyDur) / 0.35;
               const [sx, sz] = stoneAtU(1);
               s1.skipStone.visible = sinkP < 0.85;
@@ -9161,12 +9236,12 @@ export class FlightChessEngine {
             const p = (yCyc - 6.0) / 1.8;
             const reach = Math.sin(Math.min(1, p * 1.35) * Math.PI * 0.5);
             ysPt.rightArm.position.set(
-              THREE.MathUtils.lerp(0.165, 0.022, reach),
-              THREE.MathUtils.lerp(0.275, 0.425, reach),
+              THREE.MathUtils.lerp(0.165, 0.0, reach),
+              THREE.MathUtils.lerp(0.275, 0.338, reach),
               THREE.MathUtils.lerp(0.02, 0.215, reach),
             );
-            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.72, -1.25, reach) + Math.sin(t * 14) * 0.05;
-            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.22, 0.45, reach);
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.72, -0.58, reach) + Math.sin(t * 14) * 0.04;
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.22, 0.32, reach);
             ysPt.headPivot.rotation.x = 0.14 * reach + Math.sin(t * 12) * 0.04;
             ysPt.headPivot.rotation.y = -0.06 * reach;
             s1.honeyGlob.visible = p < 0.72;
@@ -9180,12 +9255,12 @@ export class FlightChessEngine {
             // 放下手开心回味
             const p = (yCyc - 7.8) / 1.4;
             ysPt.rightArm.position.set(
-              THREE.MathUtils.lerp(0.022, 0.165, p),
-              THREE.MathUtils.lerp(0.425, 0.275, p),
+              THREE.MathUtils.lerp(0.0, 0.165, p),
+              THREE.MathUtils.lerp(0.338, 0.275, p),
               THREE.MathUtils.lerp(0.215, 0.02, p),
             );
-            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-1.25, -0.62, p);
-            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.45, 0.12, p);
+            ysPt.rightArm.rotation.x = THREE.MathUtils.lerp(-0.58, -0.62, p);
+            ysPt.rightArm.rotation.z = THREE.MathUtils.lerp(0.32, 0.12, p);
             ysPt.headPivot.rotation.x = THREE.MathUtils.lerp(0.12, 0.08, p);
             ysPt.headPivot.rotation.y = Math.sin(p * Math.PI * 2) * 0.16;
             s1.honeyGlob.visible = false;
