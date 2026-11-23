@@ -917,14 +917,14 @@ export class FlightChessEngine {
       if (P.key === 'yier') {
         msgs.push(`✨ ${P.name}「甜梦先发」开局站上起点`);
         this.after(450, () => {
-          if (!this.disposed) this.showPieceSpeech(firstPlane, '✨ 甜梦先发！先站起点啦~', 3600);
+          if (!this.disposed) this.showPieceSpeech(firstPlane, '✨ 触发天赋，开局抢先站上起点', 3600);
         });
       } else if (P.key === 'xiangyu') {
         const items = this.openingTalentItems[pid] ?? [];
         const names = items.map((it) => `${ITEM_DEFS[it].icon}${ITEM_DEFS[it].name}`).join(' + ');
         msgs.push(`🎁 ${P.name}「星愿百宝袋」开局获 ${names}`);
         this.after(650, () => {
-          if (!this.disposed) this.showPieceSpeech(firstPlane, `🎁 百宝袋开局送 ${names}！`, 4000);
+          if (!this.disposed) this.showPieceSpeech(firstPlane, `🎁 触发天赋，开局获得 ${names}`, 4000);
         });
       }
     });
@@ -1242,6 +1242,7 @@ export class FlightChessEngine {
     announceKillStreak(kills, info.voice);
     this.emitSnapshot();
     if (this.killBannerTimer !== null) window.clearTimeout(this.killBannerTimer);
+    if (this.randomEventBannerTimer !== null) window.clearTimeout(this.randomEventBannerTimer);
     this.killBannerTimer = window.setTimeout(() => {
       if (this.disposed) return;
       this.killBanner = null;
@@ -1987,7 +1988,9 @@ export class FlightChessEngine {
       }
     } else if (eventId === 'beeDetour') {
       const topBear = actorStack[actorStack.length - 1] ?? actorPlane;
-      if (topBear.shielded) {
+      if (topBear.pos < 1 || topBear.pos >= HOME_END) {
+        detail = `小黄蜂绕了一圈，${P.name} 还没出门躲过一劫！`;
+      } else if (topBear.shielded) {
         topBear.shielded = false;
         this.syncShieldVisuals();
         const cc = this.posToCell(P, topBear.pos);
@@ -2005,7 +2008,7 @@ export class FlightChessEngine {
       beep(420, 0.15, 'sawtooth', 0.11);
     } else if (eventId === 'windBoost') {
       const prevPos = actorPlane.pos;
-      const targetPos = Math.min(50, prevPos + 4);
+      const targetPos = prevPos >= 1 && prevPos <= 50 ? Math.min(50, prevPos + 4) : prevPos;
       if (targetPos > prevPos) {
         actorStack.forEach((pl) => {
           pl.pos = targetPos;
@@ -2028,15 +2031,21 @@ export class FlightChessEngine {
       }
       beep(740, 0.14, 'triangle', 0.14);
     } else if (eventId === 'swapPos') {
-      const myRing = this.ringIndexOf(actorPlane);
-      const otherCandidates = this.planes.filter(
-        (q) =>
-          q.pid !== actorPlane.pid &&
-          q.pos >= 1 &&
-          q.pos <= 50 &&
-          !q.animating &&
-          this.ringIndexOf(q) !== myRing,
-      );
+      const ringToValidRel = (plStart: number, rIdx: number): number => {
+        const rel = (rIdx - plStart - 2 + 104) % 52;
+        return rel >= 1 && rel <= 50 ? rel : -1;
+      };
+      const canSwap = actorPlane.pos >= 1 && actorPlane.pos <= 50;
+      const myRing = canSwap ? this.ringIndexOf(actorPlane) : -1;
+      const otherCandidates = canSwap
+        ? this.planes.filter((q) => {
+            if (q.pid === actorPlane.pid || q.pos < 1 || q.pos > 50 || q.animating) return false;
+            const tRing = this.ringIndexOf(q);
+            if (tRing === myRing) return false;
+            const T = this.players[q.pid];
+            return ringToValidRel(P.start, tRing) > 0 && ringToValidRel(T.start, myRing) > 0;
+          })
+        : [];
       if (otherCandidates.length > 0) {
         const target = otherCandidates[Math.floor(Math.random() * otherCandidates.length)];
         const T = this.players[target.pid];
@@ -2045,12 +2054,8 @@ export class FlightChessEngine {
           .filter((q) => q.pos === target.pos && !q.animating)
           .sort((a, b) => this.compareArrivalOrder(a, b));
 
-        const ringToRelPos = (plStart: number, rIdx: number): number => {
-          const rel = (rIdx - plStart - 2 + 104) % 52;
-          return Math.min(50, Math.max(1, rel === 0 ? 50 : rel));
-        };
-        const newMyPos = ringToRelPos(P.start, targetRing);
-        const newTargetPos = ringToRelPos(T.start, myRing);
+        const newMyPos = ringToValidRel(P.start, targetRing);
+        const newTargetPos = ringToValidRel(T.start, myRing);
 
         actorStack.forEach((pl) => {
           pl.pos = newMyPos;
@@ -2087,7 +2092,7 @@ export class FlightChessEngine {
             this.syncShieldVisuals();
           }
         });
-      } else {
+      } else if (actorPlane.pos >= 1 && actorPlane.pos <= 50) {
         const prevPos = actorPlane.pos;
         const targetPos = Math.min(50, prevPos + 4);
         actorStack.forEach((pl) => {
@@ -2104,6 +2109,8 @@ export class FlightChessEngine {
         ).then(() => {
           if (!this.disposed) this.relayout();
         });
+      } else {
+        detail = `${P.name} 当前暂无外圈在场小熊，先起飞一只再体验乾坤换位吧~`;
       }
     }
 
@@ -4459,7 +4466,7 @@ export class FlightChessEngine {
         if (p.pos === -1) return allowTakeoff;
         return true;
       })
-      .sort((a, b) => a.idx - b.idx);
+      .sort((a, b) => this.compareArrivalOrder(a, b));
     // 棋盘上同格叠叠乐只控制最底下那只
     const seenStack = new Set<string>();
     const result: { plane: PlaneData }[] = [];
@@ -4679,7 +4686,7 @@ export class FlightChessEngine {
         this.setMsg(`⚙️ 双倍珍珠奶茶掷出 ${d1} + ${d2} = ${this.die} 点`);
       }
       this.emitSnapshot();
-      await this.onRolled(this.die, this.die >= 5);
+      await this.onRolled(this.die, this.die >= 5 || (this.hasGlobalEvent('koiTailwind') && this.die >= 4));
       return;
     }
 
@@ -5519,7 +5526,7 @@ export class FlightChessEngine {
       // 破盾后立刻爆出抹茶翠绿反震冲击波（在震退起飞之前呈现），同时等攻击方落地余韵结束即刻弹飞
       this.setMsg(`🍵 ${mochaName} 触发「茶香反震」，泡泡罩将 ${attackerName} 震退 3 格！`, this.players[mochaDefPid].uiColor);
       const mochaUnit = byPid.get(mochaDefPid)?.[0];
-      if (mochaUnit) this.showPieceSpeech(mochaUnit, '🍵 茶香反震！弹退你 3 格~', 3000);
+      if (mochaUnit) this.showPieceSpeech(mochaUnit, '🍵 触发天赋，破盾反震击退 3 格', 3000);
       this.spawnMochaRecoilFx(c[0], c[1]);
       beep(520, 0.14, 'sine', 0.16);
       this.triggerShake();
@@ -5789,7 +5796,7 @@ export class FlightChessEngine {
         );
         this.showPieceSpeech(
           plane,
-          P.key === 'bubu' ? '🛡️ 三盾守门！泡泡罩护体~' : '🍵 茶香反震！先套一层泡泡罩~',
+          P.key === 'bubu' ? '🛡️ 触发天赋，起飞自带泡泡罩' : '🫧 触发天赋，首熊起飞自带泡泡罩',
           2800,
         );
       }
@@ -5886,7 +5893,7 @@ export class FlightChessEngine {
             await this.sleep(240);
             if (this.disposed) return;
             this.setMsg(`🍓 ${P.name} 触发「元气蹦跳」，补步至同色格！`, P.uiColor);
-            this.showPieceSpeech(plane, '🍓 元气蹦跳！再蹦一步踩同色~', 2800);
+            this.showPieceSpeech(plane, '🍓 触发天赋，补步踩上同色格', 2800);
             beep(660, 0.12, 'triangle', 0.14);
             setPos(nextOwn);
             let talentCap: Promise<number> | null = null;
@@ -6046,7 +6053,7 @@ export class FlightChessEngine {
         await this.sleep(260);
         if (this.disposed) return;
         this.setMsg(`🌊 ${P.name} 触发「顺风破蛋」，直接顺风滑入终点！`, P.uiColor);
-        this.showPieceSpeech(plane, '🌊 顺风破蛋！冲进终点咯~', 3200);
+        this.showPieceSpeech(plane, '🌊 触发天赋，走廊直通终点', 3200);
         beep(740, 0.18, 'triangle', 0.16);
         setPos(HOME_END);
         await hopAll(
